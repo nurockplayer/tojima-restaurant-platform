@@ -102,6 +102,10 @@ func (a MenuAPI) publicMenu(w http.ResponseWriter, r *http.Request) {
 		respondMenu(w, nil, err)
 		return
 	}
+	if r.URL.Query().Get("amounts") == "string" {
+		writeMoneyJSON(w, http.StatusOK, safeGuestMenu(menu))
+		return
+	}
 	writeJSON(w, http.StatusOK, safeGuestMenu(menu))
 }
 
