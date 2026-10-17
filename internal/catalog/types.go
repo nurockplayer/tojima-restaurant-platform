@@ -1,0 +1,159 @@
+// Package catalog owns published menu snapshots, store-scoped price overrides,
+// option rules, and the shared product availability decision.
+package catalog
+
+import (
+	"errors"
+	"strings"
+	"unicode"
+	"unicode/utf8"
+)
+
+// MaxCatalogCanonicalJSONBytes bounds the complete accepted catalog document,
+// including all nested items and reserving each nonnegative base price's space
+// up to its 19-digit int64 maximum for later store-price overrides.
+const MaxCatalogCanonicalJSONBytes = 1 << 20
+
+type Availability string
+
+const (
+	PendingConfirmation Availability = "PENDING_CONFIRMATION"
+	Available           Availability = "AVAILABLE"
+	Paused              Availability = "PAUSED"
+)
+
+var (
+	ErrNotFound        = errors.New("catalog resource not found")
+	ErrDenied          = errors.New("catalog access denied")
+	ErrConflict        = errors.New("catalog state conflict")
+	ErrStale           = errors.New("catalog draft or state is stale")
+	ErrInvalid         = errors.New("catalog data is invalid")
+	ErrNotPublished    = errors.New("no published menu")
+	ErrNotDetached     = errors.New("store menu is linked")
+	ErrAlreadyDetached = errors.New("store menu is already detached")
+	ErrPriceOverflow   = errors.New("integer price overflow")
+)
+
+type StoreScope struct{ TenantID, StoreID string }
+
+type CatalogData struct {
+	Categories []Category `json:"categories"`
+}
+
+type Category struct {
+	Key      string    `json:"key"`
+	Name     string    `json:"name"`
+	Position int       `json:"position"`
+	Products []Product `json:"products"`
+}
+
+type Product struct {
+	Key                  string        `json:"key"`
+	Name                 string        `json:"name"`
+	Description          string        `json:"description,omitempty"`
+	BasePriceMinor       int64         `json:"base_price_minor"`
+	EffectivePriceMinor  int64         `json:"-"`
+	PriceOverrideVersion int64         `json:"-"`
+	Position             int           `json:"position"`
+	Active               bool          `json:"active"`
+	Availability         Availability  `json:"-"`
+	AvailabilityVersion  int64         `json:"-"`
+	Selectable           bool          `json:"-"`
+	Groups               []OptionGroup `json:"option_groups,omitempty"`
+}
+
+type OptionGroup struct {
+	Key       string   `json:"key"`
+	Name      string   `json:"name"`
+	MinSelect int      `json:"min_select"`
+	MaxSelect int      `json:"max_select"`
+	Position  int      `json:"position"`
+	Options   []Option `json:"options"`
+}
+
+type Option struct {
+	Key                 string       `json:"key"`
+	Name                string       `json:"name"`
+	PriceDeltaMinor     int64        `json:"price_delta_minor"`
+	Position            int          `json:"position"`
+	Active              bool         `json:"active"`
+	Availability        Availability `json:"-"`
+	AvailabilityVersion int64        `json:"-"`
+}
+
+type Draft struct {
+	Version int64 `json:"version"`
+	CatalogData
+}
+
+type PublishedMenu struct {
+	TenantID string `json:"-"`
+	StoreID  string `json:"-"`
+	Mode     string `json:"mode"`
+	Revision int64  `json:"revision"`
+	CatalogData
+}
+
+type PublishResult struct {
+	Revision     int64 `json:"revision"`
+	DraftVersion int64 `json:"draft_version"`
+}
+
+type PriceOverride struct {
+	ProductKey string `json:"product_key"`
+	PriceMinor int64  `json:"price_minor"`
+	Active     bool   `json:"active"`
+	Version    int64  `json:"version"`
+}
+
+type AvailabilityKind string
+
+const (
+	ProductAvailability AvailabilityKind = "PRODUCT"
+	OptionAvailability  AvailabilityKind = "OPTION"
+)
+
+type AvailabilityTarget struct {
+	Kind       AvailabilityKind `json:"kind"`
+	ProductKey string           `json:"product_key,omitempty"`
+	GroupKey   string           `json:"group_key,omitempty"`
+	OptionKey  string           `json:"option_key,omitempty"`
+}
+
+type AvailabilityChange struct {
+	Target          AvailabilityTarget `json:"target"`
+	Status          Availability       `json:"status"`
+	Reason          string             `json:"reason,omitempty"`
+	ExpectedVersion int64              `json:"expected_version"`
+}
+
+type AvailabilityResult struct {
+	Status  Availability `json:"status"`
+	Version int64        `json:"version"`
+}
+
+type OptionSelection struct {
+	GroupKey  string `json:"group_key"`
+	OptionKey string `json:"option_key"`
+}
+
+type PriceQuote struct {
+	ProductKey string `json:"product_key"`
+	UnitMinor  int64  `json:"unit_minor"`
+}
+
+func cleanKey(s string) bool {
+	if s == "" || !utf8.ValidString(s) || strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func catalogKey(s string) bool {
+	return cleanKey(s) && utf8.RuneCountInString(s) <= 100
+}
