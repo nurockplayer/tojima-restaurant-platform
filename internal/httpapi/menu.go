@@ -204,6 +204,14 @@ func (a MenuAPI) publishCompanyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	result, err := a.Catalog.PublishCompanyDraft(r.Context(), tenantID, actor.SubjectID, input.ExpectedVersion)
+	var blocked *catalog.PublicationValidationError
+	if errors.As(err, &blocked) {
+		writeJSON(w, http.StatusBadRequest, struct {
+			Error  string                     `json:"error"`
+			Issues []catalog.PublicationIssue `json:"issues"`
+		}{Error: "publication_blocked", Issues: blocked.Issues})
+		return
+	}
 	respondMenu(w, result, err)
 }
 
@@ -325,13 +333,44 @@ func (a MenuAPI) resetPriceOverride(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a MenuAPI) setAvailability(w http.ResponseWriter, r *http.Request) {
-	scope, actor, ok := a.authorizeStore(w, r, "menu.availability.write", []authz.Role{authz.StoreManager}, []authz.Role{authz.StoreManager})
-	if !ok {
+	scope, err := a.Catalog.ResolveStoreScope(r.Context(), r.PathValue("tenantID"), r.PathValue("storeID"))
+	if err != nil {
+		respondMenu(w, nil, err)
+		return
+	}
+	actor, err := a.Identity.Resolve(r.Context(), r)
+	if err != nil {
+		respondMenu(w, nil, authz.ErrDenied)
 		return
 	}
 	var input catalog.AvailabilityChange
 	if err := decodeJSON(w, r, &input); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request_too_large")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	var roles, mfaRoles []authz.Role
+	switch input.Status {
+	case catalog.Paused:
+		roles = []authz.Role{authz.Staff, authz.StoreManager}
+		mfaRoles = []authz.Role{authz.StoreManager}
+	case catalog.Available:
+		roles = []authz.Role{authz.StoreManager}
+		mfaRoles = []authz.Role{authz.StoreManager}
+	default:
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	if err = a.Authorizer.Authorize(r.Context(), authz.Request{
+		Actor: actor, Permission: "menu.availability.write",
+		Resource:     authz.Scope{TenantID: scope.TenantID, StoreID: scope.StoreID},
+		AllowedRoles: roles, MFARequiredRoles: mfaRoles,
+	}); err != nil {
+		respondMenu(w, nil, authz.ErrDenied)
 		return
 	}
 	result, err := a.Catalog.SetStoreAvailability(r.Context(), scope, actor.SubjectID, input)
