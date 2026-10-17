@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/operations"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 	"github.com/nurockplayer/tojima-restaurant-platform/migrations/postgres"
@@ -22,15 +23,32 @@ type Fixture struct {
 	Sessions      *tablesession.Service
 	Menus         *catalog.Service
 	Orders        *ordering.Service
+	Operations    *operations.Service
 	Locator       string
 	Schema        string
 	admin         *pgx.Conn
 	schemaCreated bool
 }
 
+// Options are explicit test-fixture settings and never select production
+// restaurant defaults.
+type Options struct {
+	CashEnabled bool
+	CashMode    operations.CashMode
+}
+
 // New requires an explicit loopback test database and creates a random schema.
 // TTLs are named local test values; they do not select production guest policy.
 func New(ctx context.Context, dsn string) (f *Fixture, err error) {
+	// Existing guest API tests exercise CASH checkout. Keep that compatibility
+	// visible as a fixture choice; production cash settings remain fail-closed.
+	return NewWithOptions(ctx, dsn, Options{CashEnabled: true, CashMode: operations.PayLater})
+}
+
+func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixture, err error) {
+	if options.CashMode != operations.Prepaid && options.CashMode != operations.PayLater {
+		return nil, errors.New("invalid test cash mode")
+	}
 	if dsn == "" {
 		return nil, errors.New("TEST_DATABASE_URL is required")
 	}
@@ -84,7 +102,11 @@ func New(ctx context.Context, dsn string) (f *Fixture, err error) {
 	if _, err = rand.Read(pepper); err != nil {
 		return nil, err
 	}
-	f.Sessions, err = tablesession.New(f.Pool, tablesession.Options{SessionTTL: 4 * time.Hour, GrantTTL: time.Hour, GrantWindow: time.Minute, GrantWindowMax: 1000, PINTTL: 15 * time.Minute, PINLockout: time.Minute, PINMaxAttempts: 3, PINLength: 6, PINPepper: pepper}, nil)
+	f.Operations, err = operations.New(f.Pool)
+	if err != nil {
+		return nil, err
+	}
+	f.Sessions, err = tablesession.New(f.Pool, tablesession.Options{SessionTTL: 4 * time.Hour, GrantTTL: time.Hour, GrantWindow: time.Minute, GrantWindowMax: 1000, PINTTL: 15 * time.Minute, PINLockout: time.Minute, PINMaxAttempts: 3, PINLength: 6, PINPepper: pepper}, f.Operations)
 	if err != nil {
 		return nil, err
 	}
@@ -124,8 +146,11 @@ func New(ctx context.Context, dsn string) (f *Fixture, err error) {
 			}
 		}
 	}
-	f.Orders, err = ordering.New(f.Pool, f.Sessions, f.Menus)
+	f.Orders, err = ordering.NewWithOrderPolicy(f.Pool, f.Sessions, f.Menus, f.Operations)
 	if err != nil {
+		return nil, err
+	}
+	if _, err = f.Operations.SetCashSettings(ctx, operations.StoreScope{TenantID: "test-tenant", StoreID: "test-store"}, "fixture-bootstrap", options.CashEnabled, options.CashMode, 0); err != nil {
 		return nil, err
 	}
 	return f, nil

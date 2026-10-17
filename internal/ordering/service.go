@@ -30,11 +30,12 @@ type menuAccess interface {
 // Service joins P-76 capabilities to P-77 current pricing inside the short
 // transaction that edits, previews, or commits a shared cart.
 type Service struct {
-	db       *pgxpool.Pool
-	sessions grantAccess
-	menus    menuAccess
-	now      func(context.Context, pgx.Tx) (time.Time, error)
-	newID    func() (string, error)
+	db           *pgxpool.Pool
+	sessions     grantAccess
+	menus        menuAccess
+	commitPolicy OrderCommitPolicy
+	now          func(context.Context, pgx.Tx) (time.Time, error)
+	newID        func() (string, error)
 }
 
 func New(db *pgxpool.Pool, sessions *tablesession.Service, menus *catalog.Service) (*Service, error) {
@@ -42,6 +43,21 @@ func New(db *pgxpool.Pool, sessions *tablesession.Service, menus *catalog.Servic
 		return nil, ErrInvalid
 	}
 	return &Service{db: db, sessions: sessions, menus: menus, now: databaseClock, newID: randomID}, nil
+}
+
+// NewWithOrderPolicy wires P-79 payment and fulfillment state into each order
+// commit. New remains source-compatible for P-78 readers/tests; without this
+// hook CASH order creation is denied and any legacy state remains fail-closed.
+func NewWithOrderPolicy(db *pgxpool.Pool, sessions *tablesession.Service, menus *catalog.Service, policy OrderCommitPolicy) (*Service, error) {
+	if policy == nil {
+		return nil, ErrInvalid
+	}
+	service, err := New(db, sessions, menus)
+	if err != nil {
+		return nil, err
+	}
+	service.commitPolicy = policy
+	return service, nil
 }
 
 func databaseClock(ctx context.Context, tx pgx.Tx) (time.Time, error) {
@@ -224,6 +240,9 @@ func (s *Service) Commit(ctx context.Context, input CommitRequest) (CommitResult
 	if !validIdempotencyKey(input.IdempotencyKey) || input.ExpectedGeneration <= 0 || input.ExpectedVersion <= 0 || input.PreviewFingerprint == "" || !validPayment(input.PaymentMethod) {
 		return CommitResult{}, ErrInvalid
 	}
+	if input.PaymentMethod == Cash && s.commitPolicy == nil {
+		return CommitResult{}, ErrPaymentUnavailable
+	}
 	digest, err := digestJSON(struct {
 		Generation  int64         `json:"generation"`
 		Version     int64         `json:"version"`
@@ -312,6 +331,15 @@ func (s *Service) Commit(ctx context.Context, input CommitRequest) (CommitResult
 		cart.Generation, string(input.PaymentMethod), session.RequiresStaffAcceptance, menu.CatalogID, menu.Mode, menu.Revision, snapshot, taxJSON, total.GrossJPY)
 	if err != nil {
 		return CommitResult{}, err
+	}
+	if s.commitPolicy != nil {
+		if err = s.commitPolicy.InitOrderTx(ctx, tx, CommittedOrder{
+			ID: orderID, SessionID: session.ID, Scope: session.Scope, Generation: cart.Generation,
+			PaymentMethod: string(input.PaymentMethod), RequiresStaffAcceptance: session.RequiresStaffAcceptance,
+			TotalGrossJPY: total.GrossJPY, Tax: taxRecord,
+		}); err != nil {
+			return CommitResult{}, err
+		}
 	}
 	if _, err = tx.Exec(ctx, `INSERT INTO table_order_idempotency(session_id,generation,idempotency_key,request_digest,order_id)
 		VALUES ($1,$2,$3,$4,$5)`, session.ID, cart.Generation, input.IdempotencyKey, digest[:], orderID); err != nil {
