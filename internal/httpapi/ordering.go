@@ -194,6 +194,8 @@ func (a OrderingAPI) respond(w http.ResponseWriter, r *http.Request, value any, 
 		code = "idempotency_conflict"
 	case errors.Is(err, ordering.ErrUnavailable):
 		code = "unavailable"
+	case errors.Is(err, ordering.ErrPaymentUnavailable):
+		code = "cash_unavailable"
 	case errors.Is(err, ordering.ErrEmptyCart), errors.Is(err, ordering.ErrInvalid):
 		writeError(w, 400, "invalid_request")
 		return

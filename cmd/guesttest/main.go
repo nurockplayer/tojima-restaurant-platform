@@ -39,7 +39,7 @@ func run() error {
 	}
 	defer f.Close(context.Background())
 	mux := http.NewServeMux()
-	mux.Handle("/v1/", httpapi.NewGuestHandler(f.Sessions, f.Menus, f.Orders))
+	mux.Handle("/v1/", httpapi.NewGuestHandler(f.Sessions, f.Menus, f.Orders, f.Operations))
 	mux.Handle("/", http.FileServer(http.Dir(*assets)))
 	server := &http.Server{Addr: "127.0.0.1:8081", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Referrer-Policy", "no-referrer")

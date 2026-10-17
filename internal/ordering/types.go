@@ -3,9 +3,12 @@
 package ordering
 
 import (
+	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tax"
 )
 
@@ -46,7 +49,26 @@ var (
 	ErrIdempotencyConflict = errors.New("idempotency key was used for a different request")
 	ErrUnavailable         = errors.New("one or more cart lines are unavailable")
 	ErrEmptyCart           = errors.New("cannot commit an empty cart")
+	ErrPaymentUnavailable  = errors.New("payment method is unavailable")
 )
+
+// OrderCommitPolicy initializes payment and fulfillment state in the same
+// transaction that persists the immutable order.
+type OrderCommitPolicy interface {
+	InitOrderTx(context.Context, pgx.Tx, CommittedOrder) error
+}
+
+// CommittedOrder contains server-derived immutable values only.
+type CommittedOrder struct {
+	ID                      string
+	SessionID               string
+	Scope                   tablesession.Scope
+	Generation              int64
+	PaymentMethod           string
+	RequiresStaffAcceptance bool
+	TotalGrossJPY           int64
+	Tax                     tax.SnapshotRecord
+}
 
 // Cart contains only mutable customer selections. It carries no client scope,
 // price, or tax fields; every returned value is revalidated from server state.

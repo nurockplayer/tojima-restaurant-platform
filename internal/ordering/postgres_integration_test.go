@@ -24,6 +24,26 @@ type allowOrderingClose struct{}
 
 func (allowOrderingClose) CheckClose(context.Context, pgx.Tx, tablesession.Session) error { return nil }
 
+// p78TestCommitPolicy initializes only the state row needed by P-79 close
+// safeguards. It is a test adapter, not production cash-settings policy.
+type p78TestCommitPolicy struct{}
+
+func (p78TestCommitPolicy) InitOrderTx(ctx context.Context, tx pgx.Tx, order CommittedOrder) error {
+	status := "PENDING"
+	var cashMode any
+	if order.PaymentMethod == string(Cash) {
+		status = "UNPAID"
+		cashMode = "PREPAID"
+	}
+	_, err := tx.Exec(ctx, `INSERT INTO operation_order_state(order_id,session_id,tenant_id,store_id,table_id,generation,payment_method,payment_status,cash_mode,fulfillment_status,requires_staff_acceptance,staff_accepted,version)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'WAITING',$10,false,1)`, order.ID, order.SessionID, order.Scope.TenantID, order.Scope.StoreID, order.Scope.TableID, order.Generation, order.PaymentMethod, status, cashMode, order.RequiresStaffAcceptance)
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,after_payment_status,after_fulfillment_status,state_version) VALUES($1,'p78-test','ORDER_CREATED',$2,'WAITING',1)`, order.ID, status)
+	return err
+}
+
 type orderingFixture struct {
 	pool     *pgxpool.Pool
 	sessions *tablesession.Service
@@ -816,7 +836,7 @@ func newOrderingFixture(t *testing.T, ctx context.Context) *orderingFixture {
 		}
 		tokens[i] = grant.Token
 	}
-	service, err := New(pool, sessionService, menuService)
+	service, err := NewWithOrderPolicy(pool, sessionService, menuService, p78TestCommitPolicy{})
 	if err != nil {
 		t.Fatal(err)
 	}

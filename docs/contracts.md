@@ -21,4 +21,14 @@ This records the staged relational contracts, not production deployment approval
 
 繁體中文：Go 是授權、定價、送單與付款狀態權威。必須用服務端資料所屬與目前 membership 驗權；S0 的型別／契約測試只是後續實作的起點，尚未證明真實 DB 併發與交易安全。
 
-P-75 and P-76 are integrated through PR #1 and PR #2 with independent review and PostgreSQL CI. PostgreSQL test implementation and the [initial Japanese tax policy](adr/0004-japan-tax-calculation.md) are approved. P-77 retains its [S6 boundaries](p77-test-scope.md); P-78 requires P-77 acceptance and must persist the actual tax snapshot atomically with order creation. Historical specification issue hierarchy alone does not establish readiness.
+P-75 through P-78 are integrated through PR #1–#4 with independent review and PostgreSQL CI. PostgreSQL test implementation and the [initial Japanese tax policy](adr/0004-japan-tax-calculation.md) are approved. P-77 retains its [S6 boundaries](p77-test-scope.md); P-78 persists the actual tax snapshot atomically with order creation. Historical specification issue hierarchy alone does not establish readiness.
+
+P-79 snapshots each new CASH order's PREPAID/PAY_LATER policy at admission.
+Operational payment/fulfillment state lives separately from the immutable order.
+Cash receipts aggregate saved historical gross lines by normalized rate, with one
+floor per invoice rate, and allocate only to this session's unpaid CASH orders.
+Every close-affecting state transition serializes on the same session row.
+An operational hold blocks collection, KDS progression and close; its future
+P-81/P-82 writers must use that same transaction boundary and record audit events.
+P-79 exposes no hold-clear, refund, cancellation or manual Stripe-paid endpoint.
+See the [P-79 test/runtime boundary](p79-test-scope.md).

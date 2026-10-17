@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
 import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
+import { operationsClient } from '../api/operations';
+import type { GuestOperations, GuestOrderStatus } from '../api/operations';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
 
 type Locale = 'ja' | 'zh';
@@ -68,6 +70,19 @@ function isSafeAmount(amount: string | number | undefined): boolean {
   return typeof amount === 'string' && /^-?\d+$/.test(amount);
 }
 
+function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
+  const fulfillment: Record<GuestOrderStatus['fulfillment_status'], string> = locale === 'ja'
+    ? { WAITING: '調理開始待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
+    : { WAITING: '等待開始製作', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
+  const payment: Record<GuestOrderStatus['payment_status'], string> = locale === 'ja'
+    ? { UNPAID: '未払い', PAID: '支払済み', PENDING: '支払確認中', UNKNOWN: '支払状態を確認中' }
+    : { UNPAID: '尚未付款', PAID: '已付款', PENDING: '付款確認中', UNKNOWN: '付款狀態確認中' };
+  const fulfillmentLabel = order.requires_staff_acceptance && !order.staff_accepted
+    ? (locale === 'ja' ? '店員の受付待ち' : '等待店員接單')
+    : fulfillment[order.fulfillment_status];
+  return `${fulfillmentLabel} · ${payment[order.payment_status]}`;
+}
+
 export function App() {
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
@@ -77,6 +92,7 @@ export function App() {
   const [status, setStatus] = useState<PublicTable | null>(null);
   const [{ cart, preview }, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
   const [orders, setOrders] = useState<Order[]>([]);
+  const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
   const [payment, setPayment] = useState<'STRIPE' | 'CASH'>('STRIPE');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
@@ -125,6 +141,13 @@ export function App() {
     try {
       const latest = await cartClient.orders(current.grant.session.id, current.grant.table_join_token);
       if (sequence === orderRequestSequence.current) setOrders(latest);
+      try {
+        const operations = await operationsClient.guest(current.grant.session.id, current.grant.table_join_token);
+        if (sequence === orderRequestSequence.current) setGuestOperations(operations);
+      } catch (cause) {
+        if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+        else if (sequence === orderRequestSequence.current) setGuestOperations({ orders: [], cash_enabled: false });
+      }
     } catch (cause) {
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
       throw cause;
@@ -235,6 +258,7 @@ export function App() {
   }, [entry, tab, refreshCart]);
 
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
+  useEffect(() => { if (guestOperations?.cash_enabled === false && payment === 'CASH') setPayment('STRIPE'); }, [guestOperations?.cash_enabled, payment]);
   useEffect(() => {
     if (preview && cart && (preview.generation !== cart.generation || preview.version !== cart.version)) {
       dispatchCart({ type: 'preview-cleared' });
@@ -472,7 +496,7 @@ export function App() {
             </article>)}</div>
             <div className="total-row"><span>{t.total}</span><strong>{safeAmount(preview.quote.tax.total_gross_jpy)}</strong></div>
             <div className="tax-row"><span>{t.tax}</span><span>{safeAmount(preview.quote.tax.total_tax_jpy)}</span></div>
-            <fieldset className="payment-choice"><legend>{t.method}</legend><label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label><label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{t.cash}</label></fieldset>
+            <fieldset className="payment-choice"><legend>{t.method}</legend><label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label>{guestOperations?.cash_enabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{t.cash}</label>}</fieldset>
             <p className="payment-note">{payment === 'STRIPE' ? t.stripeNote : t.cashNote}</p>
             {!previewAmountsSafe && <p className="error" role="alert">{t.amountError}</p>}
             {previewMatchesCart && <button className="button primary wide" disabled={busy || unavailable || uncertain || !previewAmountsSafe} onClick={() => void confirmOrder()}>{busy ? t.working : t.confirm}</button>}
@@ -512,11 +536,12 @@ export function App() {
       </>}
 
       {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
-        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => <article className="order-card" key={order.order_id}>
+        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : t.cash}</span></div>
+          {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
           {order.quote?.lines.map((line) => <div className="order-line" key={line.line_id}><span>{line.name} × {line.quantity}{line.options.map((option) => <small className="order-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>{option.name} +{safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}</span><strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong></div>)}
           <div className="order-total"><span>{t.total}</span><strong>{safeAmount(order.quote?.tax.total_gross_jpy ?? order.total_gross_jpy)}</strong></div><div className="tax-row"><span>{t.tax}</span><span>{safeAmount(order.quote?.tax.total_tax_jpy)}</span></div><small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
-        </article>)}
+        </article>; })}
       </section>}
       <footer className="workspace-footer">{t.brand} <span>·</span> {locale === 'ja' ? 'おいしい時間を、みんなで。' : '與同桌一起享用好味道。'}</footer>
     </div>
