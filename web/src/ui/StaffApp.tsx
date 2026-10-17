@@ -483,8 +483,9 @@ function modeLabel(mode: string, locale: Locale) {
 function tableStatus(status: StaffTable['status'], t: typeof copy[Locale]) { return statusLabel(status, t); }
 function blockerLabel(value: string, locale: Locale) {
   const lower = value.toLowerCase();
-  if (lower.includes('cash') || lower.includes('unpaid')) return locale === 'ja' ? '未精算の現金注文があります。' : '仍有未結清的現金訂單。';
-  if (lower.includes('stripe') || lower.includes('payment') || lower.includes('refund')) return locale === 'ja' ? '支払いや返金の確認が完了していません。' : '付款或退款尚未確認完成。';
+  if (lower.includes('operation_hold') || lower.includes('hold')) return locale === 'ja' ? '運営保留中のため、責任者の確認が必要です。' : '此桌次目前由營運保留，請由負責人確認後再關桌。';
+  if (lower.includes('cash')) return locale === 'ja' ? '未精算の現金注文があります。' : '仍有未結清的現金訂單。';
+  if (lower.includes('unpaid') || lower.includes('payment') || lower.includes('stripe') || lower.includes('refund')) return locale === 'ja' ? '未確認または未精算の支払いがあります。' : '仍有付款未確認或未結清。';
   if (lower.includes('served') || lower.includes('fulfillment') || lower.includes('kitchen')) return locale === 'ja' ? 'まだ提供していない注文があります。' : '仍有訂單尚未送達。';
   return locale === 'ja' ? '注文の状態を確認してください。' : '請確認訂單狀態。';
 }

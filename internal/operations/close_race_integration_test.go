@@ -125,10 +125,12 @@ func TestPostgresCashSettlementStillRequiresServedBeforeClose(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = f.Operations.SettleCash(ctx, operations.CashSettlementRequest{
+	settlementInput := operations.CashSettlementRequest{
 		Scope: scope, SessionID: grant.Session.ID, Actor: "test-cashier", Fingerprint: preview.Fingerprint,
 		TenderedJPY: preview.DueJPY, RegisterSessionRef: "test-register-session", IdempotencyKey: "close-settlement",
-	}); err != nil {
+	}
+	originalReceipt, err := f.Operations.SettleCash(ctx, settlementInput)
+	if err != nil {
 		t.Fatal(err)
 	}
 	state, err := f.Operations.ReadSession(ctx, scope, grant.Session.ID)
@@ -157,7 +159,39 @@ func TestPostgresCashSettlementStillRequiresServedBeforeClose(t *testing.T) {
 		}
 		state.Orders[0] = updated
 	}
+	setOperationalHold(t, ctx, f, grant.Session.ID, order.ID, true)
+	detail, err := f.Operations.ReadSession(ctx, scope, grant.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hasHoldBlocker := false
+	for _, blocker := range detail.CloseBlockers {
+		if blocker == "OPERATION_HOLD" {
+			hasHoldBlocker = true
+		}
+	}
+	if !hasHoldBlocker {
+		t.Fatalf("paid and served held order must be shown as a close blocker: %+v", detail.CloseBlockers)
+	}
+	if err = f.Sessions.Close(ctx, grant.Session.Scope, grant.Session.ID, "test-cashier"); !errors.Is(err, tablesession.ErrCloseBlocked) {
+		t.Fatalf("operational hold did not block close after payment and service: %v", err)
+	}
+	setOperationalHold(t, ctx, f, grant.Session.ID, order.ID, false)
 	if err = f.Sessions.Close(ctx, grant.Session.Scope, grant.Session.ID, "test-cashier"); err != nil {
 		t.Fatalf("close failed after all orders were paid and served: %v", err)
+	}
+	retry, err := f.Operations.SettleCash(ctx, settlementInput)
+	if err != nil || retry.ID != originalReceipt.ID || retry.DueJPY != originalReceipt.DueJPY || retry.CreatedAt != originalReceipt.CreatedAt {
+		t.Fatalf("closed-session retry did not return original immutable receipt: retry=%+v original=%+v err=%v", retry, originalReceipt, err)
+	}
+	conflictingBody := settlementInput
+	conflictingBody.TenderedJPY++
+	if _, err = f.Operations.SettleCash(ctx, conflictingBody); !errors.Is(err, operations.ErrIdempotencyConflict) {
+		t.Fatalf("closed-session same-key different body must conflict: %v", err)
+	}
+	differentKey := settlementInput
+	differentKey.IdempotencyKey = "closed-new-settlement"
+	if _, err = f.Operations.SettleCash(ctx, differentKey); !errors.Is(err, operations.ErrConflict) {
+		t.Fatalf("closed-session new settlement must be denied: %v", err)
 	}
 }

@@ -25,6 +25,10 @@ const (
 	maxActionKey  = 128
 )
 
+var japanLocation = time.FixedZone("JST", 9*60*60)
+
+func cashInvoiceDate(now time.Time) time.Time { return now.In(japanLocation) }
+
 // Service contains P-79 operational state. It receives actors from a verified
 // MOD-08 adapter; it does not authenticate identities or manufacture roles.
 type Service struct{ db *pgxpool.Pool }
@@ -232,7 +236,7 @@ func (s *Service) ListTables(ctx context.Context, scope StoreScope) ([]TableSumm
 		return nil, ErrInvalid
 	}
 	rows, err := s.db.Query(ctx, `SELECT t.table_id,t.name,coalesce(ts.session_id,''),coalesce(ts.status,'IDLE'),coalesce(ts.qr_mode,st.qr_entry_mode),ts.expires_at,
-		coalesce(sum(CASE WHEN os.payment_method='CASH' AND os.payment_status='UNPAID' THEN o.total_gross_jpy ELSE 0 END),0),count(o.order_id)
+		coalesce(sum(CASE WHEN os.payment_method='CASH' AND os.payment_status='UNPAID' AND os.fulfillment_status IS DISTINCT FROM 'CANCELLED' THEN o.total_gross_jpy ELSE 0 END),0),count(o.order_id)
 		FROM dining_tables t JOIN stores st USING(tenant_id,store_id) JOIN tenants n USING(tenant_id)
 		LEFT JOIN table_sessions ts ON ts.tenant_id=t.tenant_id AND ts.store_id=t.store_id AND ts.table_id=t.table_id AND ts.status='OPEN'
 		LEFT JOIN table_orders o ON o.session_id=ts.session_id LEFT JOIN operation_order_state os ON os.order_id=o.order_id
@@ -419,6 +423,12 @@ func closeBlockers(orders []OrderState) []string {
 			break
 		}
 	}
+	for _, o := range orders {
+		if o.OperationalHold {
+			out = append(out, "OPERATION_HOLD")
+			break
+		}
+	}
 	return out
 }
 
@@ -524,7 +534,8 @@ func (s *Service) SettleCash(ctx context.Context, input CashSettlementRequest) (
 		return Receipt{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockSession(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE"); err != nil {
+	status, err := lockSessionStatus(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE")
+	if err != nil {
 		return Receipt{}, err
 	}
 	var prior Receipt
@@ -545,6 +556,11 @@ func (s *Service) SettleCash(ctx context.Context, input CashSettlementRequest) (
 		return prior, nil
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return Receipt{}, err
+	}
+	// A committed receipt is replayable after the table was safely closed. A
+	// closed session may not create a new settlement, even if new work appears.
+	if status != "OPEN" {
+		return Receipt{}, ErrConflict
 	}
 	orders, invoice, due, err := currentCashOrders(ctx, tx, input.Scope, input.SessionID)
 	if err != nil {
@@ -606,7 +622,7 @@ func (s *Service) SettleCash(ctx context.Context, input CashSettlementRequest) (
 
 func currentCashOrders(ctx context.Context, tx pgx.Tx, scope TableScope, sessionID string) ([]cashOrder, tax.InvoiceRecord, int64, error) {
 	rows, err := tx.Query(ctx, `SELECT o.order_id,o.total_gross_jpy,st.operational_hold,o.tax_snapshot FROM table_orders o JOIN operation_order_state st USING(order_id)
-		WHERE o.session_id=$1 AND o.tenant_id=$2 AND o.store_id=$3 AND o.table_id=$4 AND st.payment_method='CASH' AND st.payment_status='UNPAID' ORDER BY o.order_id LIMIT $5`, sessionID, scope.TenantID, scope.StoreID, scope.TableID, maxCashOrders+1)
+		WHERE o.session_id=$1 AND o.tenant_id=$2 AND o.store_id=$3 AND o.table_id=$4 AND st.payment_method='CASH' AND st.payment_status='UNPAID' AND st.fulfillment_status IS DISTINCT FROM 'CANCELLED' ORDER BY o.order_id LIMIT $5`, sessionID, scope.TenantID, scope.StoreID, scope.TableID, maxCashOrders+1)
 	if err != nil {
 		return nil, tax.InvoiceRecord{}, 0, err
 	}
@@ -646,7 +662,7 @@ func currentCashOrders(ctx context.Context, tx pgx.Tx, scope TableScope, session
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
 		return nil, tax.InvoiceRecord{}, 0, err
 	}
-	invoice, err := tax.AggregateInvoice(tax.Scope{TenantID: scope.TenantID, StoreID: scope.StoreID}, now, invoiceOrders)
+	invoice, err := tax.AggregateInvoice(tax.Scope{TenantID: scope.TenantID, StoreID: scope.StoreID}, cashInvoiceDate(now), invoiceOrders)
 	if err != nil {
 		return nil, tax.InvoiceRecord{}, 0, err
 	}
@@ -676,26 +692,34 @@ func cashFingerprint(sessionID string, orders []cashOrder, amount int64) (string
 }
 
 func lockSession(ctx context.Context, tx pgx.Tx, scope TableScope, sessionID, lock string) error {
-	if lock != "FOR SHARE" && lock != "FOR UPDATE" {
-		return ErrInvalid
-	}
-	var status string
-	var enabled bool
-	err := tx.QueryRow(ctx, `SELECT ts.status,(t.enabled AND st.enabled AND st.operating AND n.enabled) FROM table_sessions ts JOIN dining_tables t USING(tenant_id,store_id,table_id) JOIN stores st USING(tenant_id,store_id) JOIN tenants n USING(tenant_id)
-		WHERE ts.session_id=$1 AND ts.tenant_id=$2 AND ts.store_id=$3 AND ts.table_id=$4 `+lock+` OF ts`, sessionID, scope.TenantID, scope.StoreID, scope.TableID).Scan(&status, &enabled)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNotFound
-	}
+	status, err := lockSessionStatus(ctx, tx, scope, sessionID, lock)
 	if err != nil {
 		return err
 	}
 	if status != "OPEN" {
 		return ErrConflict
 	}
-	if !enabled {
-		return ErrDenied
-	}
 	return nil
+}
+
+func lockSessionStatus(ctx context.Context, tx pgx.Tx, scope TableScope, sessionID, lock string) (string, error) {
+	if lock != "FOR SHARE" && lock != "FOR UPDATE" {
+		return "", ErrInvalid
+	}
+	var status string
+	var enabled bool
+	err := tx.QueryRow(ctx, `SELECT ts.status,(t.enabled AND st.enabled AND st.operating AND n.enabled) FROM table_sessions ts JOIN dining_tables t USING(tenant_id,store_id,table_id) JOIN stores st USING(tenant_id,store_id) JOIN tenants n USING(tenant_id)
+		WHERE ts.session_id=$1 AND ts.tenant_id=$2 AND ts.store_id=$3 AND ts.table_id=$4 `+lock+` OF ts`, sessionID, scope.TenantID, scope.StoreID, scope.TableID).Scan(&status, &enabled)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	if err != nil {
+		return "", err
+	}
+	if !enabled {
+		return "", ErrDenied
+	}
+	return status, nil
 }
 
 func jsonDigest(v any) ([]byte, error) {

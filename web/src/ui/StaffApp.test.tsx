@@ -98,6 +98,39 @@ describe('staff operations', () => {
     expect(closeCalls).toBe(0);
   });
 
+  it('explains an operational hold in Japanese and Chinese and keeps close blocked', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'STAFF_OPEN' }, orders: [], receipts: [], close_blockers: ['OPERATION_HOLD'] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, 'テーブルを閉じる');
+    expect(host?.textContent).toContain('運営保留中のため、責任者の確認が必要です。');
+    expect(host?.textContent).not.toContain('OPERATION_HOLD');
+    const confirm = [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('閉卓を確認'));
+    expect(confirm?.disabled).toBe(true);
+    await click(host!, '繁體中文');
+    expect(host?.textContent).toContain('此桌次目前由營運保留，請由負責人確認後再關桌。');
+  });
+
+  it('describes unpaid or unknown payment as a payment hold, not a cash order', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'STAFF_OPEN' }, orders: [], receipts: [], close_blockers: ['UNPAID_OR_UNKNOWN_PAYMENT'] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, 'テーブルを閉じる');
+    expect(host?.textContent).toContain('未確認または未精算の支払いがあります。');
+    expect(host?.textContent).not.toContain('未精算の現金注文があります。');
+    expect(host?.textContent).not.toContain('UNPAID_OR_UNKNOWN_PAYMENT');
+  });
+
   it('allows a cashier with service capability to close an unblocked session', async () => {
     let closeCalls = 0;
     const routes: Route = async (url) => {

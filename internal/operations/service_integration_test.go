@@ -424,6 +424,49 @@ func TestPostgresLegacyStripeStateFailsClosedAndCashWithoutPolicyIsDenied(t *tes
 	}
 }
 
+func TestPostgresCancelledCashOrderIsExcludedFromDueAndPreview(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f, err := testguest.NewWithOptions(ctx, dsn, testguest.Options{CashEnabled: true, CashMode: operations.PayLater})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close(ctx)
+	grant, err := f.Sessions.DirectJoin(ctx, f.Locator, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	order := commitCashOrder(t, ctx, f, grant, 1, "cancelled-cash")
+
+	// Cancellation is not a production P79 operation. This test-only fixture
+	// injects a historical cancelled state so the defensive due/preview queries
+	// can be verified independently of a future authorized cancellation seam.
+	if _, err = f.Pool.Exec(ctx, `ALTER TABLE operation_order_state DISABLE TRIGGER operation_order_state_transition`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Pool.Exec(ctx, `UPDATE operation_order_state SET fulfillment_status='CANCELLED',version=version+1 WHERE order_id=$1`, order.ID); err != nil {
+		_, _ = f.Pool.Exec(ctx, `ALTER TABLE operation_order_state ENABLE TRIGGER operation_order_state_transition`)
+		t.Fatal(err)
+	}
+	if _, err = f.Pool.Exec(ctx, `ALTER TABLE operation_order_state ENABLE TRIGGER operation_order_state_transition`); err != nil {
+		t.Fatal(err)
+	}
+
+	scope := operations.TableScope{TenantID: grant.Session.Scope.TenantID, StoreID: grant.Session.Scope.StoreID, TableID: grant.Session.Scope.TableID}
+	preview, err := f.Operations.PreviewCash(ctx, scope, grant.Session.ID)
+	if !errors.Is(err, operations.ErrNotReady) {
+		t.Fatalf("cancelled cash order remained in settlement preview: preview=%+v err=%v", preview, err)
+	}
+	tables, err := f.Operations.ListTables(ctx, operations.StoreScope{TenantID: scope.TenantID, StoreID: scope.StoreID})
+	if err != nil || len(tables) != 1 || tables[0].UnpaidCashJPY != 0 || tables[0].OrderCount != 1 {
+		t.Fatalf("cancelled cash order affected due/count projection: tables=%+v err=%v", tables, err)
+	}
+}
+
 func setStorePrice(t *testing.T, ctx context.Context, f *testguest.Fixture, scope catalog.StoreScope, key string, amount, version int64) {
 	t.Helper()
 	if _, err := f.Menus.SetStorePriceOverride(ctx, scope, "manager", key, amount, version); err != nil {
