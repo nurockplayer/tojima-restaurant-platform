@@ -106,7 +106,6 @@ export function App() {
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const strings = useRef(t);
   strings.current = t;
-  const requestSequence = useRef(0);
   const cartRequestSequence = useRef(0);
   const orderRequestSequence = useRef(0);
   const replay = useRef<Replay | null>(null);
@@ -232,7 +231,7 @@ export function App() {
       }
     };
     void init();
-    return () => { active = false; requestSequence.current++; };
+    return () => { active = false; };
   }, [activate, invalidateGrant, query.locator, query.sessionID]);
 
   useEffect(() => {

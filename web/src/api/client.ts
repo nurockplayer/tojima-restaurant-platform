@@ -1,5 +1,4 @@
 import type {
-  ApiErrorBody,
   Cart,
   CommitResult,
   GuestGrant,
@@ -9,16 +8,8 @@ import type {
   PublicTable,
   Order,
 } from './types';
-
-export class ApiError extends Error {
-  constructor(
-    readonly status: number,
-    readonly body: ApiErrorBody,
-  ) {
-    super(body.error || `Request failed (${status})`);
-    this.name = 'ApiError';
-  }
-}
+import { bearerHeaders as auth, request } from '../shared/http';
+export { ApiError } from '../shared/http';
 
 export interface CartClient {
   status(locator: string): Promise<PublicTable>;
@@ -33,33 +24,6 @@ export interface CartClient {
   preview(sessionID: string, token: string, cart: Cart): Promise<Preview>;
   commit(sessionID: string, token: string, preview: Preview, paymentMethod: 'STRIPE' | 'CASH', key: string): Promise<CommitResult>;
   orders(sessionID: string, token: string): Promise<Order[]>;
-}
-
-function apiBase(): string {
-  return (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-}
-
-async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(`${apiBase()}${path}`, {
-      ...options,
-      headers: { accept: 'application/json', ...options.headers },
-    });
-  } catch {
-    // Keep the error generic. URLs may contain public table locators.
-    throw new Error('network_unavailable');
-  }
-  const body = (await response.json().catch(() => ({}))) as ApiErrorBody;
-  if (!response.ok) throw new ApiError(response.status, body);
-  return body as T;
-}
-
-function auth(token: string, key?: string): HeadersInit {
-  return {
-    authorization: `Bearer ${token}`,
-    ...(key ? { 'Idempotency-Key': key } : {}),
-  };
 }
 
 function expected(cart: Cart) {

@@ -51,6 +51,7 @@ SQLite is a **historical S0 test harness only**. Owner approved PostgreSQL test 
 - [ADR-0003](docs/adr/0003-identity-ui-and-external-gates.md): unresolved IdP and later Stripe gates; guest UI now accepted in ADR-0005.
 - [ADR-0004](docs/adr/0004-japan-tax-calculation.md): approved Japanese tax defaults, effective schedules, rounding and later invoice boundaries.
 - [ADR-0005](docs/adr/0005-typescript-guest-web.md): Owner-approved React + TypeScript + Vite, pnpm and guest UI boundary.
+- [ADR-0006](docs/adr/0006-frontend-stack.md): MVP frontend stack — adopt-on-first-consumer libraries (React Aria, TanStack Query/Router, React Hook Form), shared HTTP transport, lazy surfaces and the oxlint hooks gate.
 - [Relational contracts](docs/contracts.md): source-of-truth entities and required constraints for later stages.
 
 ## Local guest acceptance UI

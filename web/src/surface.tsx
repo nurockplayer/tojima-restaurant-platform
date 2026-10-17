@@ -1,0 +1,53 @@
+import { Component, lazy, Suspense } from 'react';
+import type { ComponentType, ReactNode } from 'react';
+
+export type SurfaceName = 'guest' | 'staff';
+
+/** `/staff` and `/staff/` open the staff console; every other path keeps the guest flow and its query string. */
+export function surfaceFor(pathname: string): SurfaceName {
+  return pathname.replace(/\/$/, '') === '/staff' ? 'staff' : 'guest';
+}
+
+// Each surface is its own chunk, so guest phones never download the staff/KDS console.
+const surfaces: Record<SurfaceName, ComponentType> = {
+  guest: lazy(() => import('./ui/App').then((module) => ({ default: module.App }))),
+  staff: lazy(() => import('./ui/StaffApp').then((module) => ({ default: module.StaffApp }))),
+};
+
+const copy = {
+  loading: '読み込み中… / 載入中…',
+  failed: '画面を読み込めませんでした。通信状態を確認して再読み込みしてください。 / 無法載入畫面，請確認網路後重新載入。',
+  reload: '再読み込み / 重新載入',
+};
+
+interface BoundaryProps { children: ReactNode; onReload: () => void }
+
+/** A failed chunk download (offline, or stale assets after a deploy) shows a reload action instead of a blank page. */
+export class SurfaceBoundary extends Component<BoundaryProps, { failed: boolean }> {
+  override state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  override render() {
+    if (!this.state.failed) return this.props.children;
+    return (
+      <div className="loading-card" role="alert">
+        <p>{copy.failed}</p>
+        <button type="button" className="button primary small" onClick={this.props.onReload}>{copy.reload}</button>
+      </div>
+    );
+  }
+}
+
+export function Surface({ name, onReload = () => window.location.reload() }: { name: SurfaceName; onReload?: () => void }) {
+  const Selected = surfaces[name];
+  return (
+    <SurfaceBoundary onReload={onReload}>
+      <Suspense fallback={<div className="loading-card" role="status">{copy.loading}</div>}>
+        <Selected />
+      </Suspense>
+    </SurfaceBoundary>
+  );
+}

@@ -1,4 +1,4 @@
-import { ApiError } from './client';
+import { bearerHeaders, request as httpRequest } from '../shared/http';
 
 export interface StaffContext { tenantID: string; storeID: string }
 export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean }
@@ -24,15 +24,7 @@ export interface GuestOrderStatus { id: string; payment_status: StaffOrder['paym
 export interface GuestOperations { orders: GuestOrderStatus[]; cash_enabled: boolean }
 
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  let response: Response;
-  try {
-    response = await fetch(path, { ...init, headers: { accept: 'application/json', authorization: `Bearer ${token}`, ...init.headers } });
-  } catch {
-    throw new Error('network_unavailable');
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, body as { error: string });
-  return body as T;
+  return httpRequest<T>(path, { ...init, headers: { ...bearerHeaders(token), ...init.headers } });
 }
 
 const json = (body: unknown, key?: string): RequestInit => ({
