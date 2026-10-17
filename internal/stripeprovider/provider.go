@@ -1,5 +1,5 @@
 // Package stripeprovider contains the narrow Stripe API adapter used by the
-// later durable payment-attempt service. It deliberately owns no retry,
+// durable payment-attempt service. It deliberately owns no retry,
 // one-attempt, tenant mapping, or fulfillment policy.
 package stripeprovider
 
@@ -221,7 +221,10 @@ func (p *Provider) CreateCheckout(ctx context.Context, req CreateCheckoutRequest
 	if err != nil {
 		return CheckoutResult{}, ErrOutcomeUnknown
 	}
-	if r.URL == "" || r.AmountJPY != req.AmountJPY || r.Metadata["tenant_id"] != req.TenantID || r.Metadata["store_id"] != req.StoreID || r.Metadata["order_id"] != req.OrderID || r.Metadata["attempt_id"] != req.AttemptID {
+	// An idempotent recovery may describe a Checkout that has already completed
+	// or expired. Only an open Checkout needs a continuation URL; the durable
+	// service must still receive completed/paid evidence without one.
+	if (r.Status == CheckoutOpen && r.URL == "") || r.AmountJPY != req.AmountJPY || r.Metadata["tenant_id"] != req.TenantID || r.Metadata["store_id"] != req.StoreID || r.Metadata["order_id"] != req.OrderID || r.Metadata["attempt_id"] != req.AttemptID {
 		return CheckoutResult{}, ErrOutcomeUnknown
 	}
 	return r, nil

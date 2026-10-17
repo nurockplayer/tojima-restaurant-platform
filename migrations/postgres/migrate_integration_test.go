@@ -54,7 +54,7 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("idempotent up: %v", err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 5 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 6 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
 	if err = postgres.Reapply(ctx, target); err != nil {
@@ -63,6 +63,9 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	var exists bool
 	if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".operation_order_state").Scan(&exists); err != nil || !exists {
 		t.Fatalf("005 operations schema missing after reapply: exists=%v err=%v", exists, err)
+	}
+	if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".stripe_payment_attempts").Scan(&exists); err != nil || !exists {
+		t.Fatalf("006 payments schema missing after reapply: exists=%v err=%v", exists, err)
 	}
 	if err = postgres.Down(ctx, target); err != nil {
 		t.Fatalf("final down: %v", err)

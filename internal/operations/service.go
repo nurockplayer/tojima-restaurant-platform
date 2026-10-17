@@ -191,13 +191,14 @@ func releaseOrder(ctx context.Context, tx pgx.Tx, orderID, actor string) error {
 	var fulfillment FulfillmentStatus
 	var session, tenant, store, table string
 	var version int64
-	err := tx.QueryRow(ctx, `SELECT payment_method,payment_status='PAID',requires_staff_acceptance,staff_accepted,operational_hold,coalesce(cash_mode,''),fulfillment_status,session_id,tenant_id,store_id,table_id,version FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, orderID).
-		Scan(&method, &paid, &staffRequired, &staffAccepted, &held, &cashMode, &fulfillment, &session, &tenant, &store, &table, &version)
+	var review bool
+	err := tx.QueryRow(ctx, `SELECT payment_method,payment_status='PAID',requires_staff_acceptance,staff_accepted,operational_hold,payment_review_required,coalesce(cash_mode,''),fulfillment_status,session_id,tenant_id,store_id,table_id,version FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, orderID).
+		Scan(&method, &paid, &staffRequired, &staffAccepted, &held, &review, &cashMode, &fulfillment, &session, &tenant, &store, &table, &version)
 	if err != nil {
 		return err
 	}
 	paymentOpen := (method == string(ordering.Stripe) && paid) || (method == string(ordering.Cash) && (cashMode == PayLater || paid))
-	if held || !paymentOpen || (staffRequired && !staffAccepted) || fulfillment != Waiting {
+	if held || review || !paymentOpen || (staffRequired && !staffAccepted) || fulfillment != Waiting {
 		return nil
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO operation_kds_cards(order_id,session_id,tenant_id,store_id,table_id) VALUES($1,$2,$3,$4,$5) ON CONFLICT(order_id) DO NOTHING`, orderID, session, tenant, store, table)
@@ -221,7 +222,7 @@ func releaseOrder(ctx context.Context, tx pgx.Tx, orderID, actor string) error {
 func (s *Service) CheckClose(ctx context.Context, tx pgx.Tx, session tablesession.Session) error {
 	var bad int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM table_orders o LEFT JOIN operation_order_state st ON st.order_id=o.order_id
-		WHERE o.session_id=$1 AND (st.order_id IS NULL OR st.payment_status<>'PAID' OR st.fulfillment_status<>'SERVED' OR st.operational_hold)`, session.ID).Scan(&bad)
+		WHERE o.session_id=$1 AND (st.order_id IS NULL OR st.payment_status<>'PAID' OR st.fulfillment_status<>'SERVED' OR st.operational_hold OR st.payment_review_required)`, session.ID).Scan(&bad)
 	if err != nil {
 		return err
 	}
@@ -333,9 +334,9 @@ func readOrders(ctx context.Context, q interface {
 		where += fmt.Sprintf(" AND o.session_id=$%d", len(args))
 	}
 	if releasedOnly {
-		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') AND NOT st.operational_hold`
+		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') AND NOT st.operational_hold AND NOT st.payment_review_required`
 	}
-	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot
+	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot
 		FROM table_orders o JOIN dining_tables dt USING(tenant_id,store_id,table_id) LEFT JOIN operation_order_state st USING(order_id) WHERE `+where+` ORDER BY o.created_at,o.order_id`, args...)
 	if err != nil {
 		return nil, err
@@ -349,7 +350,7 @@ func readOrders(ctx context.Context, q interface {
 		var created time.Time
 		var raw []byte
 		var payment, fulfill *string
-		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.Version, &v.TotalGrossJPY, &created, &raw); err != nil {
+		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = created
@@ -366,7 +367,7 @@ func readOrders(ctx context.Context, q interface {
 			v.FulfillmentStatus = Waiting
 			v.BlockedReason = "OPERATION_STATE_MISSING"
 		}
-		if v.OperationalHold {
+		if v.OperationalHold || v.PaymentReviewRequired {
 			v.BlockedReason = "OPERATION_HOLD"
 		}
 		var snap struct {
@@ -424,7 +425,7 @@ func closeBlockers(orders []OrderState) []string {
 		}
 	}
 	for _, o := range orders {
-		if o.OperationalHold {
+		if o.OperationalHold || o.PaymentReviewRequired {
 			out = append(out, "OPERATION_HOLD")
 			break
 		}
@@ -871,7 +872,7 @@ func (s *Service) PendingOutbox(ctx context.Context, scope StoreScope, limit int
 	if !validStoreScope(scope) || limit < 1 || limit > 500 {
 		return nil, ErrInvalid
 	}
-	rows, err := s.db.Query(ctx, `SELECT b.outbox_id,b.order_id,b.event_type,b.created_at,b.attempts FROM operation_outbox b JOIN operation_kds_cards k USING(order_id) JOIN operation_order_state st USING(order_id) WHERE k.tenant_id=$1 AND k.store_id=$2 AND b.delivered_at IS NULL AND NOT st.operational_hold AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') ORDER BY b.outbox_id LIMIT $3`, scope.TenantID, scope.StoreID, limit)
+	rows, err := s.db.Query(ctx, `SELECT b.outbox_id,b.order_id,b.event_type,b.created_at,b.attempts FROM operation_outbox b JOIN operation_kds_cards k USING(order_id) JOIN operation_order_state st USING(order_id) WHERE k.tenant_id=$1 AND k.store_id=$2 AND b.delivered_at IS NULL AND NOT st.operational_hold AND NOT st.payment_review_required AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') ORDER BY b.outbox_id LIMIT $3`, scope.TenantID, scope.StoreID, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -3,6 +3,7 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Cart } from '../api/types';
+import { checkoutNavigation } from '../api/checkout';
 import { App } from './App';
 
 const table = { mode: 'DIRECT_SCAN', current_session_id: 'session-1', open: true };
@@ -21,6 +22,8 @@ afterEach(async () => {
   host?.remove();
   host = undefined;
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
   sessionStorage.clear();
 });
 
@@ -119,6 +122,7 @@ describe('guest app mount', () => {
     let menuReads = 0;
     let previewCalls = 0;
     let commitCalls = 0;
+    const paymentFlow: string[] = [];
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       if (url.endsWith('/v1/guest/tables/table-1')) return json(table);
@@ -133,8 +137,14 @@ describe('guest app mount', () => {
         previewCalls += 1;
         return json(quoted);
       }
+      if (url.endsWith('/v1/guest/sessions/session-1/checkout-context') && init?.method === 'POST') {
+        paymentFlow.push('checkout-context');
+        expect(new Headers(init.headers).get('authorization')).toBe('Bearer memory-only-grant');
+        return new Response(null, { status: 204 });
+      }
       if (url.endsWith('/v1/guest/sessions/session-1/cart/commit') && init?.method === 'POST') {
         commitCalls += 1;
+        paymentFlow.push('commit');
         return json({ error: 'requote_required', cart: openCart }, 409);
       }
       throw new Error(`Unexpected API request: ${url}`);
@@ -174,10 +184,164 @@ describe('guest app mount', () => {
     expect(menuReads).toBe(3);
     expect(previewCalls).toBe(1);
     expect(commitCalls).toBe(1);
+    expect(paymentFlow).toEqual(['checkout-context', 'commit']);
     expect(host.textContent).toContain('¥200');
     expect(host.textContent).toContain('定食');
     expect(host.textContent).not.toContain('この内容で注文を確定');
     expect(host.textContent).toContain('金額を確認する');
+  });
+
+  it('checks one Stripe order on demand and navigates only to its private resume response', async () => {
+    const order = stripeOrder('order-resume');
+    const assign = vi.spyOn(checkoutNavigation, 'assign').mockImplementation(() => undefined);
+    const fetchMock = await mountCheckoutOrders([order], async (url, init) => {
+      if (url.endsWith('/orders/order-resume/checkout') && init.method !== 'POST') return json(checkoutStatus('order-resume', 'OPEN', true));
+      if (url.endsWith('/orders/order-resume/checkout/resume')) return json({ url: 'https://checkout.example.test/private-session', expires_at: '2026-10-18T12:30:00Z' });
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/checkout'))).toBe(false);
+    await clickButton(host!, '支払い状況を確認');
+    expect(host?.textContent).toContain('お支払い手続きができます');
+    expect(host?.textContent).toContain('支払いを続ける');
+    expect(host?.textContent).not.toContain('checkout.example.test');
+    await clickButton(host!, '支払いを続ける');
+    expect(assign).toHaveBeenCalledWith('https://checkout.example.test/private-session');
+    expect(host?.textContent).not.toContain('checkout.example.test');
+    expect([...Array(sessionStorage.length)].map((_, index) => sessionStorage.getItem(sessionStorage.key(index) ?? '')).join(' ')).not.toContain('checkout.example.test');
+  });
+
+  it('does not send the Stripe order when the original-browser context bootstrap fails', async () => {
+    window.history.replaceState({}, '', '/?table=table-1');
+    const menu = { currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '食事', position: 1, products: [{ key: 'meal', name: '定食', effective_price_minor: '1000', position: 1, availability: 'AVAILABLE', selectable: true, option_groups: [] }] }] };
+    const openCart = { session_id: 'session-1', generation: 1, version: 2, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [] }] };
+    const quoted = { session_id: 'session-1', generation: 1, version: 2, fingerprint: 'fp-1', quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: '定食', base_gross_jpy: '1000', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1000', total_net_jpy: '909', total_tax_jpy: '91', buckets: [] } } };
+    let commits = 0;
+    const calls: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url === '/v1/guest/tables/table-1') return json(table);
+      if (url === '/v1/guest/tables/table-1/join') return json(grant);
+      if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(menu);
+      if (url.endsWith('/sessions/session-1/cart') && !url.endsWith('/preview')) return json(openCart);
+      if (url.endsWith('/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false });
+      if (url.endsWith('/cart/preview')) return json(quoted);
+      if (url.endsWith('/checkout-context')) { calls.push('context'); return json({ error: 'temporary_failure' }, 503); }
+      if (url.endsWith('/cart/commit')) { commits += 1; calls.push('commit'); return json({ error: 'unexpected_commit' }, 500); }
+      throw new Error(`Unexpected API request: ${url} ${init.method ?? 'GET'}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await clickButton(host!, '金額を確認する');
+    await clickButton(host!, 'この内容で注文を確定');
+    expect(calls).toEqual(['context']);
+    expect(commits).toBe(0);
+    expect(host?.textContent).toContain('注文は送信されていません');
+    expect(host?.textContent).not.toContain('前回の操作を照合して再試行');
+  });
+
+  it('bootstraps before a new Stripe commit and selects only that attempt for status polling', async () => {
+    window.history.replaceState({}, '', '/?table=table-1');
+    const menu = { currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '食事', position: 1, products: [{ key: 'meal', name: '定食', effective_price_minor: '1000', position: 1, availability: 'AVAILABLE', selectable: true, option_groups: [] }] }] };
+    const openCart = { session_id: 'session-1', generation: 1, version: 2, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [] }] };
+    const emptyCart = { ...openCart, generation: 2, version: 0, lines: [] };
+    const quoted = { session_id: 'session-1', generation: 1, version: 2, fingerprint: 'fp-1', quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: '定食', base_gross_jpy: '1000', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1000', total_net_jpy: '909', total_tax_jpy: '91', buckets: [] } } };
+    const order = stripeOrder('order-created');
+    const flow: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url === '/v1/guest/tables/table-1') return json(table);
+      if (url === '/v1/guest/tables/table-1/join') return json(grant);
+      if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(menu);
+      if (url.endsWith('/sessions/session-1/cart/preview')) return json(quoted);
+      if (url.endsWith('/sessions/session-1/cart') && init.method !== 'POST') return json(flow.includes('commit') ? emptyCart : openCart);
+      if (url.endsWith('/sessions/session-1/orders') && !url.includes('/checkout')) return json({ orders: flow.includes('commit') ? [order] : [] });
+      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false });
+      if (url.endsWith('/checkout-context')) { flow.push('bootstrap'); return new Response(null, { status: 204 }); }
+      if (url.endsWith('/cart/commit')) { flow.push('commit'); return json({ outcome: 'COMMITTED', order, cart: emptyCart }); }
+      if (url.endsWith('/orders/order-created/checkout')) { flow.push('status'); return json(checkoutStatus('order-created', 'CREATE_PENDING', false)); }
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await clickButton(host!, '金額を確認する');
+    await clickButton(host!, 'この内容で注文を確定');
+    expect(flow.slice(0, 3)).toEqual(['bootstrap', 'commit', 'status']);
+    expect(host?.textContent).toContain('注文を確認しています');
+    expect(host?.textContent).not.toContain('支払いを続ける');
+  });
+
+  it.each([
+    { state: 'OPEN', title: 'can ask staff to continue when the original proof is unavailable', expected: 'お支払い手続きができます', support: true },
+    { state: 'UNKNOWN', title: 'keeps an unknown outcome informational and offers no retry', expected: 'お支払い状況を確認しています', support: true },
+    { state: 'PAID', title: 'does not offer resume for a paid order', expected: 'お支払い済み', support: false },
+    { state: 'EXPIRED', title: 'does not offer resume for an expired order', expected: 'お支払い期限が切れました', support: false },
+  ] as const)('$title', async ({ state, expected, support }) => {
+    await mountCheckoutOrders([stripeOrder('order-state')], async (url) => {
+      if (url.endsWith('/orders/order-state/checkout')) return json(checkoutStatus('order-state', state, false));
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    await clickButton(host!, '支払い状況を確認');
+    expect(host?.textContent).toContain(expected);
+    expect(host?.textContent).not.toContain('支払いを続ける');
+    expect(host?.textContent.includes('スタッフにお声がけください')).toBe(support);
+  });
+
+  it('ignores a delayed payment status after the guest selects another Stripe order', async () => {
+    const oldStatus = deferred<Response>();
+    await mountCheckoutOrders([stripeOrder('order-old'), stripeOrder('order-new')], async (url) => {
+      if (url.endsWith('/orders/order-old/checkout')) return oldStatus.promise;
+      if (url.endsWith('/orders/order-new/checkout')) return json(checkoutStatus('order-new', 'PAID', false));
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    const cards = host!.querySelectorAll<HTMLElement>('.order-card');
+    await act(async () => { cards.item(0)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { host!.querySelectorAll<HTMLElement>('.order-card').item(1)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.textContent).toContain('お支払い済み');
+    await act(async () => { oldStatus.resolve(json(checkoutStatus('order-old', 'OPEN', true))); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.textContent).toContain('お支払い済み');
+    expect(host?.textContent).not.toContain('支払いを続ける');
+  });
+
+  it('does not navigate or change the newer payment view when an old resume request finishes late', async () => {
+    const resumeResponse = deferred<Response>();
+    const assign = vi.spyOn(checkoutNavigation, 'assign').mockImplementation(() => undefined);
+    await mountCheckoutOrders([stripeOrder('order-resume-old'), stripeOrder('order-resume-new')], async (url, init) => {
+      if (url.endsWith('/orders/order-resume-old/checkout') && init.method !== 'POST') return json(checkoutStatus('order-resume-old', 'OPEN', true));
+      if (url.endsWith('/orders/order-resume-new/checkout') && init.method !== 'POST') return json(checkoutStatus('order-resume-new', 'PAID', false));
+      if (url.endsWith('/orders/order-resume-old/checkout/resume')) return resumeResponse.promise;
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+
+    const cards = host!.querySelectorAll<HTMLElement>('.order-card');
+    await act(async () => { cards.item(0)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await clickButton(host!, '支払いを続ける');
+    await act(async () => { host!.querySelectorAll<HTMLElement>('.order-card').item(1)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    resumeResponse.resolve(json({ url: 'https://checkout.example.test/stale-session' }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(assign).not.toHaveBeenCalled();
+    expect(host?.textContent).not.toContain('支払いを続ける');
+    expect(host?.textContent).not.toContain('stale-session');
+  });
+
+  it('skips selected-order polling while that same status request is still pending', async () => {
+    const pendingStatus = deferred<Response>();
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-slow')], async (url) => {
+      if (url.endsWith('/orders/order-slow/checkout')) { reads++; return pendingStatus.promise; }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    expect(reads).toBe(1);
+    await act(async () => { pendingStatus.resolve(json(checkoutStatus('order-slow', 'UNKNOWN', false))); await Promise.resolve(); });
   });
 
   it('switches single-select options, clears optional choices, protects required groups, and replays a 503 with the same request', async () => {
@@ -312,6 +476,44 @@ async function mountGuestStatus(
   }
 }
 
+async function mountCheckoutOrders(
+  orders: unknown[],
+  checkoutRoute: (url: string, init: RequestInit) => Promise<Response>,
+) {
+  window.history.replaceState({}, '', '/?table=table-1');
+  const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+    const url = String(input);
+    if (url === '/v1/guest/tables/table-1') return json(table);
+    if (url === '/v1/guest/tables/table-1/join') return json(grant);
+    if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(guestMenu);
+    if (url === '/v1/guest/sessions/session-1/cart') return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
+    if (url === '/v1/guest/sessions/session-1/orders') return json({ orders });
+    if (url === '/v1/guest/sessions/session-1/operations') return json({ orders: [], cash_enabled: false });
+    if (url.includes('/orders/') && url.includes('/checkout')) return checkoutRoute(url, init);
+    throw new Error(`Unexpected API request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+  await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await clickButton(host!, '注文履歴');
+  return fetchMock;
+}
+
+function stripeOrder(orderID: string) {
+  return {
+    order_id: orderID, session_id: 'session-1', generation: 1, payment_method: 'STRIPE',
+    requires_staff_acceptance: false, total_gross_jpy: '1100', created_at: '2026-10-18T00:00:00Z',
+  };
+}
+
+function checkoutStatus(orderID: string, state: string, resumeAvailable: boolean) {
+  return {
+    order_id: orderID, state, last_reconciled_at: null, payment_review_required: state === 'REVIEW_REQUIRED',
+    resume_available: resumeAvailable,
+  };
+}
+
 async function setTextField(container: Element, label: string, value: string) {
   const field = [...container.querySelectorAll('label.field')].find((item) => item.textContent?.includes(label));
   const input = field?.querySelector('input');
@@ -336,6 +538,12 @@ function findOption(fieldset: Element, name: string): HTMLInputElement {
   const input = label?.querySelector('input');
   if (!input) throw new Error(`Missing option: ${name}`);
   return input;
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => { resolve = done; });
+  return { promise, resolve };
 }
 
 function json(body: unknown, status = 200): Response {

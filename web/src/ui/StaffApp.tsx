@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, amountJPY, newOperationKey } from '../api/client';
 import { operationsClient } from '../api/operations';
 import type { Capabilities, CashPreview, CashSettings, OpenedSession, Receipt, SessionOperations, StaffContext, StaffOrder, StaffTable } from '../api/operations';
+import { checkoutClient } from '../api/checkout';
+import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation } from './cart-state';
 
 type Locale = 'ja' | 'zh';
@@ -23,6 +25,8 @@ const copy = {
     receipt: '精算済み', receiptID: '領収番号', change: 'お釣り', cashier: '担当者', close: 'テーブルを閉じる', closeTitle: 'テーブルを閉じますか？', closeConfirm: '閉卓を確認', blockers: '閉卓できない注文があります。', noBlockers: '未収・処理中の支払いや未提供の注文はありません。',
     cashSettings: '現金受付設定', enabled: '現金を受け付ける', prepaid: '先払い', payLater: '後払い', save: '設定を保存',
     noCashOrders: '精算対象の現金注文はありません。', closeBlocked: '未提供または未精算の注文があるため閉卓できません。',
+    paymentCheck: '支払い状況を確認', paymentReconcile: '最新の支払い状況を確認', paymentError: '支払い状況を確認できません。時間をおいてお試しください。', paymentReview: '支払い状況を店舗で確認する必要があります。', lastPaymentCheck: '最終確認',
+    stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     retry: '同じ操作を確認して再試行', network: '処理結果を確認できません。再試行は同じ操作を照合します。', stale: '最新情報を読み直しました。内容を確認してから操作してください。',
     error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: 'キャンセル', session: '卓セッション', updated: '同期済み',
@@ -39,6 +43,8 @@ const copy = {
     receipt: '已完成結帳', receiptID: '收據編號', change: '找零', cashier: '收銀人員', close: '關閉桌次', closeTitle: '確定關閉此桌次？', closeConfirm: '確認關桌', blockers: '仍有訂單未完成，無法關桌。', noBlockers: '沒有未收款、處理中付款或未送達的訂單。',
     cashSettings: '現金收款設定', enabled: '接受現金付款', prepaid: '先付款', payLater: '後付款', save: '儲存設定',
     noCashOrders: '目前沒有待收現金訂單。', closeBlocked: '尚有未送達或未結清的訂單，無法關桌。',
+    paymentCheck: '確認付款狀態', paymentReconcile: '更新付款狀態', paymentError: '目前無法確認付款狀態，請稍後再試。', paymentReview: '需要由門店確認付款狀態。', lastPaymentCheck: '最後確認',
+    stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     retry: '以相同操作確認並重試', network: '目前無法確認操作結果。重試會比對同一筆操作。', stale: '已更新最新狀態，請確認內容後再操作。',
     error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: '取消', session: '桌次工作階段', updated: '已同步',
@@ -61,6 +67,10 @@ export function StaffApp() {
   const [settings, setSettings] = useState<CashSettings | null>(null);
   const [selectedTableID, setSelectedTableID] = useState('');
   const [detail, setDetail] = useState<SessionOperations | null>(null);
+  const [orderPayment, setOrderPayment] = useState<{ orderID: string; status: CheckoutStatus } | null>(null);
+  const [paymentBusyOrderID, setPaymentBusyOrderID] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [paymentErrorOrderID, setPaymentErrorOrderID] = useState('');
   const [dialog, setDialog] = useState<Dialog>(null);
   const [cashPreview, setCashPreview] = useState<CashPreview | null>(null);
   const [tendered, setTendered] = useState('');
@@ -79,6 +89,7 @@ export function StaffApp() {
   const kdsRequest = useRef(0);
   const settingsRequest = useRef(0);
   const detailRequest = useRef(0);
+  const paymentRequest = useRef(0);
   const hasTables = !!capabilities && (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage);
 
   const isCurrent = useCallback((requestEpoch: number, ctx: StaffContext, bearer: string) => {
@@ -91,6 +102,14 @@ export function StaffApp() {
   }, []);
 
   const table = useMemo(() => tables.find((item) => item.table_id === selectedTableID) ?? null, [tables, selectedTableID]);
+  const selectedTableRef = useRef(selectedTableID);
+  selectedTableRef.current = selectedTableID;
+  const selectedSessionRef = useRef(table?.session_id ?? '');
+  selectedSessionRef.current = table?.session_id ?? '';
+  const clearPaymentView = () => {
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
+  };
+  useEffect(() => { clearPaymentView(); }, [connected, selectedTableID, table?.session_id]);
 
   const loadTables = useCallback(async (ctx: StaffContext, bearer: string) => {
     const requestEpoch = currentEpoch(ctx, bearer);
@@ -137,6 +156,29 @@ export function StaffApp() {
     return result;
   }, [currentEpoch, isCurrent]);
 
+  const inspectPayment = useCallback(async (order: StaffOrder, reconcile = false) => {
+    if (order.payment_method !== 'STRIPE' || !table?.session_id || !capabilities?.can_cash && !capabilities?.can_serve) return;
+    const requestEpoch = currentEpoch(context, token);
+    if (requestEpoch === null) return;
+    const tableID = table.table_id;
+    const sessionID = table.session_id;
+    const requestID = ++paymentRequest.current;
+    const isPaymentViewCurrent = () => isCurrent(requestEpoch, context, token)
+      && selectedTableRef.current === tableID && selectedSessionRef.current === sessionID
+      && paymentRequest.current === requestID;
+    setPaymentBusyOrderID(order.id); setPaymentErrorOrderID(order.id); setPaymentError('');
+    try {
+      const status = reconcile
+        ? await checkoutClient.reconcile(context, token, tableID, sessionID, order.id)
+        : await checkoutClient.staffStatus(context, token, tableID, sessionID, order.id);
+      if (isPaymentViewCurrent()) setOrderPayment({ orderID: order.id, status });
+    } catch {
+      if (isPaymentViewCurrent()) setPaymentError(t.paymentError);
+    } finally {
+      if (isPaymentViewCurrent()) setPaymentBusyOrderID('');
+    }
+  }, [capabilities?.can_cash, capabilities?.can_serve, context, currentEpoch, isCurrent, t.paymentError, table, token]);
+
   const connect = useCallback(async (ctx: StaffContext, bearer: string) => {
     if (!ctx.tenantID.trim() || !ctx.storeID.trim() || !bearer.trim()) return;
     const cleanContext = { tenantID: ctx.tenantID.trim(), storeID: ctx.storeID.trim() };
@@ -147,6 +189,7 @@ export function StaffApp() {
     sessionStorage.setItem(TOKEN_KEY, cleanBearer);
     setContext(cleanContext);
     setToken(cleanBearer);
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
     setCapabilities(null); setTables([]); setKdsOrders([]); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
     pendingWrite.current = null; setBusy(false); setUncertain(false);
     setLoading(true); setError(''); setNotice('');
@@ -266,6 +309,7 @@ export function StaffApp() {
   const enterTable = async (item: StaffTable) => {
     const requestEpoch = currentEpoch(context, token);
     if (requestEpoch === null || busy || uncertain) return;
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
     setSelectedTableID(item.table_id); setError(''); setNotice(''); setCashPreview(null); setReceipt(null);
     if (item.session_id) {
       setLoading(true);
@@ -339,6 +383,7 @@ export function StaffApp() {
 
   const disconnect = () => {
     epoch.current += 1;
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
     active.current = null;
     tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1;
     sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
@@ -366,8 +411,8 @@ export function StaffApp() {
       <header className="welcome"><div><div className="eyebrow">{t.subtitle}</div><h1>{context.storeID}</h1><p>{context.tenantID}</p></div><button className="text-button" onClick={disconnect}>{t.disconnect}</button></header>
       {noOperations ? <p className="notice">{t.noAccess}</p> : <>
         <nav className="tabs staff-tabs" aria-label={locale === 'ja' ? 'スタッフ操作' : '店員操作'}>
-          {hasTables && <button className={view === 'tables' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { setView('tables'); setSelectedTableID(''); setDetail(null); }}>{t.tables}</button>}
-          {capabilities?.can_kitchen && <button className={view === 'kds' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { setView('kds'); setSelectedTableID(''); setDetail(null); }}>{t.kds}</button>}
+          {hasTables && <button className={view === 'tables' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('tables'); setSelectedTableID(''); setDetail(null); }}>{t.tables}</button>}
+          {capabilities?.can_kitchen && <button className={view === 'kds' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('kds'); setSelectedTableID(''); setDetail(null); }}>{t.kds}</button>}
           <button className="icon-button" aria-label={t.refresh} onClick={() => void refreshDashboard()} disabled={loading || busy || uncertain}>↻</button>
         </nav>
         {loading && <p role="status" className="muted">{t.loading}</p>}
@@ -388,10 +433,10 @@ export function StaffApp() {
               <button className="button primary" disabled={busy || uncertain} onClick={saveSettings}>{t.save}</button>
             </section>}
           </section>}
-          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
+          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
             <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={() => void openCashPreview()}>{t.cashSettle}</button>}</div>
-            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} canServe={capabilities.can_serve} busy={busy || uncertain} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
+            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
             <div className="staff-section-title"><h3>{t.receipts}</h3></div>
             {detail.receipts.map((item) => <ReceiptCard key={item.id} receipt={item} t={t} />)}
             {capabilities.can_serve && <button className="button quiet wide close-table" disabled={busy || uncertain} onClick={() => setDialog('close')}>{t.close}</button>}
@@ -427,8 +472,10 @@ export function StaffApp() {
   </StaffShell>;
 }
 
-function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, onAccept, onStart, onReady, onServe }: {
+function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, paymentStatus, paymentBusy = false, paymentError = '', canCheckPayment = false, onCheckPayment, onReconcilePayment, onAccept, onStart, onReady, onServe }: {
   order: StaffOrder; locale: Locale; t: typeof copy[Locale]; canServe: boolean; busy: boolean; compact?: boolean;
+  paymentStatus?: CheckoutStatus; paymentBusy?: boolean; paymentError?: string; canCheckPayment?: boolean;
+  onCheckPayment?: () => void; onReconcilePayment?: () => void;
   onAccept?: () => void; onStart?: () => void; onReady?: () => void; onServe?: () => void;
 }) {
   const activeState = order.fulfillment_status;
@@ -437,6 +484,15 @@ function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, onA
     {order.requires_staff_acceptance && !order.staff_accepted && <p className="notice">{t.waiting}</p>}
     <ul className="staff-order-lines">{order.lines.map((line, index) => <li key={`${line.product_name}-${index}`}><span>{line.product_name} × {line.quantity}{line.options.map((option, optionIndex) => <small key={`${option.group_name}-${option.option_name}-${optionIndex}`}>{option.group_name.trim() ? `${option.group_name}: ` : ''}{option.option_name}</small>)}</span>{!compact && <strong>{amountJPY(line.line_gross_jpy)}</strong>}</li>)}</ul>
     {!compact && <div className="staff-order-payment"><span>{order.payment_method === 'CASH' ? t.cash : t.stripe}</span><span>{paymentLabel(order.payment_status, t)}</span><strong>{amountJPY(order.total_gross_jpy)}</strong></div>}
+    {!compact && order.payment_method === 'STRIPE' && canCheckPayment && <div className="staff-payment-status">
+      <button className="button small quiet" disabled={busy || paymentBusy} onClick={onCheckPayment}>{t.paymentCheck}</button>
+      {paymentBusy && <p className="muted" role="status">{t.loading}</p>}
+      {paymentStatus && <p className="guest-order-status" role="status">{checkoutStateLabel(paymentStatus.state, locale)}</p>}
+      {paymentStatus?.payment_review_required && <p className="notice">{t.paymentReview}</p>}
+      {paymentStatus?.last_reconciled_at && <small>{t.lastPaymentCheck}: {new Date(paymentStatus.last_reconciled_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>}
+      {paymentError && <p className="error" role="alert">{paymentError}</p>}
+      {paymentStatus && <button className="button small primary" disabled={busy || paymentBusy} onClick={onReconcilePayment}>{paymentBusy ? t.loading : t.paymentReconcile}</button>}
+    </div>}
     <div className="staff-order-actions">
       {order.requires_staff_acceptance && !order.staff_accepted && canServe && onAccept && <button className="button small primary" disabled={busy} onClick={onAccept}>{t.receive}</button>}
       {compact && order.fulfillment_status === 'ACCEPTED' && onStart && <button className="button small primary" disabled={busy} onClick={onStart}>{t.start}</button>}
@@ -444,6 +500,21 @@ function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, onA
       {!compact && canServe && order.fulfillment_status === 'READY' && onServe && <button className="button small primary" disabled={busy} onClick={onServe}>{t.markServed}</button>}
     </div>
   </article>;
+}
+
+function checkoutStateLabel(state: CheckoutState | string, locale: Locale): string {
+  const labels: Record<string, { ja: string; zh: string }> = {
+    CREATE_PENDING: { ja: copy.ja.stateCreatePending, zh: copy.zh.stateCreatePending },
+    CREATING: { ja: copy.ja.stateCreating, zh: copy.zh.stateCreating },
+    OPEN: { ja: copy.ja.stateOpen, zh: copy.zh.stateOpen },
+    PROCESSING: { ja: copy.ja.stateProcessing, zh: copy.zh.stateProcessing },
+    UNKNOWN: { ja: copy.ja.stateUnknown, zh: copy.zh.stateUnknown },
+    PAID: { ja: copy.ja.statePaid, zh: copy.zh.statePaid },
+    EXPIRED: { ja: copy.ja.stateExpired, zh: copy.zh.stateExpired },
+    FAILED: { ja: copy.ja.stateFailed, zh: copy.zh.stateFailed },
+    REVIEW_REQUIRED: { ja: copy.ja.stateReview, zh: copy.zh.stateReview },
+  };
+  return (labels[state] ?? labels.UNKNOWN!)[locale];
 }
 
 function ReceiptCard({ receipt, t }: { receipt: Receipt; t: typeof copy[Locale] }) {

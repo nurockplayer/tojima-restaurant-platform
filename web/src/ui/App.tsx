@@ -3,6 +3,8 @@ import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client'
 import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
 import { operationsClient } from '../api/operations';
 import type { GuestOperations, GuestOrderStatus } from '../api/operations';
+import { checkoutClient, checkoutNavigation } from '../api/checkout';
+import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
 
 type Locale = 'ja' | 'zh';
@@ -20,6 +22,9 @@ const copy = {
     order: '確定した注文', orderId: '注文番号', stripeNote: '注文を確定しても、お支払いは完了しません。', cashNote: '現金のお支払いはスタッフが確認します。',
     staffWaiting: 'スタッフの確認待ち', acceptedOrder: '注文を受け付けました',
     already: 'この世代の注文はすでに確定しています。確定した内容をご確認ください。', stale: 'カートまたは価格が更新されました。最新内容で金額を確認し直してください。',
+    checkoutStatus: 'カードのお支払い', checkCheckout: '支払い状況を確認', checkoutLoading: '状況を確認しています…', continueCheckout: '支払いを続ける', checkoutSupport: 'この端末でお支払いを続けられない場合は、スタッフにお声がけください。', checkoutError: '支払い状況を確認できません。スタッフにお声がけください。',
+    checkoutUnavailable: 'カードのお支払いを準備できませんでした。注文は送信されていません。もう一度お試しください。', resumeError: '支払い画面を開けませんでした。状況を確認してから、スタッフにお声がけください。',
+    stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
     error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
     selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
@@ -38,6 +43,9 @@ const copy = {
     order: '已成立訂單', orderId: '訂單編號', stripeNote: '確認訂單後，付款仍未完成。', cashNote: '現金付款由服務人員確認收款。',
     staffWaiting: '等待店員確認', acceptedOrder: '訂單已受理',
     already: '此購物車版本已成立訂單，請查看已確認內容。', stale: '購物車或價格已更新，請重新確認最新內容與金額。',
+    checkoutStatus: '信用卡付款', checkCheckout: '確認付款狀態', checkoutLoading: '正在確認狀態…', continueCheckout: '繼續付款', checkoutSupport: '若無法在此裝置繼續付款，請洽服務人員。', checkoutError: '目前無法確認付款狀態，請洽服務人員。',
+    checkoutUnavailable: '無法準備信用卡付款，訂單尚未送出。請再試一次。', resumeError: '無法開啟付款畫面，請先確認狀態或洽服務人員。',
+    stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
     error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
     selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
@@ -83,16 +91,39 @@ function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
   return `${fulfillmentLabel} · ${payment[order.payment_status]}`;
 }
 
+function checkoutStateLabel(state: CheckoutState | string, locale: Locale): string {
+  const labels: Record<string, { ja: string; zh: string }> = {
+    CREATE_PENDING: { ja: copy.ja.stateCreatePending, zh: copy.zh.stateCreatePending },
+    CREATING: { ja: copy.ja.stateCreating, zh: copy.zh.stateCreating },
+    OPEN: { ja: copy.ja.stateOpen, zh: copy.zh.stateOpen },
+    PROCESSING: { ja: copy.ja.stateProcessing, zh: copy.zh.stateProcessing },
+    UNKNOWN: { ja: copy.ja.stateUnknown, zh: copy.zh.stateUnknown },
+    PAID: { ja: copy.ja.statePaid, zh: copy.zh.statePaid },
+    EXPIRED: { ja: copy.ja.stateExpired, zh: copy.zh.stateExpired },
+    FAILED: { ja: copy.ja.stateFailed, zh: copy.zh.stateFailed },
+    REVIEW_REQUIRED: { ja: copy.ja.stateReview, zh: copy.zh.stateReview },
+  };
+  return (labels[state] ?? labels.UNKNOWN!)[locale];
+}
+
 export function App() {
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
   const query = useMemo(entryFromURL, []);
   const [entry, setEntry] = useState<Entry | null>(null);
+  const entryRef = useRef<Entry | null>(null);
+  entryRef.current = entry;
   const mode = entry?.grant.session.mode;
   const [status, setStatus] = useState<PublicTable | null>(null);
   const [{ cart, preview }, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
   const [orders, setOrders] = useState<Order[]>([]);
   const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
+  const [checkoutOrderID, setCheckoutOrderID] = useState('');
+  const checkoutOrderRef = useRef('');
+  checkoutOrderRef.current = checkoutOrderID;
+  const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus | null>(null);
+  const [checkoutError, setCheckoutError] = useState('');
+  const [resumingOrderID, setResumingOrderID] = useState('');
   const [payment, setPayment] = useState<'STRIPE' | 'CASH'>('STRIPE');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
@@ -109,10 +140,18 @@ export function App() {
   const requestSequence = useRef(0);
   const cartRequestSequence = useRef(0);
   const orderRequestSequence = useRef(0);
+  const checkoutRequestSequence = useRef(0);
+  const checkoutViewEpoch = useRef(0);
+  const resumeRequestSequence = useRef(0);
+  const checkoutReadsInFlight = useRef(new Set<string>());
   const replay = useRef<Replay | null>(null);
   const inFlight = useRef(false);
 
   const invalidateGrant = useCallback((sessionID: string) => {
+    checkoutRequestSequence.current++;
+    checkoutViewEpoch.current++;
+    resumeRequestSequence.current++;
+    setCheckoutOrderID(''); setCheckoutStatus(null); setCheckoutError(''); setResumingOrderID('');
     sessionStorage.removeItem(storageKey(sessionID));
     setEntry((current) => current?.grant.session.id === sessionID ? null : current);
     dispatchCart({ type: 'session-cleared' }); setOrders([]); setUncertain(false); replay.current = null;
@@ -181,6 +220,10 @@ export function App() {
   };
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
+    checkoutRequestSequence.current++;
+    checkoutViewEpoch.current++;
+    resumeRequestSequence.current++;
+    setCheckoutOrderID(''); setCheckoutStatus(null); setCheckoutError(''); setResumingOrderID('');
     let menu: GuestMenu;
     try {
       menu = locator
@@ -195,6 +238,76 @@ export function App() {
     setEntry(next);
     await refresh(next);
   }, [invalidateGrant, refresh]);
+
+  const refreshCheckoutStatus = useCallback(async (current: Entry, orderID: string) => {
+    const readKey = `${current.grant.session.id}:${current.grant.table_join_token}:${orderID}`;
+    if (checkoutReadsInFlight.current.has(readKey)) return;
+    checkoutReadsInFlight.current.add(readKey);
+    const sequence = ++checkoutRequestSequence.current;
+    try {
+      const latest = await checkoutClient.status(current.grant.session.id, current.grant.table_join_token, orderID);
+      const activeEntry = entryRef.current;
+      if (sequence === checkoutRequestSequence.current && checkoutOrderRef.current === orderID && activeEntry?.grant.session.id === current.grant.session.id && activeEntry.grant.table_join_token === current.grant.table_join_token) {
+        setCheckoutStatus(latest);
+        setCheckoutError('');
+      }
+    } catch (cause) {
+      const activeEntry = entryRef.current;
+      if (sequence !== checkoutRequestSequence.current || checkoutOrderRef.current !== orderID || activeEntry?.grant.session.id !== current.grant.session.id || activeEntry.grant.table_join_token !== current.grant.table_join_token) return;
+      if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+      else { setCheckoutStatus(null); setCheckoutError(t.checkoutError); }
+    } finally {
+      checkoutReadsInFlight.current.delete(readKey);
+    }
+  }, [invalidateGrant, t.checkoutError]);
+
+  useEffect(() => {
+    if (!entry || !checkoutOrderID || tab !== 'orders') return;
+    let timer: number | undefined;
+    const poll = () => { void refreshCheckoutStatus(entry, checkoutOrderID); };
+    const schedule = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      if (document.visibilityState === 'visible') timer = window.setInterval(poll, 2500);
+    };
+    poll(); schedule(); document.addEventListener('visibilitychange', schedule);
+    return () => {
+      document.removeEventListener('visibilitychange', schedule);
+      if (timer !== undefined) window.clearInterval(timer);
+      checkoutRequestSequence.current++;
+    };
+  }, [checkoutOrderID, entry, refreshCheckoutStatus, tab]);
+
+  const selectCheckoutOrder = (orderID: string) => {
+    checkoutViewEpoch.current++;
+    resumeRequestSequence.current++;
+    checkoutOrderRef.current = orderID;
+    setCheckoutOrderID(orderID); setCheckoutStatus(null); setCheckoutError(''); setResumingOrderID('');
+  };
+
+  const resumeCheckout = async (orderID: string) => {
+    const current = entryRef.current;
+    if (!current || checkoutOrderRef.current !== orderID || checkoutStatus?.order_id !== orderID || !checkoutStatus.resume_available || resumingOrderID) return;
+    const viewEpoch = checkoutViewEpoch.current;
+    const requestID = ++resumeRequestSequence.current;
+    const isResumeViewCurrent = () => checkoutViewEpoch.current === viewEpoch
+      && resumeRequestSequence.current === requestID
+      && checkoutOrderRef.current === orderID
+      && entryRef.current?.grant.session.id === current.grant.session.id
+      && entryRef.current.grant.table_join_token === current.grant.table_join_token;
+    setResumingOrderID(orderID); setCheckoutError('');
+    try {
+      const response = await checkoutClient.resume(current.grant.session.id, orderID);
+      const destination = new URL(response.url);
+      if (destination.protocol !== 'https:') throw new Error('invalid_checkout_destination');
+      const activeEntry = entryRef.current;
+      if (isResumeViewCurrent() && activeEntry?.grant.session.id === current.grant.session.id) checkoutNavigation.assign(destination.toString());
+    } catch {
+      if (isResumeViewCurrent()) {
+        setCheckoutError(t.resumeError);
+        void refreshCheckoutStatus(current, orderID);
+      }
+    } finally { if (isResumeViewCurrent()) setResumingOrderID(''); }
+  };
 
   useEffect(() => {
     let active = true;
@@ -396,9 +509,21 @@ export function App() {
     if (!entry || !cart || !preview || preview.version !== cart.version || preview.generation !== cart.generation || busy) return;
     setBusy(true); setError(''); setNotice('');
     const key = newOperationKey();
+    if (payment === 'STRIPE') {
+      try {
+        await checkoutClient.ensureContext(entry.grant.session.id, entry.grant.table_join_token);
+      } catch {
+        setError(t.checkoutUnavailable); setBusy(false); return;
+      }
+      const activeEntry = entryRef.current;
+      if (activeEntry?.grant.session.id !== entry.grant.session.id || activeEntry.grant.table_join_token !== entry.grant.table_join_token) {
+        setBusy(false); return;
+      }
+    }
     try {
       const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, payment, key);
       adoptCart(result.cart); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
+      selectCheckoutOrder(payment === 'STRIPE' ? result.order.order_id : '');
       clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       await refresh(entry);
     } catch (cause) {
@@ -539,6 +664,17 @@ export function App() {
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : t.cash}</span></div>
           {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
+          {order.payment_method === 'STRIPE' && <div className="checkout-status-panel">
+            <strong>{t.checkoutStatus}</strong>
+            {checkoutOrderID === order.order_id && <>
+              {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status">{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
+              {!checkoutStatus && !checkoutError && <p className="muted" role="status">{t.checkoutLoading}</p>}
+              {checkoutError && <p className="error" role="alert">{checkoutError}</p>}
+              {checkoutStatus?.order_id === order.order_id && checkoutStatus.resume_available && <button className="button small primary" disabled={resumingOrderID === order.order_id} onClick={() => void resumeCheckout(order.order_id)}>{resumingOrderID === order.order_id ? t.checkoutLoading : t.continueCheckout}</button>}
+              {checkoutStatus?.order_id === order.order_id && !checkoutStatus.resume_available && !['PAID', 'EXPIRED', 'FAILED'].includes(checkoutStatus.state) && <p className="notice">{t.checkoutSupport}</p>}
+            </>}
+            <button className="button small quiet" disabled={resumingOrderID === order.order_id} onClick={() => selectCheckoutOrder(order.order_id)}>{t.checkCheckout}</button>
+          </div>}
           {order.quote?.lines.map((line) => <div className="order-line" key={line.line_id}><span>{line.name} × {line.quantity}{line.options.map((option) => <small className="order-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>{option.name} +{safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}</span><strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong></div>)}
           <div className="order-total"><span>{t.total}</span><strong>{safeAmount(order.quote?.tax.total_gross_jpy ?? order.total_gross_jpy)}</strong></div><div className="tax-row"><span>{t.tax}</span><span>{safeAmount(order.quote?.tax.total_tax_jpy)}</span></div><small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
         </article>; })}
@@ -549,5 +685,5 @@ export function App() {
 }
 
 function Shell({ children, locale, setLocale, t }: { children: React.ReactNode; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
-  return <main className="app-shell"><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header>{children}</main>;
+  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header>{children}</main>;
 }

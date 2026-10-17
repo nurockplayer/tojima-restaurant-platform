@@ -165,6 +165,22 @@ func TestCreateCheckoutRejectsBadScopeAndNeverRetriesAmbiguousResult(t *testing.
 	}
 }
 
+func TestCreateRecoveryAcceptsCompletedPaidWithoutContinuationURL(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"cs_test_recovered","object":"checkout.session","livemode":false,"mode":"payment","currency":"jpy","amount_total":330,"status":"complete","payment_status":"paid","payment_intent":"pi_recovered","expires_at":1900000000,"url":null,"metadata":{"tenant_id":"t","store_id":"s","order_id":"o","attempt_id":"a"}}`)
+	}))
+	defer server.Close()
+	p, err := New(testConfig(&http.Client{Transport: redirectTransport{target: server.URL}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := p.CreateCheckout(context.Background(), CreateCheckoutRequest{Account: AccountContext{Mode: ModeConnectedDirectFixture, StripeAccountID: testAccount}, TenantID: "t", StoreID: "s", OrderID: "o", AttemptID: "a", IdempotencyKey: "same-attempt", AmountJPY: 330, Description: "Order"})
+	if err != nil || got.Status != CheckoutComplete || got.PaymentStatus != PaymentPaid || got.PaymentIntentID != "pi_recovered" || got.URL != "" {
+		t.Fatalf("completed recovery discarded: result=%#v err=%v", got, err)
+	}
+}
+
 func TestCreateCheckoutPropagatesCanceledContextWithoutRetry(t *testing.T) {
 	var calls atomic.Int32
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))

@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
@@ -14,9 +15,10 @@ import (
 )
 
 type OrderingAPI struct {
-	Orders   *ordering.Service
-	Sessions *tablesession.Service
-	Catalog  *catalog.Service
+	Orders        *ordering.Service
+	Sessions      *tablesession.Service
+	Catalog       *catalog.Service
+	PaymentConfig *PaymentsHTTPConfig
 }
 
 // An existing P-77 product may select all 5,000 catalog options. Each key can
@@ -77,7 +79,11 @@ type commitCartRequest struct {
 // NewOrderingHandler exposes guest capabilities only. A TABLE_JOIN grant is
 // never accepted from a request body or substituted for staff/payment identity.
 func NewOrderingHandler(orders *ordering.Service, sessions *tablesession.Service, menus *catalog.Service) http.Handler {
-	a := OrderingAPI{orders, sessions, menus}
+	return newOrderingHandler(orders, sessions, menus, nil)
+}
+
+func newOrderingHandler(orders *ordering.Service, sessions *tablesession.Service, menus *catalog.Service, paymentConfig *PaymentsHTTPConfig) http.Handler {
+	a := OrderingAPI{Orders: orders, Sessions: sessions, Catalog: menus, PaymentConfig: paymentConfig}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/guest/sessions/{sessionID}/menu", a.menu)
 	mux.HandleFunc("GET /v1/guest/sessions/{sessionID}/cart", a.cart)
@@ -152,7 +158,30 @@ func (a OrderingAPI) commit(w http.ResponseWriter, r *http.Request) {
 	if !decodeCart(w, r, &body) {
 		return
 	}
-	c, err := a.Orders.Commit(r.Context(), ordering.CommitRequest{SessionID: r.PathValue("sessionID"), GrantToken: joinToken(r), ExpectedGeneration: body.Generation, ExpectedVersion: body.Version, IdempotencyKey: r.Header.Get("Idempotency-Key"), PreviewFingerprint: body.Fingerprint, PaymentMethod: body.PaymentMethod})
+	input := ordering.CommitRequest{SessionID: r.PathValue("sessionID"), GrantToken: joinToken(r), ExpectedGeneration: body.Generation, ExpectedVersion: body.Version, IdempotencyKey: r.Header.Get("Idempotency-Key"), PreviewFingerprint: body.Fingerprint, PaymentMethod: body.PaymentMethod}
+	if body.PaymentMethod == ordering.Stripe && a.PaymentConfig != nil {
+		if !a.PaymentConfig.originAllowed(r.Header.Get("Origin")) || !a.PaymentConfig.requestHostAllowed(r) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		cookie, err := r.Cookie(a.PaymentConfig.cookieName())
+		if err != nil {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		proof, err := a.PaymentConfig.Proofs.Verify(cookie.Value, time.Now().UTC())
+		if err != nil || len(proof.Hash) != len(input.CheckoutProofHash) {
+			writeError(w, http.StatusForbidden, "forbidden")
+			return
+		}
+		copy(input.CheckoutProofHash[:], proof.Hash)
+		input.CheckoutProofExpiresAt = proof.ExpiresAt
+	}
+	c, err := a.Orders.Commit(r.Context(), input)
+	if body.PaymentMethod == ordering.Stripe && errors.Is(err, ordering.ErrPaymentUnavailable) {
+		writeError(w, http.StatusServiceUnavailable, "payment_unavailable")
+		return
+	}
 	a.respond(w, r, map[string]any{"outcome": c.Outcome, "order": safeOrder(c.Order), "cart": c.Cart}, err)
 }
 func (a OrderingAPI) orders(w http.ResponseWriter, r *http.Request) {

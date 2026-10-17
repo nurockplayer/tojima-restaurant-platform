@@ -166,6 +166,82 @@ describe('staff operations', () => {
     expect(closeCalls).toBe(0);
   });
 
+  it('lets an authorized cashier read and explicitly reconcile Stripe order status', async () => {
+    let statusReads = 0;
+    let reconciles = 0;
+    const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/orders/order-1/payment') && init.method !== 'POST') { statusReads++; return json(paymentStatus('OPEN')); }
+      if (url.endsWith('/orders/order-1/payment/reconcile') && init.method === 'POST') { reconciles++; return json(paymentStatus('PAID')); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    expect(host?.textContent).toContain('クレジットカード');
+    await click(host!, '支払い状況を確認');
+    expect(statusReads).toBe(1);
+    expect(host?.textContent).toContain('お支払い手続きができます');
+    await click(host!, '最新の支払い状況を確認');
+    expect(reconciles).toBe(1);
+    expect(host?.textContent).toContain('お支払い済み');
+  });
+
+  it('does not expose payment reconciliation to a manager-only account', async () => {
+    let paymentRequests = 0;
+    const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/operations/cash-settings`) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.includes('/payment')) { paymentRequests++; return json(paymentStatus('OPEN')); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    expect(host?.textContent).toContain('クレジットカード');
+    expect(host?.textContent).not.toContain('支払い状況を確認');
+    expect(paymentRequests).toBe(0);
+  });
+
+  it('shows an error on the order card when the first payment status read fails', async () => {
+    const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/orders/order-1/payment') && init.method !== 'POST') return json({ error: 'temporarily_unavailable' }, 503);
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, '支払い状況を確認');
+    expect(host?.textContent).toContain('支払い状況を確認できません。時間をおいてお試しください。');
+  });
+
+  it('does not show a delayed payment status after staff disconnects', async () => {
+    const statusResponse = deferred<Response>();
+    const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/orders/order-1/payment') && init.method !== 'POST') return statusResponse.promise;
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, '支払い状況を確認');
+    await click(host!, '切断');
+    statusResponse.resolve(json(paymentStatus('PAID')));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.textContent).toContain('接続');
+    expect(host?.textContent).not.toContain('お支払い済み');
+  });
+
   it('shows reception only with service capability and requires explicit acceptance for direct-scan orders', async () => {
     let accepted = false;
     let acceptCalls = 0;
@@ -291,5 +367,8 @@ async function setField(container: Element, label: string, value: string) {
 function staffOrder(overrides: Partial<StaffOrder> = {}): StaffOrder { return { ...defaultOrder(), ...overrides }; }
 function defaultOrder(): StaffOrder {
   return { id: 'order-1', session_id: 'session-1', table_id: 'table-1', table_name: 'T1', generation: 1, payment_method: 'CASH' as const, payment_status: 'UNPAID' as const, fulfillment_status: 'WAITING' as const, requires_staff_acceptance: false, staff_accepted: true, version: 3, total_gross_jpy: '1210', created_at: '2026-10-18T00:59:00Z', lines: [{ product_name: 'ラーメン', quantity: 1, unit_gross_jpy: '1100', line_gross_jpy: '1210', options: [{ group_name: 'サイズ', option_name: '大盛り', price_delta_minor: '110' }] }] };
+}
+function paymentStatus(state: string) {
+  return { order_id: 'order-1', state, last_reconciled_at: '2026-10-18T12:00:00Z', payment_review_required: state === 'REVIEW_REQUIRED', resume_available: false };
 }
 function json(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }); }

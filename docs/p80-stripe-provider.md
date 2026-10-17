@@ -25,7 +25,8 @@ merchant-of-record, payout, or real connected-account operating decision.
 Production remains unconfigured until the owner supplies the concrete
 merchant/account mapping, approved Stripe charge mode, authorized test
 credentials, and endpoint signing secrets. No credential or merchant mapping
-is checked into this repository.
+for a real merchant is checked into this repository. Synthetic mappings exist
+only in the isolated test fixtures.
 
 `CreateCheckout` accepts server-calculated positive integer JPY up to
 `Config.MaxAmountJPY`, server-owned order/attempt/scope references, a stable
@@ -69,13 +70,13 @@ secret, request body, or Checkout URL.
 
 ## Service responsibilities and limits
 
-The future service layer must own a durable one-attempt-per-order invariant,
+The `internal/payments` service owns the durable one-attempt-per-order invariant,
 tenant/store-to-Stripe-account mapping, immutable attempt and request
 fingerprint, original-submitter capability, provider account/scope/amount
 checks, retry/idempotency horizon, webhook event deduplication, monotone
 payment-state transitions, late-payment holds, and safe order-release policy.
-Stripe idempotency retention is finite (at least 24 hours); the service must
-choose a conservative retry window shorter than that and never issue a fresh
+Stripe idempotency retention is finite (at least 24 hours); the service requires
+a configured retry window shorter than that and never issues a fresh
 create request after an ambiguous result has passed its safe retry horizon.
 The adapter alone makes no exactly-once or payment-fulfillment guarantee.
 
@@ -108,7 +109,7 @@ Production Secret Manager selection remains dependent on the deployment
 platform and is not decided by this test adapter.
 
 The original submitter context is a separate signed random token from
-`internal/checkoutproof`, established before commit by the later HTTP adapter.
+`internal/checkoutproof`, established before commit by the payment HTTP adapter.
 Each winning order binds only its hash and fixed expiry. This primitive does
 not itself authorize a payment, issue an HTTP cookie, or replace TABLE_JOIN,
 ORDER_READ, or MOD-08 staff identity.

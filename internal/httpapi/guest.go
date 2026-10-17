@@ -12,9 +12,17 @@ import (
 // NewGuestHandler composes the existing guest entry/menu capabilities with the
 // shared cart. Staff/admin routes are deliberately absent from this surface.
 func NewGuestHandler(sessions *tablesession.Service, menus *catalog.Service, orders *ordering.Service, ops ...*operations.Service) http.Handler {
+	var opsService *operations.Service
+	if len(ops) == 1 {
+		opsService = ops[0]
+	}
+	return newGuestHandler(sessions, menus, orders, opsService, nil)
+}
+
+func newGuestHandler(sessions *tablesession.Service, menus *catalog.Service, orders *ordering.Service, ops *operations.Service, paymentConfig *PaymentsHTTPConfig) http.Handler {
 	s := NewSessionHandler(sessions, nil, nil)
 	m := NewMenuHandler(menus, nil, nil)
-	o := NewOrderingHandler(orders, sessions, menus)
+	o := newOrderingHandler(orders, sessions, menus, paymentConfig)
 	mux := http.NewServeMux()
 	mux.Handle("/v1/guest/tables/{locator}", s)
 	mux.Handle("/v1/guest/tables/{locator}/join", s)
@@ -25,8 +33,8 @@ func NewGuestHandler(sessions *tablesession.Service, menus *catalog.Service, ord
 	mux.Handle("/v1/guest/sessions/{sessionID}/cart", o)
 	mux.Handle("/v1/guest/sessions/{sessionID}/cart/", o)
 	mux.Handle("/v1/guest/sessions/{sessionID}/orders", o)
-	if len(ops) == 1 && ops[0] != nil {
-		mux.Handle("/v1/guest/sessions/{sessionID}/operations", NewOperationsHandler(ops[0], sessions, nil, nil))
+	if ops != nil {
+		mux.Handle("/v1/guest/sessions/{sessionID}/operations", NewOperationsHandler(ops, sessions, nil, nil))
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-store")
