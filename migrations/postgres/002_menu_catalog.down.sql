@@ -1,0 +1,18 @@
+DROP TABLE store_option_availability;
+DROP TABLE menu_admin_audit;
+DROP TABLE store_product_availability;
+DROP TABLE store_product_price_overrides;
+DROP TABLE store_menu_bindings;
+DROP TABLE menu_revision_options;
+DROP TABLE menu_revision_option_groups;
+DROP TABLE menu_revision_products;
+DROP TABLE menu_revision_categories;
+DROP TABLE menu_draft_options;
+DROP TABLE menu_draft_option_groups;
+DROP TABLE menu_draft_products;
+DROP TABLE menu_draft_categories;
+ALTER TABLE menu_catalogs DROP CONSTRAINT menu_catalog_current_revision_fk;
+ALTER TABLE menu_catalogs DROP CONSTRAINT menu_catalog_draft_base_revision_fk;
+DROP TABLE menu_catalog_revisions;
+DROP TABLE menu_catalogs;
+DROP FUNCTION reject_menu_revision_mutation();

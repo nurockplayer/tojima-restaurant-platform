@@ -20,4 +20,4 @@ This records the staged relational contracts, not production deployment approval
 
 繁體中文：Go 是授權、定價、送單與付款狀態權威。必須用服務端資料所屬與目前 membership 驗權；S0 的型別／契約測試只是後續實作的起點，尚未證明真實 DB 併發與交易安全。
 
-P-75 is integrated through PR #1 and the PostgreSQL test implementation gate is resolved. P-76 requires its own exact-head tests and independent review. P-77 follows P-76 acceptance; P-78 also requires P-77. Historical specification issue hierarchy alone does not establish readiness.
+P-75 and P-76 are integrated through PR #1 and PR #2 with independent review and PostgreSQL CI. The PostgreSQL test engine decision is resolved. The P-77 non-tax catalog candidate retains the [tax gate and S6 boundaries](p77-test-scope.md); P-78 still requires P-77 acceptance. Historical specification issue hierarchy alone does not establish readiness.

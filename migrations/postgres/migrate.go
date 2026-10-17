@@ -12,7 +12,16 @@ import (
 //go:embed *.sql
 var files embed.FS
 
-const migrationVersion = 1
+type migration struct {
+	version int
+	up      string
+	down    string
+}
+
+var migrations = []migration{
+	{version: 1, up: "001_table_sessions.up.sql", down: "001_table_sessions.down.sql"},
+	{version: 2, up: "002_menu_catalog.up.sql", down: "002_menu_catalog.down.sql"},
+}
 
 // Up applies all migrations atomically and serializes concurrent processes.
 func Up(ctx context.Context, conn *pgx.Conn) error {
@@ -27,27 +36,30 @@ func Up(ctx context.Context, conn *pgx.Conn) error {
 	if _, err = tx.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())`); err != nil {
 		return err
 	}
-	var applied bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)", migrationVersion).Scan(&applied); err != nil {
-		return err
-	}
-	if !applied {
-		migration, readErr := files.ReadFile("001_table_sessions.up.sql")
+	for _, item := range migrations {
+		var applied bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)", item.version).Scan(&applied); err != nil {
+			return err
+		}
+		if applied {
+			continue
+		}
+		migrationSQL, readErr := files.ReadFile(item.up)
 		if readErr != nil {
 			return readErr
 		}
-		if _, err = tx.Exec(ctx, string(migration)); err != nil {
+		if _, err = tx.Exec(ctx, string(migrationSQL)); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES ($1)", migrationVersion); err != nil {
+		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES ($1)", item.version); err != nil {
 			return err
 		}
 	}
 	return tx.Commit(ctx)
 }
 
-// Down removes the P-76 schema in one transaction. It is intended for controlled
-// test/schema lifecycle use; callers must select the target schema themselves.
+// Down removes all installed schemas in one transaction. It is intended for
+// controlled test/schema lifecycle use; callers select the target schema.
 func Down(ctx context.Context, conn *pgx.Conn) error {
 	tx, err := conn.Begin(ctx)
 	if err != nil {
@@ -64,19 +76,23 @@ func Down(ctx context.Context, conn *pgx.Conn) error {
 	if !exists {
 		return tx.Commit(ctx)
 	}
-	var applied bool
-	if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)", migrationVersion).Scan(&applied); err != nil {
-		return err
-	}
-	if applied {
-		migration, readErr := files.ReadFile("001_table_sessions.down.sql")
+	for i := len(migrations) - 1; i >= 0; i-- {
+		item := migrations[i]
+		var applied bool
+		if err = tx.QueryRow(ctx, "SELECT EXISTS (SELECT 1 FROM schema_migrations WHERE version=$1)", item.version).Scan(&applied); err != nil {
+			return err
+		}
+		if !applied {
+			continue
+		}
+		migrationSQL, readErr := files.ReadFile(item.down)
 		if readErr != nil {
 			return readErr
 		}
-		if _, err = tx.Exec(ctx, string(migration)); err != nil {
+		if _, err = tx.Exec(ctx, string(migrationSQL)); err != nil {
 			return err
 		}
-		if _, err = tx.Exec(ctx, "DELETE FROM schema_migrations WHERE version=$1", migrationVersion); err != nil {
+		if _, err = tx.Exec(ctx, "DELETE FROM schema_migrations WHERE version=$1", item.version); err != nil {
 			return err
 		}
 	}
