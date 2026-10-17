@@ -45,6 +45,60 @@ describe('catalog admin UI', () => {
     expect((screen.getByRole('button', { name: '確認した内容を公開' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('summarizes nonblocking additions, text and price changes from the saved candidate with linked-store impact', async () => {
+    installContext();
+    const published = draft();
+    const candidate = draft();
+    candidate.version = 8;
+    candidate.categories[0]!.name = '料理と新着';
+    candidate.categories[0]!.products[0]!.base_price_minor = '1000';
+    candidate.categories[0]!.products[0]!.option_groups.push({ key: 'size', name: 'サイズ', min_select: 0, max_select: 1, position: 0, options: [{ key: 'large', name: '大盛り', price_delta_minor: '100', position: 0, active: true }] });
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: published.categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(candidate);
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    vi.spyOn(catalogClient, 'previewCompany').mockResolvedValue({ draft_version: 8, published_revision: 4, linked_store_count: 3, can_publish: true, issues: [], preview_fingerprint: 'checked-8' });
+    await mount();
+
+    await user.click(screen.getByRole('button', { name: '公開前チェック' }));
+
+    const summary = await screen.findByLabelText('公開内容の変更概要');
+    expect(summary.textContent).toContain('料理 → 料理と新着');
+    expect(summary.textContent).toContain('定食: ¥900 → ¥1,000');
+    expect(summary.textContent).toContain('定食 / サイズ');
+    expect(summary.textContent).toContain('定食 / 大盛り');
+    expect(summary.textContent).toContain('連動中の店舗: 3');
+    expect(summary.textContent).toContain('公開可否は下記のサーバー検証結果');
+    expect(screen.getByRole('button', { name: '確認した内容を公開' })).not.toHaveProperty('disabled', true);
+
+    await user.clear(screen.getByLabelText('説明'));
+    await user.type(screen.getByLabelText('説明'), '編集後の説明');
+    expect(screen.queryByLabelText('公開内容の変更概要')).toBeNull();
+    expect((screen.getByRole('button', { name: '確認した内容を公開' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('identifies a required-choice rule change separately while server issues remain the publish authority', async () => {
+    installContext();
+    const published = draft();
+    published.categories[0]!.products[0]!.option_groups = [{ key: 'size', name: 'サイズ', min_select: 1, max_select: 1, position: 0, options: [{ key: 'normal', name: '普通', price_delta_minor: '0', position: 0, active: true }] }];
+    const candidate = structuredClone(published);
+    candidate.version = 8;
+    candidate.categories[0]!.products[0]!.option_groups[0]!.min_select = 2;
+    candidate.categories[0]!.products[0]!.option_groups[0]!.max_select = 2;
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: published.categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(candidate);
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    vi.spyOn(catalogClient, 'previewCompany').mockResolvedValue({ draft_version: 8, published_revision: 4, linked_store_count: 3, can_publish: false, issues: [{ code: 'REQUIRED_GROUP_MIN_INCREASED', product_key: 'meal', group_key: 'size' }], preview_fingerprint: 'blocked-8' });
+    await mount();
+
+    await user.click(screen.getByRole('button', { name: '公開前チェック' }));
+
+    const summary = await screen.findByLabelText('公開内容の変更概要');
+    expect(summary.textContent).toContain('必須選択ルールの変更 (1)');
+    expect(summary.textContent).toContain('定食 / サイズ: 1–1 → 2–2');
+    expect(screen.getByText('必須選択数を増やすと既存店舗で注文できなくなる可能性があります。')).toBeTruthy();
+    expect((screen.getByRole('button', { name: '確認した内容を公開' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('adds option groups and options through the dynamic structured editor', async () => {
     installContext();
     vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });

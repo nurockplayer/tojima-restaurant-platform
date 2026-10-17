@@ -30,6 +30,8 @@ const copy = {
     addCategory: 'カテゴリを追加', addProduct: '商品を追加', addGroup: '選択肢グループを追加', addOption: '選択肢を追加', remove: '削除', categoryName: 'カテゴリ名', productName: '商品名', description: '説明', basePrice: '基本価格', optionGroup: '選択肢グループ', groupName: 'グループ名', min: '必須の最小数', max: '選択できる最大数', optionName: '選択肢名', extraPrice: '追加料金', active: '販売対象',
     saveDraft: '草稿を保存', preview: '公開前チェック', publish: '確認した内容を公開', stale: '内容が更新されています。最新情報を読み込み、もう一度確認してください。', unsaved: '未保存の変更があります。保存後に公開前チェックを行ってください。', previewNeeded: '公開前チェックを行い、問題がないことを確認してください。', previewValid: '公開可能です。確認した内容を公開できます。', previewBlocked: '修正が必要な項目があります。修正後にもう一度チェックしてください。', noIssues: '公開前チェックに問題はありません。',
     newProductPending: '新しい商品と選択肢は、連動中の各店舗で確認されるまで販売できません。', issueNewGroup: '販売中の商品に新しい必須グループを追加できません。', issueOptionalRequired: '販売中の商品で任意グループを必須に変更できません。', issueMinIncrease: '必須選択数を増やすと既存店舗で注文できなくなる可能性があります。', issueChoiceShortage: 'この店舗では販売中の必須選択肢が不足します。', issueFallback: '公開内容の確認が必要です。',
+    changeSummaryTitle: '公開内容の変更概要', changeSummaryAdvisory: 'この概要は草稿と公開版の差分です。公開可否は下記のサーバー検証結果を確認してください。', noCatalogChanges: '公開版からの変更はありません。',
+    addedCategory: '追加カテゴリ', removedCategory: '削除カテゴリ', addedProduct: '追加商品', removedProduct: '削除商品', addedGroup: '追加選択肢グループ', removedGroup: '削除選択肢グループ', addedOption: '追加選択肢', removedOption: '削除選択肢', changedText: '名称・説明の変更', changedPrice: '価格の変更', changedRequiredRule: '必須選択ルールの変更', changedSalesStatus: '販売対象の変更', moreItems: (count: number) => `ほか${count}件`,
     modeLinked: '本部メニューと連動', modeDetached: 'この店舗の専用メニュー', sourcePrice: '本部基本価格', detachedBasePrice: '店舗メニューの基本価格', overridePrice: 'この店舗の価格', effectivePrice: '現在の販売価格', resetPrice: '本部価格に戻す', savePrice: '店舗価格を保存', availability: '販売状態', pending: '店舗確認待ち', available: '販売中', paused: '一時停止', confirmSale: '販売を確認', pause: '販売を一時停止', reopen: '販売を再開', reason: '停止理由', reasonRequired: '停止理由を入力してください。',
     detach: '専用メニューに切り替える', detachExplain: '現在の公開メニューを複製します。以後、本部の公開はこの店舗に反映されません。', detachConfirm: '複製して切り替える', cancel: 'キャンセル', detachedDraft: '店舗専用メニューの草稿', saveStoreDraft: '店舗草稿を保存', publishStoreDraft: '店舗メニューを公開',
     unauthorized: 'この認証情報では表示できません。許可されたテスト用アクセストークンを確認してください。', network: '通信を完了できませんでした。最新状態を更新してから操作してください。', genericError: '操作を完了できませんでした。最新状態を確認してください。',
@@ -42,6 +44,8 @@ const copy = {
     addCategory: '新增分類', addProduct: '新增商品', addGroup: '新增選項群組', addOption: '新增選項', remove: '刪除', categoryName: '分類名稱', productName: '商品名稱', description: '說明', basePrice: '基本價格', optionGroup: '選項群組', groupName: '群組名稱', min: '必選最少數量', max: '最多選擇數量', optionName: '選項名稱', extraPrice: '加價金額', active: '納入販售',
     saveDraft: '儲存草稿', preview: '檢查發布內容', publish: '發布已確認內容', stale: '內容已更新。請重新載入最新狀態，再次檢查。', unsaved: '有尚未儲存的變更。儲存後再檢查發布內容。', previewNeeded: '請先檢查發布內容，確認沒有問題。', previewValid: '可以發布。請確認後再發布。', previewBlocked: '有需要修正的項目，修正後請重新檢查。', noIssues: '檢查完成，沒有發現發布問題。',
     newProductPending: '新增商品與選項在連動分店確認前不會開放販售。', issueNewGroup: '已販售商品不能新增必選群組。', issueOptionalRequired: '不能將已販售商品的可選群組改為必選。', issueMinIncrease: '提高必選數量可能導致現有分店無法接單。', issueChoiceShortage: '此分店仍在販售的必選項目不足。', issueFallback: '發布內容需要確認。',
+    changeSummaryTitle: '發布內容變更摘要', changeSummaryAdvisory: '此摘要比較草稿與已發布版本。是否可發布仍以以下伺服器檢查結果為準。', noCatalogChanges: '與已發布版本相比沒有變更。',
+    addedCategory: '新增分類', removedCategory: '刪除分類', addedProduct: '新增商品', removedProduct: '刪除商品', addedGroup: '新增選項群組', removedGroup: '刪除選項群組', addedOption: '新增選項', removedOption: '刪除選項', changedText: '名稱或說明變更', changedPrice: '價格變更', changedRequiredRule: '必選規則變更', changedSalesStatus: '販售狀態變更', moreItems: (count: number) => `另有 ${count} 項`,
     modeLinked: '連動總部菜單', modeDetached: '分店專用菜單', sourcePrice: '總部基本價格', detachedBasePrice: '分店菜單基本價格', overridePrice: '本店價格', effectivePrice: '目前售價', resetPrice: '恢復總部價格', savePrice: '儲存分店價格', availability: '販售狀態', pending: '待分店確認', available: '販售中', paused: '暫停販售', confirmSale: '確認開放販售', pause: '暫停販售', reopen: '恢復販售', reason: '停售原因', reasonRequired: '請輸入停售原因。',
     detach: '切換為分店專用菜單', detachExplain: '複製目前已發布菜單。之後總部發布內容不會套用至此分店。', detachConfirm: '複製並切換', cancel: '取消', detachedDraft: '分店專用菜單草稿', saveStoreDraft: '儲存分店草稿', publishStoreDraft: '發布分店菜單',
     unauthorized: '此權杖無法檢視此內容。請確認使用已授權的測試用存取權杖。', network: '無法完成連線。請先更新最新狀態，再重新操作。', genericError: '無法完成操作，請確認最新狀態。',
@@ -90,6 +94,9 @@ export function CatalogApp() {
   const storeDirty = !!storeDraft && !!storeSaved && !sameCatalog(storeDraft, storeSaved);
   const companyCanSave = !!companyDraft && companyDirty && canWriteDraft(companyDraft);
   const storeCanSave = !!storeDraft && storeDirty && canWriteDraft(storeDraft);
+  const currentPreview = !!preview && !!published && !!companyDraft && !!companySaved && !companyDirty
+    && preview.draft_version === companyDraft.version && preview.draft_version === companySaved.version
+    && preview.published_revision === published.revision ? preview : null;
   const resetData = useCallback(() => {
     previewEpoch.current++;
     setPreviewBusy(false);
@@ -351,11 +358,11 @@ export function CatalogApp() {
         <div className="catalog-actions">
           <button type="button" className="button quiet" disabled={!companyCanSave || busy} onClick={() => void saveCompany()}>{t.saveDraft}</button>
           <button type="button" className="button quiet" disabled={companyDirty || busy || previewBusy} onClick={() => void runPreview()}>{previewBusy ? t.loading : t.preview}</button>
-          <button type="button" className="button primary" disabled={!preview || !preview.can_publish || preview.draft_version !== companyDraft.version || companyDirty || busy || previewBusy} onClick={() => void publishCompany()}>{t.publish}</button>
+          <button type="button" className="button primary" disabled={!currentPreview || !currentPreview.can_publish || busy || previewBusy} onClick={() => void publishCompany()}>{t.publish}</button>
         </div>
         {companyError && <p className="error" role="alert">{companyError}</p>}
         {companyDirty && <p className="muted">{t.unsaved}</p>}
-        {preview && <PreviewPanel preview={preview} draft={companyDraft} published={published} t={t} />}
+        {currentPreview && companySaved && <PreviewPanel preview={currentPreview} candidate={companySaved} published={published} t={t} />}
       </section>}
       {panel === 'store' && hasStore && storeMenu && <section className="catalog-panel" aria-label={t.storeMenu}>
         <div className="catalog-summary"><span>{storeMenu.mode === 'LINKED' ? t.modeLinked : t.modeDetached}</span><span>{t.revision}: <strong>{storeMenu.revision}</strong></span></div>
@@ -426,9 +433,17 @@ function OptionFields({ control, register, categoryIndex, productIndex, groupInd
   </fieldset>;
 }
 
-function PreviewPanel({ preview, draft, published, t }: { preview: CompanyPreview; draft: CatalogData; published: CompanyPublished | null; t: typeof copy[Locale] }) {
-  const names = useMemo(() => nameIndex(draft, published), [draft, published]);
+function PreviewPanel({ preview, candidate, published, t }: { preview: CompanyPreview; candidate: CatalogData; published: CompanyPublished; t: typeof copy[Locale] }) {
+  const names = useMemo(() => nameIndex(candidate, published), [candidate, published]);
+  const changes = useMemo(() => summarizeChanges(published, candidate, t), [candidate, published, t]);
   return <section className={`catalog-preview ${preview.can_publish ? 'is-clear' : 'has-issues'}`} aria-label={t.preview}>
+    <div className="catalog-change-summary" aria-label={t.changeSummaryTitle}>
+      <h3>{t.changeSummaryTitle}</h3><p>{t.changeSummaryAdvisory}</p>
+      {changes.length === 0 ? <p>{t.noCatalogChanges}</p> : <ul>{changes.map((change) => <li key={change.kind}>
+        <strong>{t[change.kind]} ({change.items.length})</strong> {change.items.slice(0, 4).join(' · ')}{change.items.length > 4 ? ` · ${t.moreItems(change.items.length - 4)}` : ''}
+      </li>)}</ul>}
+      <p>{t.linkedCount}: {preview.linked_store_count}</p>
+    </div>
     <h2>{t.preview}</h2><p>{preview.can_publish ? t.noIssues : t.previewBlocked}</p>
     {preview.issues.length > 0 && <ul>{preview.issues.map((issue, index) => <li key={`${issue.code}:${issue.product_key}:${issue.group_key}:${issue.store_id}:${index}`}>
       <strong>{names.product(issue.product_key)}</strong>{issue.group_key && <span> · {names.group(issue.product_key, issue.group_key)}</span>}
@@ -472,6 +487,67 @@ function AvailabilityControl({ targetKey, label, value, version, target, canPaus
 function AvailabilityBadge({ value, t }: { value: Availability; t: typeof copy[Locale] }) {
   const label = value === 'AVAILABLE' ? t.available : value === 'PAUSED' ? t.paused : t.pending;
   return <span className={`availability-badge availability-${value.toLowerCase()}`}>{label}</span>;
+}
+
+type ChangeKind = 'addedCategory' | 'removedCategory' | 'addedProduct' | 'removedProduct' | 'addedGroup' | 'removedGroup' | 'addedOption' | 'removedOption' | 'changedText' | 'changedPrice' | 'changedRequiredRule' | 'changedSalesStatus';
+interface CatalogChange { kind: ChangeKind; items: string[] }
+
+function summarizeChanges(published: CatalogData, candidate: CatalogData, t: typeof copy[Locale]): CatalogChange[] {
+  const rows = new Map<ChangeKind, string[]>();
+  const add = (kind: ChangeKind, item: string) => rows.set(kind, [...(rows.get(kind) ?? []), item]);
+  const oldCategories = new Map(published.categories.map((item) => [item.key, item]));
+  const newCategories = new Map(candidate.categories.map((item) => [item.key, item]));
+  for (const [key, category] of newCategories) if (!oldCategories.has(key)) add('addedCategory', category.name);
+  for (const [key, category] of oldCategories) if (!newCategories.has(key)) add('removedCategory', category.name);
+  for (const [key, current] of newCategories) {
+    const old = oldCategories.get(key);
+    if (old && old.name !== current.name) add('changedText', `${old.name} → ${current.name}`);
+  }
+
+  const products = (catalog: CatalogData) => catalog.categories.flatMap((category) => category.products.map((product) => ({ product, categoryName: category.name })));
+  const oldProducts = new Map(products(published).map((row) => [row.product.key, row]));
+  const newProducts = new Map(products(candidate).map((row) => [row.product.key, row]));
+  for (const [key, row] of newProducts) if (!oldProducts.has(key)) add('addedProduct', row.product.name);
+  for (const [key, row] of oldProducts) if (!newProducts.has(key)) add('removedProduct', row.product.name);
+  for (const [key, row] of newProducts) {
+    const previous = oldProducts.get(key)?.product;
+    if (!previous) continue;
+    if (previous.name !== row.product.name) add('changedText', `${previous.name} → ${row.product.name}`);
+    else if ((previous.description ?? '') !== (row.product.description ?? '')) add('changedText', `${row.product.name} (${t.description})`);
+    if (String(previous.base_price_minor) !== String(row.product.base_price_minor)) add('changedPrice', `${row.product.name}: ${amountJPY(previous.base_price_minor)} → ${amountJPY(row.product.base_price_minor)}`);
+    if (previous.active !== row.product.active) add('changedSalesStatus', row.product.name);
+  }
+
+  const groups = (catalog: CatalogData) => products(catalog).flatMap(({ product }) => product.option_groups.map((group) => ({ productKey: product.key, productName: product.name, group })));
+  const groupIdentity = (row: ReturnType<typeof groups>[number]) => `${row.productKey}\0${row.group.key}`;
+  const oldGroups = new Map(groups(published).map((row) => [groupIdentity(row), row]));
+  const newGroups = new Map(groups(candidate).map((row) => [groupIdentity(row), row]));
+  for (const [key, row] of newGroups) if (!oldGroups.has(key)) add('addedGroup', `${row.productName} / ${row.group.name}`);
+  for (const [key, row] of oldGroups) if (!newGroups.has(key)) add('removedGroup', `${row.productName} / ${row.group.name}`);
+  for (const [key, row] of newGroups) {
+    const previous = oldGroups.get(key)?.group;
+    if (!previous) continue;
+    if (previous.name !== row.group.name) add('changedText', `${previous.name} → ${row.group.name}`);
+    if (previous.min_select !== row.group.min_select || previous.max_select !== row.group.max_select) {
+      add('changedRequiredRule', `${row.productName} / ${row.group.name}: ${previous.min_select}–${previous.max_select} → ${row.group.min_select}–${row.group.max_select}`);
+    }
+  }
+
+  const options = (catalog: CatalogData) => groups(catalog).flatMap(({ productKey, productName, group }) => group.options.map((option) => ({ productKey, productName, groupName: group.name, groupKey: group.key, option })));
+  const optionIdentity = (row: ReturnType<typeof options>[number]) => `${row.productKey}\0${row.groupKey}\0${row.option.key}`;
+  const oldOptions = new Map(options(published).map((row) => [optionIdentity(row), row]));
+  const newOptions = new Map(options(candidate).map((row) => [optionIdentity(row), row]));
+  for (const [key, row] of newOptions) if (!oldOptions.has(key)) add('addedOption', `${row.productName} / ${row.option.name}`);
+  for (const [key, row] of oldOptions) if (!newOptions.has(key)) add('removedOption', `${row.productName} / ${row.option.name}`);
+  for (const [key, row] of newOptions) {
+    const previous = oldOptions.get(key)?.option;
+    if (!previous) continue;
+    if (previous.name !== row.option.name) add('changedText', `${previous.name} → ${row.option.name}`);
+    if (String(previous.price_delta_minor) !== String(row.option.price_delta_minor)) add('changedPrice', `${row.productName} / ${row.option.name}: ${amountJPY(previous.price_delta_minor)} → ${amountJPY(row.option.price_delta_minor)}`);
+    if (previous.active !== row.option.active) add('changedSalesStatus', `${row.productName} / ${row.option.name}`);
+  }
+
+  return [...rows].map(([kind, items]) => ({ kind, items }));
 }
 
 function sameCatalog(a: CatalogData, b: CatalogData) { return JSON.stringify(a.categories) === JSON.stringify(b.categories); }

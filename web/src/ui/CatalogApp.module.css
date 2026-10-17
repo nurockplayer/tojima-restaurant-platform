@@ -209,6 +209,28 @@
   margin: 4px 0 0;
 }
 
+.catalogScope :global(.catalog-change-summary) {
+  margin: 0 0 18px;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.catalogScope :global(.catalog-change-summary h3) {
+  margin: 0 0 6px;
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.catalogScope :global(.catalog-change-summary p) {
+  margin: 5px 0;
+}
+
+.catalogScope :global(.catalog-change-summary ul) {
+  margin: 8px 0;
+}
+
 .catalogScope :global(.catalog-store-list) {
   display: grid;
   gap: 14px;
