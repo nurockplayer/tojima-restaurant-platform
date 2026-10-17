@@ -87,6 +87,7 @@ export function StaffApp() {
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const openerRef = useRef<HTMLButtonElement | null>(null);
+  const kdsPoll = useRef<Promise<unknown> | null>(null);
   const pendingWrite = useRef<PendingWrite | null>(null);
   const epoch = useRef(0);
   const active = useRef<ActiveStaffContext | null>(null);
@@ -205,7 +206,7 @@ export function StaffApp() {
     setContext(cleanContext);
     setToken(cleanBearer);
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
-    openerRef.current = null;
+    openerRef.current = null; kdsPoll.current = null;
     setCapabilities(null); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
     pendingWrite.current = null; setBusy(false); setUncertain(false);
     setLoading(true); setError(''); setNotice('');
@@ -262,13 +263,12 @@ export function StaffApp() {
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;
     let timer: number | undefined;
-    let polling = false;
     const schedule = () => {
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') timer = window.setInterval(() => {
-        if (polling) return;
-        polling = true;
-        void loadKds(context, token).catch(() => setKdsStale(true)).finally(() => { polling = false; });
+        if (kdsPoll.current) return;
+        const poll = loadKds(context, token).catch(() => setKdsStale(true)).finally(() => { if (kdsPoll.current === poll) kdsPoll.current = null; });
+        kdsPoll.current = poll;
       }, 2500);
     };
     schedule(); document.addEventListener('visibilitychange', schedule);
@@ -408,7 +408,7 @@ export function StaffApp() {
     active.current = null;
     tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1;
     sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
-    openerRef.current = null;
+    openerRef.current = null; kdsPoll.current = null;
     setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; setUncertain(false);
   };
 

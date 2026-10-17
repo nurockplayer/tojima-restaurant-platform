@@ -86,6 +86,30 @@ describe('staff operations', () => {
     expect(host?.querySelector('p.kds-stale[role="status"]')).toBeNull();
   });
 
+  it('keeps the KDS poll guard when the operator leaves and returns to the board', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const pendingPoll = deferred<Response>();
+    let kdsCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/operations/kds`) { kdsCalls += 1; return kdsCalls === 2 ? pendingPoll.promise : json({ orders: [] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '厨房看板');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+    await click(host!, 'テーブル');
+    await click(host!, '厨房看板');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+    pendingPoll.resolve(json({ orders: [] }));
+    await act(async () => { await pendingPoll.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(3);
+  });
+
   it('dismisses the close dialog on cancel and restores focus to its opener', async () => {
     const routes: Route = async (url) => {
       if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
