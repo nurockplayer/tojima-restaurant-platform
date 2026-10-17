@@ -265,6 +265,7 @@ export function App() {
 
   useEffect(() => {
     if (!entry || !checkoutOrderID || tab !== 'orders') return;
+    const checkoutSequence = checkoutRequestSequence;
     let timer: number | undefined;
     let disposed = false;
     // REVIEW_REQUIRED is a held state: P80 deliberately stops automated state
@@ -295,7 +296,8 @@ export function App() {
       disposed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       if (timer !== undefined) window.clearInterval(timer);
-      checkoutRequestSequence.current++;
+      // Invalidate in-flight checkout reads started by this view.
+      checkoutSequence.current++;
     };
   }, [checkoutOrderID, entry, refreshCheckoutStatus, tab]);
 
