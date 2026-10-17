@@ -255,10 +255,14 @@ func (s *Service) updateAttemptFailure(ctx context.Context, w workItem, orderID,
 	if e != nil {
 		return e
 	}
-	if before == string(StatePaid) || before == string(StateReviewRequired) {
+	// A worker failure or elapsed retry budget is not new provider evidence.
+	// Preserve confirmed outcomes (including completed-but-unpaid processing)
+	// while the same transaction holds the attempt lock against webhook writes.
+	switch AttemptState(before) {
+	case StatePaid, StateReviewRequired, StateFailed, StateExpired, StateProcessing:
 		return tx.Commit(ctx)
 	}
-	_, e = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state=$2,updated_at=clock_timestamp() WHERE order_id=$1 AND state NOT IN ('PAID','REVIEW_REQUIRED')`, orderID, string(state))
+	_, e = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state=$2,updated_at=clock_timestamp() WHERE order_id=$1 AND state NOT IN ('PAID','REVIEW_REQUIRED','FAILED','EXPIRED','PROCESSING')`, orderID, string(state))
 	if e != nil {
 		return e
 	}

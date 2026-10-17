@@ -20,7 +20,7 @@ requires reconciliation and cannot issue another Checkout. A changed provider
 request profile cannot silently change an existing attempt. EXPIRE work shares
 the immutable retry deadline and checks database time before each provider call.
 After exhaustion it stops automated retries and leaves unresolved state UNKNOWN
-for staff reconciliation, preserving existing PAID or REVIEW_REQUIRED states.
+for staff reconciliation, preserving confirmed PAID, REVIEW_REQUIRED, FAILED, EXPIRED and PROCESSING states.
 
 The browser context is signed and random, established before STRIPE commit in
 an HttpOnly, Secure, SameSite cookie. The winning order stores only the token

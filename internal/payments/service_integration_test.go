@@ -243,54 +243,128 @@ func TestPostgresStripeCommitResumeWebhookAndReviewGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var boundedHoldErr error
-	provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) {
-		_, boundedHoldErr = f.Pool.Exec(ctx, `UPDATE operation_order_state SET operational_hold=true,version=version+1,updated_at=clock_timestamp() WHERE order_id=$1`, result.Metadata["order_id"])
-	})
-	boundedOrder, _, err := commitStripeFixtureOrder(ctx, boundedOrders, grant.Session.ID, grant.Token, "stripe-line-expire-cutoff", "stripe-order-expire-cutoff")
-	if err != nil {
-		t.Fatal(err)
+	type boundedExpiryCase struct {
+		name, lineKey, orderKey, eventType string
+		state                              AttemptState
+		orderID, checkoutID, paymentIntent string
+		deadline, availableAt              time.Time
 	}
-	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("bounded hold create worker worked=%v err=%v", worked, err)
+	boundedCases := []*boundedExpiryCase{
+		{name: "unknown", lineKey: "stripe-line-expire-cutoff-unknown", orderKey: "stripe-order-expire-cutoff-unknown", state: StateUnknown},
+		{name: "failed", lineKey: "stripe-line-expire-cutoff-failed", orderKey: "stripe-order-expire-cutoff-failed", eventType: "payment_intent.payment_failed", state: StateFailed},
+		{name: "expired", lineKey: "stripe-line-expire-cutoff-expired", orderKey: "stripe-order-expire-cutoff-expired", eventType: "checkout.session.expired", state: StateExpired},
+		{name: "processing", lineKey: "stripe-line-expire-cutoff-processing", orderKey: "stripe-order-expire-cutoff-processing", eventType: "checkout.session.completed", state: StateProcessing},
 	}
-	if boundedHoldErr != nil {
-		t.Fatalf("bounded hold race fixture: %v", boundedHoldErr)
+	// Create every order before running its work so all CREATE items precede
+	// the newly queued expiry items. This keeps the cases on one shared cutoff
+	// window rather than sleeping once for each confirmed state.
+	for _, tc := range boundedCases {
+		order, _, createErr := commitStripeFixtureOrder(ctx, boundedOrders, grant.Session.ID, grant.Token, tc.lineKey, tc.orderKey)
+		if createErr != nil {
+			t.Fatalf("%s cutoff order: %v", tc.name, createErr)
+		}
+		tc.orderID = order.Order.ID
 	}
-	provider.SetNextExpireOutcome(stripeprovider.CheckoutOpen, stripeprovider.PaymentUnpaid, false)
-	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("pre-deadline expiry retry worker worked=%v err=%v", worked, err)
+	for _, tc := range boundedCases {
+		var holdErr error
+		provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) {
+			_, holdErr = f.Pool.Exec(ctx, `UPDATE operation_order_state SET operational_hold=true,version=version+1,updated_at=clock_timestamp() WHERE order_id=$1`, result.Metadata["order_id"])
+		})
+		if worked, workErr := boundedService.ProcessNext(ctx); workErr != nil || !worked {
+			t.Fatalf("%s hold create worker worked=%v err=%v", tc.name, worked, workErr)
+		}
+		if holdErr != nil {
+			t.Fatalf("%s hold race fixture: %v", tc.name, holdErr)
+		}
 	}
-	var retryDeadline, workAvailable time.Time
-	if err = f.Pool.QueryRow(ctx, `SELECT a.retry_not_after,w.available_at FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, boundedOrder.Order.ID).Scan(&retryDeadline, &workAvailable); err != nil {
-		t.Fatal(err)
+	for _, tc := range boundedCases {
+		provider.SetNextExpireOutcome(stripeprovider.CheckoutOpen, stripeprovider.PaymentUnpaid, false)
+		if worked, workErr := boundedService.ProcessNext(ctx); workErr != nil || !worked {
+			t.Fatalf("%s pre-deadline expiry retry worker worked=%v err=%v", tc.name, worked, workErr)
+		}
+		if err = f.Pool.QueryRow(ctx, `SELECT a.retry_not_after,w.available_at FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, tc.orderID).Scan(&tc.deadline, &tc.availableAt); err != nil {
+			t.Fatal(err)
+		}
 	}
-	// Wait for the immutable deadline and delayed retry to both become due. The
-	// attempt snapshot itself is deliberately not modified by this test.
-	waitUntil := retryDeadline
-	if workAvailable.After(waitUntil) {
-		waitUntil = workAvailable
+	for _, tc := range boundedCases {
+		if tc.eventType == "" {
+			continue // No verified outcome: the original UNKNOWN expiry-cutoff case.
+		}
+		var event stripeprovider.VerifiedEvent
+		if tc.eventType == "payment_intent.payment_failed" {
+			tc.paymentIntent, err = testPaymentIntentID(ctx, f.Pool, tc.orderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			intent, retrieveErr := provider.RetrievePaymentIntent(ctx, account, tc.paymentIntent)
+			if retrieveErr != nil {
+				t.Fatal(retrieveErr)
+			}
+			event = stripeprovider.VerifiedEvent{ID: "evt_fixture_cutoff_" + tc.name, Type: tc.eventType, AccountID: account.StripeAccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now().UTC(), ObjectID: tc.paymentIntent, PaymentIntent: &intent}
+		} else {
+			tc.checkoutID, err = testCheckoutID(ctx, f.Pool, tc.orderID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			checkout, retrieveErr := provider.RetrieveCheckout(ctx, account, tc.checkoutID)
+			if retrieveErr != nil {
+				t.Fatal(retrieveErr)
+			}
+			if tc.state == StateExpired {
+				checkout.Status = stripeprovider.CheckoutExpired
+			} else {
+				// A completed Checkout with unpaid payment remains unresolved.
+				checkout.Status = stripeprovider.CheckoutComplete
+			}
+			event = stripeprovider.VerifiedEvent{ID: "evt_fixture_cutoff_" + tc.name, Type: tc.eventType, AccountID: account.StripeAccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now().UTC(), ObjectID: tc.checkoutID, Checkout: &checkout}
+		}
+		if accepted, enqueueErr := boundedService.EnqueueVerifiedWebhook(ctx, event); enqueueErr != nil || !accepted {
+			t.Fatalf("enqueue %s event ahead of cutoff accepted=%v err=%v", tc.name, accepted, enqueueErr)
+		}
+		if worked, workErr := boundedService.ProcessNext(ctx); workErr != nil || !worked {
+			t.Fatalf("verified %s event worker before cutoff worked=%v err=%v", tc.name, worked, workErr)
+		}
+		status, readErr := boundedService.ReadSafeStatus(ctx, operations.TableScope{TenantID: "test-tenant", StoreID: "test-store", TableID: "table-01"}, grant.Session.ID, tc.orderID)
+		if readErr != nil || status.State != tc.state {
+			t.Fatalf("verified %s state must be persisted before cutoff: status=%+v err=%v", tc.name, status, readErr)
+		}
+	}
+	// Wait for the shared immutable deadline and delayed retries. The attempt
+	// snapshots are deliberately not modified; only work eligibility is made
+	// due after the real deadline has elapsed.
+	waitUntil := boundedCases[0].deadline
+	for _, tc := range boundedCases {
+		if tc.deadline.After(waitUntil) {
+			waitUntil = tc.deadline
+		}
+		if tc.availableAt.After(waitUntil) {
+			waitUntil = tc.availableAt
+		}
 	}
 	if delay := time.Until(waitUntil) + 100*time.Millisecond; delay > 0 {
 		time.Sleep(delay)
 	}
-	if _, err = f.Pool.Exec(ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, boundedOrder.Order.ID); err != nil {
-		t.Fatal(err)
+	for _, tc := range boundedCases {
+		if _, err = f.Pool.Exec(ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, tc.orderID); err != nil {
+			t.Fatal(err)
+		}
 	}
 	retrievesBeforeCutoff, expiresBeforeCutoff := provider.CheckoutOperationCounts()
-	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
-		t.Fatalf("expired retry cutoff worker worked=%v err=%v", worked, err)
+	for _, tc := range boundedCases {
+		if worked, workErr := boundedService.ProcessNext(ctx); workErr != nil || !worked {
+			t.Fatalf("%s expired retry cutoff worker worked=%v err=%v", tc.name, worked, workErr)
+		}
+		var cutoffState, cutoffWorkState, cutoffWorkCode string
+		if err = f.Pool.QueryRow(ctx, `SELECT a.state,w.status,coalesce(w.safe_error_code,'') FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, tc.orderID).Scan(&cutoffState, &cutoffWorkState, &cutoffWorkCode); err != nil {
+			t.Fatal(err)
+		}
+		if cutoffState != string(tc.state) || cutoffWorkState != "DONE" || cutoffWorkCode != "EXPIRE_RETRY_WINDOW_ELAPSED" {
+			t.Fatalf("expired expiry budget must preserve %s and stop automation: attempt=%s work=%s code=%s", tc.state, cutoffState, cutoffWorkState, cutoffWorkCode)
+		}
 	}
 	retrievesAfterCutoff, expiresAfterCutoff := provider.CheckoutOperationCounts()
 	if retrievesAfterCutoff != retrievesBeforeCutoff || expiresAfterCutoff != expiresBeforeCutoff {
-		t.Fatalf("cutoff worker contacted provider: retrieve %d→%d expire %d→%d", retrievesBeforeCutoff, retrievesAfterCutoff, expiresBeforeCutoff, expiresAfterCutoff)
-	}
-	var cutoffState, cutoffWorkState, cutoffWorkCode string
-	if err = f.Pool.QueryRow(ctx, `SELECT a.state,w.status,coalesce(w.safe_error_code,'') FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, boundedOrder.Order.ID).Scan(&cutoffState, &cutoffWorkState, &cutoffWorkCode); err != nil {
-		t.Fatal(err)
-	}
-	if cutoffState != string(StateUnknown) || cutoffWorkState != "DONE" || cutoffWorkCode != "EXPIRE_RETRY_WINDOW_ELAPSED" {
-		t.Fatalf("expired expiry budget must remain unknown and stop automation: attempt=%s work=%s code=%s", cutoffState, cutoffWorkState, cutoffWorkCode)
+		t.Fatalf("cutoff workers contacted provider: retrieve %d→%d expire %d→%d", retrievesBeforeCutoff, retrievesAfterCutoff, expiresBeforeCutoff, expiresAfterCutoff)
 	}
 
 	checkoutID, err := testCheckoutID(ctx, f.Pool, committed.Order.ID)
