@@ -12,6 +12,7 @@ var ErrDenied = errors.New("authorization denied")
 // Actor identifies the authenticated subject supplied by the MOD-08 adapter.
 type Actor struct {
 	SubjectID string
+	MFA       bool
 }
 
 // Permission names an operation requested by an actor.
@@ -25,14 +26,85 @@ type Scope struct {
 
 // Request is the minimal typed input to the MOD-08 authorization seam.
 type Request struct {
-	Actor      Actor
-	Permission Permission
-	Resource   Scope
+	Actor            Actor
+	Permission       Permission
+	Resource         Scope
+	AllowedRoles     []Role
+	RequiresMFA      bool
+	MFARequiredRoles []Role
 }
 
 // Authorizer is the adapter seam for MOD-08 identity and authorization.
 type Authorizer interface {
 	Authorize(context.Context, Request) error
+}
+
+type Role string
+
+const (
+	Staff         Role = "STAFF_CASHIER"
+	StoreManager  Role = "STORE_MANAGER"
+	Kitchen       Role = "KITCHEN"
+	TenantAdmin   Role = "TENANT_ADMIN"
+	FinanceViewer Role = "FINANCE_VIEWER"
+)
+
+// Memberships must read current, active MOD-08 membership data on every call.
+// Implementations must not cache authorization decisions across requests.
+type Memberships interface {
+	Current(context.Context, string, string) ([]Membership, error)
+}
+
+type Membership struct {
+	TenantID string
+	StoreID  string // empty means tenant-wide scope and is valid only for TENANT_ADMIN
+	Role     Role
+}
+
+type PolicyAuthorizer struct{ Directory Memberships }
+
+func (a PolicyAuthorizer) Authorize(ctx context.Context, request Request) error {
+	if a.Directory == nil || strings.TrimSpace(request.Actor.SubjectID) == "" || strings.TrimSpace(request.Resource.TenantID) == "" {
+		return ErrDenied
+	}
+	if request.RequiresMFA && !request.Actor.MFA {
+		return ErrDenied
+	}
+	memberships, err := a.Directory.Current(ctx, request.Actor.SubjectID, request.Resource.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, member := range memberships {
+		if member.TenantID != request.Resource.TenantID {
+			continue
+		}
+		if member.StoreID != request.Resource.StoreID && !(member.StoreID == "" && member.Role == TenantAdmin) {
+			continue
+		}
+		for _, allowed := range request.AllowedRoles {
+			if member.Role == allowed {
+				mfaEligible := true
+				for _, role := range request.MFARequiredRoles {
+					if member.Role == role && !request.Actor.MFA {
+						mfaEligible = false
+						break
+					}
+				}
+				if mfaEligible {
+					return nil
+				}
+				break
+			}
+		}
+	}
+	return ErrDenied
+}
+
+// DenyMemberships is the runtime default until MOD-08 supplies a governed directory.
+type DenyMemberships struct{}
+
+func (DenyMemberships) Current(context.Context, string, string) ([]Membership, error) {
+	return nil, ErrDenied
 }
 
 // SameScope allows access only when both complete tenant/store scopes match.

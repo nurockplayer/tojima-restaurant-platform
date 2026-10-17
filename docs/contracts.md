@@ -1,6 +1,6 @@
 # S0 contracts / 契約・契約邊界
 
-This is a proposed relational contract and executable contract seed, not a production schema or an implemented ordering/payment service. Exact DDL and transaction strategy belong to each dependent stage after the DB ADR is approved.
+This records the staged relational contracts, not production deployment approval or an implemented ordering/payment service. Owner approved PostgreSQL test implementation on 2026-10-18. P-76 implements S1 DDL and transaction tests; subsequent stages retain their own acceptance gates.
 
 | Source of truth / 權威資料 | Required constraint / 必要制約 | Stage |
 | --- | --- | --- |
@@ -20,4 +20,4 @@ This is a proposed relational contract and executable contract seed, not a produ
 
 繁體中文：Go 是授權、定價、送單與付款狀態權威。必須用服務端資料所屬與目前 membership 驗權；S0 的型別／契約測試只是後續實作的起點，尚未證明真實 DB 併發與交易安全。
 
-P-76 follows P-75 acceptance. It remains blocked while P-75 review/acceptance and the DB implementation gate are unresolved. Do not start P-77–84 by using historical specification issue hierarchy as authorization.
+P-75 is integrated through PR #1 and the PostgreSQL test implementation gate is resolved. P-76 requires its own exact-head tests and independent review. P-77 follows P-76 acceptance; P-78 also requires P-77. Historical specification issue hierarchy alone does not establish readiness.
