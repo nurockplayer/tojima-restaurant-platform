@@ -5,7 +5,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -74,15 +76,40 @@ func TestMenuHTTPIntegration(t *testing.T) {
 
 	ownerMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", Role: authz.TenantAdmin}}}
 	owner := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "owner", MFA: true}}, authz.PolicyAuthorizer{Directory: ownerMemberships})
-	input := catalog.Draft{Version: 0, CatalogData: catalog.CatalogData{Categories: []catalog.Category{{Key: "food", Name: "Food", Products: []catalog.Product{
-		{Key: "listed", Name: "Listed meal", BasePriceMinor: 500, Active: true},
-		{Key: "hidden", Name: "Unpublished meal", BasePriceMinor: 700, Active: false},
-	}}}}}
+	products := []catalog.Product{
+		{Key: "listed", Name: "Listed meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 500, Active: true},
+		{Key: "hidden", Name: "Unpublished meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 700, Active: false},
+	}
+	for i := 0; i < 3; i++ {
+		products = append(products, catalog.Product{Key: fmt.Sprintf("extra-%d", i), Name: "Extra meal", Description: strings.Repeat("x", 4000), Active: true})
+	}
+	input := catalog.Draft{Version: 0, CatalogData: catalog.CatalogData{Categories: []catalog.Category{{Key: "food", Name: "Food", Products: products}}}}
 	body, err := json.Marshal(input)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if len(body) <= 16<<10 {
+		t.Fatalf("draft fixture is only %d bytes, expected more than the standard request limit", len(body))
+	}
 	path := "/v1/admin/tenants/t/menu/draft"
+	oversizedBody := string(body) + strings.Repeat(" ", int(menuDraftMaxBodyBytes)-len(body)+1)
+	if response := requestJSON(t, owner, http.MethodPut, path, oversizedBody, ""); response.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized menu draft returned %d %s", response.Code, response.Body.String())
+	}
+	chunkedRequest := httptest.NewRequest(http.MethodPut, path, strings.NewReader(oversizedBody))
+	chunkedRequest.ContentLength = -1
+	chunkedResponse := httptest.NewRecorder()
+	owner.ServeHTTP(chunkedResponse, chunkedRequest)
+	if chunkedResponse.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized chunked menu draft returned %d %s", chunkedResponse.Code, chunkedResponse.Body.String())
+	}
+	invalidKey, err := json.Marshal(catalog.Draft{CatalogData: catalog.CatalogData{Categories: []catalog.Category{{Key: strings.Repeat("a", 101), Name: "Food"}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPut, path, string(invalidKey), ""); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"error":"invalid_menu"`) {
+		t.Fatalf("overlong key response %d %s", response.Code, response.Body.String())
+	}
 	if response := requestJSON(t, owner, http.MethodPut, path, string(body), ""); response.Code != http.StatusOK {
 		t.Fatalf("save company draft: %d %s", response.Code, response.Body.String())
 	}
@@ -120,6 +147,21 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	}
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/other/stores/s1/menu", "", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("cross-tenant manager read allowed: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusOK {
+		t.Fatalf("detach store for draft-body limit test: %d %s", response.Code, response.Body.String())
+	}
+	storeDraft := input
+	storeDraft.Version = 1
+	storeBody, err := json.Marshal(storeDraft)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storeBody) <= 16<<10 {
+		t.Fatalf("store draft fixture is only %d bytes, expected more than the standard request limit", len(storeBody))
+	}
+	if response := requestJSON(t, manager, http.MethodPut, "/v1/admin/tenants/t/stores/s1/menu/draft", string(storeBody), ""); response.Code != http.StatusOK {
+		t.Fatalf("save store draft over 16 KiB: %d %s", response.Code, response.Body.String())
 	}
 	managerMemberships.mu.Lock()
 	managerMemberships.values = nil

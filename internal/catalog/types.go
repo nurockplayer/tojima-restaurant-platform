@@ -5,7 +5,13 @@ package catalog
 import (
 	"errors"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 )
+
+// MaxCatalogCanonicalJSONBytes bounds the complete accepted catalog document,
+// including all nested products, option groups, and options.
+const MaxCatalogCanonicalJSONBytes = 1 << 20
 
 type Availability string
 
@@ -135,4 +141,18 @@ type PriceQuote struct {
 	UnitMinor  int64  `json:"unit_minor"`
 }
 
-func cleanKey(s string) bool { return strings.TrimSpace(s) == s && s != "" }
+func cleanKey(s string) bool {
+	if s == "" || !utf8.ValidString(s) || strings.TrimSpace(s) != s {
+		return false
+	}
+	for _, r := range s {
+		if unicode.IsControl(r) {
+			return false
+		}
+	}
+	return true
+}
+
+func catalogKey(s string) bool {
+	return cleanKey(s) && utf8.RuneCountInString(s) <= 100
+}

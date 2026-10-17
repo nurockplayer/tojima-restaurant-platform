@@ -27,6 +27,12 @@ Removing an entry from a later draft must not rewrite an earlier published revis
 
 DETACH copies menu data only. It does not clone tables, QR modes, staff, identity, payment settings, tax settings or order history. Administrative permissions use the existing MOD-08 adapter boundary and current membership: TENANT_ADMIN with MFA controls the company catalog and detachment; STORE_MANAGER with MFA controls its authorized store's prices, availability and detached draft. Another store's role cannot contribute privileges.
 
+## Draft input bounds / 草稿入力上限・草稿容量
+
+Whole-catalog replacement has an explicit 1 MiB canonical `CatalogData` JSON budget. Additional aggregate bounds are 500 products, 1,000 option groups, 5,000 options and 256 KiB of description text, alongside the existing per-field/per-collection limits. These are bounded MVP request limits, not pricing or tax policy. Company and detached-store draft PUTs allow up to 6 MiB + 16 KiB on the wire to accommodate JSON Unicode escaping and the version envelope; larger requests return HTTP 413. Other small control/session requests retain the 16 KiB limit. Structurally invalid or decoded catalogs exceeding the catalog budget return HTTP 400 before database writes.
+
+Category/product/group/option keys contain 1–100 Unicode characters, matching PostgreSQL's character limit. Invalid UTF-8 and control characters are rejected by service validation. The catalog-key length cap does not impose a new length limit on MOD-08 subject or tenant/store scope identifiers. HTTP and service tests cover realistic drafts larger than 16 KiB, oversized fixed-length/chunked requests, and 100/101-character ASCII and multibyte keys.
+
 ## Tax implementation / 税計算・稅額計算
 
 The latest P-77/P-47 and [ADR-0004](adr/0004-japan-tax-calculation.md) supersede the earlier missing-policy hold. All product and option selling prices are inclusive integer JPY. Current dine-in uses the central effective standard rule, initially 10%; eligible reduced food 8% is represented for future classification without adding a takeaway flow.

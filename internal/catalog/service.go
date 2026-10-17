@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"math/big"
@@ -10,6 +11,13 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+const (
+	maxCatalogProducts         = 500
+	maxCatalogOptionGroups     = 1000
+	maxCatalogOptions          = 5000
+	maxCatalogDescriptionBytes = 256 << 10
 )
 
 type Service struct{ db *pgxpool.Pool }
@@ -328,7 +336,7 @@ func (s *Service) DetachStore(ctx context.Context, scope StoreScope, actor strin
 }
 
 func (s *Service) SetStorePriceOverride(ctx context.Context, scope StoreScope, actor, productKey string, amount int64, expectedVersion int64) (PriceOverride, error) {
-	if !validStoreActor(scope, actor) || !cleanKey(productKey) || amount < 0 || expectedVersion < 0 {
+	if !validStoreActor(scope, actor) || !catalogKey(productKey) || amount < 0 || expectedVersion < 0 {
 		return PriceOverride{}, ErrInvalid
 	}
 	tx, err := s.db.Begin(ctx)
@@ -404,7 +412,7 @@ func (s *Service) SetStorePriceOverride(ctx context.Context, scope StoreScope, a
 }
 
 func (s *Service) ResetStorePriceOverride(ctx context.Context, scope StoreScope, actor, productKey string, expectedVersion int64) (PriceOverride, error) {
-	if !validStoreActor(scope, actor) || !cleanKey(productKey) || expectedVersion < 1 {
+	if !validStoreActor(scope, actor) || !catalogKey(productKey) || expectedVersion < 1 {
 		return PriceOverride{}, ErrInvalid
 	}
 	tx, err := s.db.Begin(ctx)
@@ -527,6 +535,9 @@ func (s *Service) SetStoreAvailability(ctx context.Context, scope StoreScope, ac
 }
 
 func Quote(menu PublishedMenu, productKey string, selected []OptionSelection) (PriceQuote, error) {
+	if !catalogKey(productKey) {
+		return PriceQuote{}, ErrInvalid
+	}
 	var product *Product
 	for ci := range menu.Categories {
 		for pi := range menu.Categories[ci].Products {
@@ -548,7 +559,7 @@ func Quote(menu PublishedMenu, productKey string, selected []OptionSelection) (P
 	amount := product.EffectivePriceMinor
 	selectedByGroup := make(map[string]map[string]bool)
 	for _, pick := range selected {
-		if !cleanKey(pick.GroupKey) || !cleanKey(pick.OptionKey) {
+		if !catalogKey(pick.GroupKey) || !catalogKey(pick.OptionKey) {
 			return PriceQuote{}, ErrInvalid
 		}
 		if selectedByGroup[pick.GroupKey] == nil {
@@ -828,26 +839,31 @@ func validateData(data CatalogData) error {
 	if len(data.Categories) > 200 {
 		return ErrInvalid
 	}
+	productCount, groupCount, optionCount, descriptionBytes := 0, 0, 0, 0
 	categoryKeys, productKeys := map[string]bool{}, map[string]bool{}
 	for _, category := range data.Categories {
-		if !cleanKey(category.Key) || !validName(category.Name, 160) || category.Position < 0 || categoryKeys[category.Key] || len(category.Products) > 1000 {
+		if !catalogKey(category.Key) || !validName(category.Name, 160) || category.Position < 0 || categoryKeys[category.Key] || len(category.Products) > 1000 {
 			return ErrInvalid
 		}
 		categoryKeys[category.Key] = true
 		for _, product := range category.Products {
-			if !cleanKey(product.Key) || !validName(product.Name, 200) || len(product.Description) > 4000 || product.BasePriceMinor < 0 || product.Position < 0 || productKeys[product.Key] || len(product.Groups) > 100 {
+			productCount++
+			descriptionBytes += len(product.Description)
+			if productCount > maxCatalogProducts || descriptionBytes > maxCatalogDescriptionBytes || !catalogKey(product.Key) || !validName(product.Name, 200) || len(product.Description) > 4000 || product.BasePriceMinor < 0 || product.Position < 0 || productKeys[product.Key] || len(product.Groups) > 100 {
 				return ErrInvalid
 			}
 			productKeys[product.Key] = true
 			groupKeys := map[string]bool{}
 			for _, group := range product.Groups {
-				if !cleanKey(group.Key) || !validName(group.Name, 160) || group.Position < 0 || group.MinSelect < 0 || group.MaxSelect < 1 || group.MaxSelect < group.MinSelect || groupKeys[group.Key] || len(group.Options) == 0 || group.MaxSelect > len(group.Options) {
+				groupCount++
+				optionCount += len(group.Options)
+				if groupCount > maxCatalogOptionGroups || optionCount > maxCatalogOptions || !catalogKey(group.Key) || !validName(group.Name, 160) || group.Position < 0 || group.MinSelect < 0 || group.MaxSelect < 1 || group.MaxSelect < group.MinSelect || groupKeys[group.Key] || len(group.Options) == 0 || group.MaxSelect > len(group.Options) {
 					return ErrInvalid
 				}
 				groupKeys[group.Key] = true
 				activeCount, optionKeys := 0, map[string]bool{}
 				for _, option := range group.Options {
-					if !cleanKey(option.Key) || !validName(option.Name, 160) || option.Position < 0 || option.PriceDeltaMinor < 0 || optionKeys[option.Key] {
+					if !catalogKey(option.Key) || !validName(option.Name, 160) || option.Position < 0 || option.PriceDeltaMinor < 0 || optionKeys[option.Key] {
 						return ErrInvalid
 					}
 					optionKeys[option.Key] = true
@@ -860,6 +876,10 @@ func validateData(data CatalogData) error {
 				}
 			}
 		}
+	}
+	canonical, err := json.Marshal(data)
+	if err != nil || len(canonical) > MaxCatalogCanonicalJSONBytes {
+		return ErrInvalid
 	}
 	return nil
 }
@@ -1114,7 +1134,7 @@ func readOptionAvailability(ctx context.Context, tx pgx.Tx, scope StoreScope, pr
 func validateAvailabilityTarget(ctx context.Context, tx pgx.Tx, scope StoreScope, catalogID, revision int64, target AvailabilityTarget) error {
 	switch target.Kind {
 	case ProductAvailability:
-		if !cleanKey(target.ProductKey) || target.GroupKey != "" || target.OptionKey != "" {
+		if !catalogKey(target.ProductKey) || target.GroupKey != "" || target.OptionKey != "" {
 			return ErrInvalid
 		}
 		var exists bool
@@ -1127,7 +1147,7 @@ func validateAvailabilityTarget(ctx context.Context, tx pgx.Tx, scope StoreScope
 		}
 		return nil
 	case OptionAvailability:
-		if !cleanKey(target.ProductKey) || !cleanKey(target.GroupKey) || !cleanKey(target.OptionKey) {
+		if !catalogKey(target.ProductKey) || !catalogKey(target.GroupKey) || !catalogKey(target.OptionKey) {
 			return ErrInvalid
 		}
 		var exists bool

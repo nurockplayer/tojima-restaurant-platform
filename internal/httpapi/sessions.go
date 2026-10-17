@@ -187,14 +187,24 @@ func (a SessionAPI) staffScope(w http.ResponseWriter, r *http.Request, permissio
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) error {
-	r.Body = http.MaxBytesReader(w, r.Body, 16<<10)
+	return decodeJSONLimit(w, r, dst, 16<<10)
+}
+
+func decodeJSONLimit(w http.ResponseWriter, r *http.Request, dst any, limit int64) error {
+	if r.ContentLength > limit {
+		return &http.MaxBytesError{Limit: limit}
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, limit)
 	decoder := json.NewDecoder(r.Body)
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(dst); err != nil {
 		return err
 	}
 	if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-		return errors.New("only one JSON value is allowed")
+		if err == nil {
+			return errors.New("only one JSON value is allowed")
+		}
+		return err
 	}
 	return nil
 }

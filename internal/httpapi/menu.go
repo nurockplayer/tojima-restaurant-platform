@@ -8,6 +8,11 @@ import (
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
 )
 
+// Go's JSON decoder permits every non-surrogate Unicode rune to arrive as a
+// six-byte \\uXXXX escape. Six times the canonical catalog budget plus a small
+// envelope allowance bounds that wire representation.
+const menuDraftMaxBodyBytes = int64(6*catalog.MaxCatalogCanonicalJSONBytes + 16<<10)
+
 type MenuAPI struct {
 	Catalog    *catalog.Service
 	Identity   IdentityResolver
@@ -174,8 +179,8 @@ func (a MenuAPI) saveCompanyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input catalog.Draft
-	if err := decodeJSON(w, r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request")
+	if err := decodeMenuDraftJSON(w, r, &input); err != nil {
+		writeMenuDraftDecodeError(w, err)
 		return
 	}
 	draft, err := a.Catalog.SaveCompanyDraft(r.Context(), tenantID, actor.SubjectID, input.Version, input.CatalogData)
@@ -196,6 +201,19 @@ func (a MenuAPI) publishCompanyDraft(w http.ResponseWriter, r *http.Request) {
 	}
 	result, err := a.Catalog.PublishCompanyDraft(r.Context(), tenantID, actor.SubjectID, input.ExpectedVersion)
 	respondMenu(w, result, err)
+}
+
+func decodeMenuDraftJSON(w http.ResponseWriter, r *http.Request, dst any) error {
+	return decodeJSONLimit(w, r, dst, menuDraftMaxBodyBytes)
+}
+
+func writeMenuDraftDecodeError(w http.ResponseWriter, err error) {
+	var tooLarge *http.MaxBytesError
+	if errors.As(err, &tooLarge) {
+		writeError(w, http.StatusRequestEntityTooLarge, "request_too_large")
+		return
+	}
+	writeError(w, http.StatusBadRequest, "invalid_request")
 }
 
 func (a MenuAPI) detachStore(w http.ResponseWriter, r *http.Request) {
@@ -250,8 +268,8 @@ func (a MenuAPI) saveStoreDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var input catalog.Draft
-	if err := decodeJSON(w, r, &input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid_request")
+	if err := decodeMenuDraftJSON(w, r, &input); err != nil {
+		writeMenuDraftDecodeError(w, err)
 		return
 	}
 	draft, err := a.Catalog.SaveStoreDraft(r.Context(), scope, actor.SubjectID, input.Version, input.CatalogData)

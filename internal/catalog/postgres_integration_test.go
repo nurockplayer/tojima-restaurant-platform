@@ -70,6 +70,7 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 	}
 	t.Run("draft publish and linked detached price semantics", func(t *testing.T) {
 		initial := sampleMenu("Soup", 900, false)
+		initial.Categories = append(initial.Categories, Category{Key: strings.Repeat("k", 100), Name: "Boundary key", Position: 1})
 		draft, err := service.SaveCompanyDraft(ctx, "t", "owner", 0, initial)
 		if err != nil || draft.Version != 1 {
 			t.Fatalf("save company draft: version=%d err=%v", draft.Version, err)
