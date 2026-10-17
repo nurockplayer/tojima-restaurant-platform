@@ -29,6 +29,7 @@ type credentialDocument struct {
 	BaseURL              string                       `json:"base_url"`
 	StaffURL             string                       `json:"staff_url"`
 	KitchenURL           string                       `json:"kitchen_url"`
+	CatalogURL           string                       `json:"catalog_url,omitempty"`
 	GuestURL             string                       `json:"guest_url"`
 	TenantID             string                       `json:"tenant_id"`
 	StoreID              string                       `json:"store_id"`
@@ -51,6 +52,7 @@ func run() error {
 	credentialsPath := flag.String("credentials", "", "new owner-only credentials output file (required)")
 	webRoot := flag.String("web-dist", "web/dist", "built staff/guest SPA directory")
 	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
+	catalogFixture := flag.Bool("catalog-fixture", false, "enable isolated catalog admin routes and local test credentials")
 	flag.Parse()
 	if strings.TrimSpace(*credentialsPath) == "" {
 		return errors.New("-credentials is required")
@@ -78,7 +80,11 @@ func run() error {
 		}
 	}
 
-	identity, directory, credentials, err := testoperations.NewCredentialSet("test-tenant", "test-store")
+	newCredentials := testoperations.NewCredentialSet
+	if *catalogFixture {
+		newCredentials = testoperations.NewCatalogCredentialSet
+	}
+	identity, directory, credentials, err := newCredentials("test-tenant", "test-store")
 	if err != nil {
 		return err
 	}
@@ -88,6 +94,9 @@ func run() error {
 		TenantID: "test-tenant", StoreID: "test-store", TableID: "table-01",
 		TableLocator: fixture.Locator, Schema: fixture.Schema, Credentials: credentials,
 		PaymentFixture: *withPayments, WebhookFixtureSecret: webhookSecret,
+	}
+	if *catalogFixture {
+		doc.CatalogURL = doc.BaseURL + "/catalog"
 	}
 	ownedFile, err := writeCredentials(*credentialsPath, doc)
 	if err != nil {
@@ -107,6 +116,9 @@ func run() error {
 		}
 	}
 	api := http.NewServeMux()
+	if *catalogFixture {
+		api.Handle("/v1/admin/", httpapi.NewMenuHandler(fixture.Menus, identity, authz.PolicyAuthorizer{Directory: directory}))
+	}
 	api.Handle("/v1/", runtime)
 	api.Handle("/healthz", httpapi.NewHandler())
 	api.Handle("/", spaHandler(*webRoot))

@@ -456,7 +456,7 @@ func waitForLinkedStoreLockWait(t *testing.T, ctx context.Context, pool *pgxpool
 		err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
 			WHERE datname=current_database() AND state='active' AND wait_event_type='Lock'
 			AND $1::int=ANY(pg_blocking_pids(pid))
-			AND lower(query) LIKE '%select s.store_id from stores s where s.tenant_id=$1%')`, blockerPID).Scan(&waiting)
+			AND lower(query) LIKE '%select s.store_id,s.enabled,s.operating from stores s where s.tenant_id=$1%')`, blockerPID).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}

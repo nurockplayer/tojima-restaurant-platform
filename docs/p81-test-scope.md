@@ -39,3 +39,50 @@ acceptance remain external gates.
 
 Authorities: [Step 18](https://linear.app/higashijima-manage-system/document/mod-05-jazhstep-18-既有商品禁止新增必選群組發布驗證-v01-789e19f3e339)
 and [Step 19](https://linear.app/higashijima-manage-system/document/mod-05-jazhstep-19-既有必選群組安全擴充發布檢查-v01-b341bf8c1033).
+
+## B2 — Menu administration and reviewed publication
+
+The `/catalog` React/TypeScript surface uses the existing tenant/store menu
+APIs. Company administrators read published content separately from a mutable
+draft, edit structured categories/products/single-layer option groups, save
+with a version, and review a read-only publication preview before publishing.
+The preview fingerprint binds the draft, publication and relevant LINKED store
+state; checked publication revalidates under the same locks and returns a
+conflict when reviewed inputs changed. Preview itself writes no publication,
+availability or audit data. Correcting an old publication still requires a new
+draft and publication, with no rollback action.
+
+The store surface displays source/mode/revision, source base price, absolute
+store override and effective price. Server capabilities determine visible
+controls; every write independently checks current identity/membership, scope,
+role, MFA, version and reason. Staff can pause; managers can confirm/reopen,
+set/reset prices and edit an already detached store snapshot. Only a tenant
+administrator with MFA can explicitly detach a store. A stale
+write requires an authoritative reload instead of silently retrying changed
+intent. Japanese and Traditional Chinese use the same API behavior.
+
+Local acceptance uses the explicit isolated fixture only:
+
+```sh
+cd web
+pnpm install --frozen-lockfile
+pnpm build
+cd ..
+TEST_DATABASE_URL='postgres://postgres@127.0.0.1:32768/tojima_test?sslmode=disable' \
+  go run ./cmd/operationstest -catalog-fixture -credentials /tmp/tojima-catalog-credentials.json
+```
+
+Open `http://127.0.0.1:8082/catalog`. Manually enter the test tenant/store and
+one opaque bearer credential from the requested owner-only file:
+`credentials.catalog_admin`, `credentials.manager`, or `credentials.cashier`.
+The browser does not read the credential file or let callers choose their role.
+Only `-catalog-fixture` mints the test tenant administrator and mounts admin
+menu routes. The file must not already exist, stays outside the web root, and
+is removed on orderly shutdown; its credentials are never committed or logged.
+The PostgreSQL schema is disposable and isolated. These memberships are test
+fixtures, not production MOD-08 identities.
+
+B2 leaves P-81 C/D/E, real IdP, production runtime and deployment acceptance
+outstanding. The production `cmd/server` remains health-only. Ingredient
+identity still comes from MOD-01; this slice adds no ingredient master,
+inventory, payment behavior or approval workflow.

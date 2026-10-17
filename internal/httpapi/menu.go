@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -28,6 +29,13 @@ type priceOverrideRequest struct {
 }
 type resetOverrideRequest struct {
 	ExpectedVersion int64 `json:"expected_version"`
+}
+type companyPreviewRequest struct {
+	ExpectedVersion int64 `json:"expected_version"`
+}
+type publishCompanyCheckedRequest struct {
+	ExpectedVersion    int64  `json:"expected_version"`
+	PreviewFingerprint string `json:"preview_fingerprint"`
 }
 
 type guestMenu struct {
@@ -72,6 +80,57 @@ type guestOption struct {
 	AvailabilityVersion int64                `json:"availability_version,omitempty"`
 }
 
+type storeAdminMenu struct {
+	Currency               string          `json:"currency"`
+	PriceMode              string          `json:"price_mode"`
+	Mode                   string          `json:"mode"`
+	Revision               int64           `json:"revision"`
+	CanPauseAvailability   bool            `json:"can_pause_availability"`
+	CanConfirmAvailability bool            `json:"can_confirm_availability"`
+	CanEditPrices          bool            `json:"can_edit_prices"`
+	CanDetach              bool            `json:"can_detach"`
+	Categories             []adminCategory `json:"categories"`
+}
+type adminCategory struct {
+	Key      string         `json:"key"`
+	Name     string         `json:"name"`
+	Position int            `json:"position"`
+	Products []adminProduct `json:"products"`
+}
+type adminProduct struct {
+	Key                  string               `json:"key"`
+	Name                 string               `json:"name"`
+	Description          string               `json:"description,omitempty"`
+	BasePriceMinor       int64                `json:"base_price_minor"`
+	OverrideActive       bool                 `json:"override_active"`
+	OverridePriceMinor   *int64               `json:"override_price_minor"`
+	EffectivePriceMinor  int64                `json:"effective_price_minor"`
+	Position             int                  `json:"position"`
+	Active               bool                 `json:"active"`
+	Availability         catalog.Availability `json:"availability"`
+	Selectable           bool                 `json:"selectable"`
+	AvailabilityVersion  int64                `json:"availability_version"`
+	PriceOverrideVersion int64                `json:"price_override_version"`
+	Groups               []adminGroup         `json:"option_groups"`
+}
+type adminGroup struct {
+	Key       string        `json:"key"`
+	Name      string        `json:"name"`
+	MinSelect int           `json:"min_select"`
+	MaxSelect int           `json:"max_select"`
+	Position  int           `json:"position"`
+	Options   []adminOption `json:"options"`
+}
+type adminOption struct {
+	Key                 string               `json:"key"`
+	Name                string               `json:"name"`
+	PriceDeltaMinor     int64                `json:"price_delta_minor"`
+	Position            int                  `json:"position"`
+	Active              bool                 `json:"active"`
+	Availability        catalog.Availability `json:"availability"`
+	AvailabilityVersion int64                `json:"availability_version"`
+}
+
 func NewMenuHandler(service *catalog.Service, identity IdentityResolver, authorizer authz.Authorizer) http.Handler {
 	if identity == nil {
 		identity = DenyIdentity{}
@@ -82,8 +141,10 @@ func NewMenuHandler(service *catalog.Service, identity IdentityResolver, authori
 	api := MenuAPI{Catalog: service, Identity: identity, Authorizer: authorizer}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/guest/tables/{locator}/menu", api.publicMenu)
+	mux.HandleFunc("GET /v1/admin/tenants/{tenantID}/menu/published", api.getCompanyPublished)
 	mux.HandleFunc("GET /v1/admin/tenants/{tenantID}/menu/draft", api.getCompanyDraft)
 	mux.HandleFunc("PUT /v1/admin/tenants/{tenantID}/menu/draft", api.saveCompanyDraft)
+	mux.HandleFunc("POST /v1/admin/tenants/{tenantID}/menu/preview", api.previewCompanyDraft)
 	mux.HandleFunc("POST /v1/admin/tenants/{tenantID}/menu/publish", api.publishCompanyDraft)
 	mux.HandleFunc("POST /v1/admin/tenants/{tenantID}/stores/{storeID}/menu/detach", api.detachStore)
 	mux.HandleFunc("GET /v1/admin/tenants/{tenantID}/stores/{storeID}/menu", api.storeMenu)
@@ -146,22 +207,72 @@ func safeMenu(menu catalog.PublishedMenu, includeInactive bool) guestMenu {
 	return result
 }
 
-func safeAdminStoreMenu(menu catalog.PublishedMenu) guestMenu {
-	result := safeMenu(menu, true)
-	for ci := range menu.Categories {
-		for pi := range menu.Categories[ci].Products {
-			product := menu.Categories[ci].Products[pi]
-			outProduct := &result.Categories[ci].Products[pi]
-			outProduct.AvailabilityVersion = product.AvailabilityVersion
-			outProduct.PriceOverrideVersion = product.PriceOverrideVersion
-			for gi := range product.Groups {
-				for oi := range product.Groups[gi].Options {
-					outProduct.Groups[gi].Options[oi].AvailabilityVersion = product.Groups[gi].Options[oi].AvailabilityVersion
-				}
+func safeStoreAdminProjection(a MenuAPI, ctx context.Context, actor authz.Actor, scope catalog.StoreScope, projection catalog.StoreAdminProjection) storeAdminMenu {
+	result := storeAdminMenu{
+		Currency: "JPY", PriceMode: "TAX_INCLUSIVE", Mode: projection.Menu.Mode, Revision: projection.Menu.Revision,
+		CanPauseAvailability:   a.canStore(ctx, actor, scope, "menu.availability.write", []authz.Role{authz.Staff, authz.StoreManager}, []authz.Role{authz.StoreManager}),
+		CanConfirmAvailability: a.canStore(ctx, actor, scope, "menu.availability.write", []authz.Role{authz.StoreManager}, []authz.Role{authz.StoreManager}),
+		CanEditPrices:          a.canStore(ctx, actor, scope, "menu.price.override", []authz.Role{authz.StoreManager}, []authz.Role{authz.StoreManager}),
+		CanDetach:              a.canTenant(ctx, actor, scope.TenantID, "menu.detach", []authz.Role{authz.TenantAdmin}, []authz.Role{authz.TenantAdmin}),
+		Categories:             make([]adminCategory, 0, len(projection.Menu.Categories)),
+	}
+	prices := make(map[string]catalog.StoreProductPrice, len(projection.ProductPrices))
+	for _, price := range projection.ProductPrices {
+		prices[price.ProductKey] = price
+	}
+	for _, category := range projection.Menu.Categories {
+		outCategory := adminCategory{Key: category.Key, Name: category.Name, Position: category.Position, Products: make([]adminProduct, 0, len(category.Products))}
+		for _, product := range category.Products {
+			price := prices[product.Key]
+			outProduct := adminProduct{
+				Key: product.Key, Name: product.Name, Description: product.Description,
+				BasePriceMinor: price.SourceBasePriceMinor, OverrideActive: price.OverrideActive, OverridePriceMinor: price.OverridePriceMinor,
+				EffectivePriceMinor: price.EffectivePriceMinor, Position: product.Position, Active: product.Active,
+				Availability: product.Availability, Selectable: product.Selectable,
+				AvailabilityVersion: product.AvailabilityVersion, PriceOverrideVersion: price.OverrideVersion,
+				Groups: make([]adminGroup, 0, len(product.Groups)),
 			}
+			for _, group := range product.Groups {
+				outGroup := adminGroup{Key: group.Key, Name: group.Name, MinSelect: group.MinSelect, MaxSelect: group.MaxSelect, Position: group.Position, Options: make([]adminOption, 0, len(group.Options))}
+				for _, option := range group.Options {
+					outGroup.Options = append(outGroup.Options, adminOption{Key: option.Key, Name: option.Name, PriceDeltaMinor: option.PriceDeltaMinor, Position: option.Position, Active: option.Active, Availability: option.Availability, AvailabilityVersion: option.AvailabilityVersion})
+				}
+				outProduct.Groups = append(outProduct.Groups, outGroup)
+			}
+			outCategory.Products = append(outCategory.Products, outProduct)
 		}
+		result.Categories = append(result.Categories, outCategory)
 	}
 	return result
+}
+
+func (a MenuAPI) canStore(ctx context.Context, actor authz.Actor, scope catalog.StoreScope, permission string, roles, mfaRoles []authz.Role) bool {
+	return a.Authorizer.Authorize(ctx, authz.Request{
+		Actor: actor, Permission: authz.Permission(permission),
+		Resource:     authz.Scope{TenantID: scope.TenantID, StoreID: scope.StoreID},
+		AllowedRoles: roles, MFARequiredRoles: mfaRoles,
+	}) == nil
+}
+
+func (a MenuAPI) canTenant(ctx context.Context, actor authz.Actor, tenantID, permission string, roles, mfaRoles []authz.Role) bool {
+	return a.Authorizer.Authorize(ctx, authz.Request{
+		Actor: actor, Permission: authz.Permission(permission),
+		Resource: authz.Scope{TenantID: tenantID}, AllowedRoles: roles, MFARequiredRoles: mfaRoles,
+	}) == nil
+}
+
+func safeAdminStoreMenu(menu catalog.PublishedMenu) storeAdminMenu {
+	prices := make([]catalog.StoreProductPrice, 0)
+	for _, category := range menu.Categories {
+		for _, product := range category.Products {
+			prices = append(prices, catalog.StoreProductPrice{
+				ProductKey: product.Key, SourceBasePriceMinor: product.BasePriceMinor,
+				OverrideActive: product.PriceOverrideActive, OverridePriceMinor: product.PriceOverrideMinor,
+				EffectivePriceMinor: product.EffectivePriceMinor, OverrideVersion: product.PriceOverrideVersion,
+			})
+		}
+	}
+	return safeStoreAdminProjection(MenuAPI{Authorizer: authz.DenyAll{}}, context.Background(), authz.Actor{}, catalog.StoreScope{}, catalog.StoreAdminProjection{Menu: menu, ProductPrices: prices})
 }
 
 func (a MenuAPI) getCompanyDraft(w http.ResponseWriter, r *http.Request) {
@@ -174,7 +285,37 @@ func (a MenuAPI) getCompanyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, err := a.Catalog.GetCompanyDraft(r.Context(), tenantID)
-	respondMenu(w, draft, err)
+	respondMenuRequest(w, r, draft, err)
+}
+
+func (a MenuAPI) getCompanyPublished(w http.ResponseWriter, r *http.Request) {
+	tenantID := r.PathValue("tenantID")
+	if !a.authorizeTenant(w, r, tenantID, "menu.published.read") {
+		return
+	}
+	snapshot, err := a.Catalog.ReadCompanyPublishedSnapshot(r.Context(), tenantID)
+	if err != nil {
+		respondMenu(w, nil, err)
+		return
+	}
+	writeMenuJSON(w, r, struct {
+		Revision int64 `json:"revision"`
+		catalog.CatalogData
+	}{Revision: snapshot.Revision, CatalogData: snapshot.CatalogData})
+}
+
+func (a MenuAPI) previewCompanyDraft(w http.ResponseWriter, r *http.Request) {
+	tenantID, _, ok := a.authorizeCompany(w, r, "menu.publish")
+	if !ok {
+		return
+	}
+	var input companyPreviewRequest
+	if err := decodeJSON(w, r, &input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	preview, err := a.Catalog.PreviewCompanyPublication(r.Context(), tenantID, input.ExpectedVersion)
+	respondMenu(w, preview, err)
 }
 
 func (a MenuAPI) saveCompanyDraft(w http.ResponseWriter, r *http.Request) {
@@ -188,7 +329,7 @@ func (a MenuAPI) saveCompanyDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, err := a.Catalog.SaveCompanyDraft(r.Context(), tenantID, actor.SubjectID, input.Version, input.CatalogData)
-	respondMenu(w, draft, err)
+	respondMenuRequest(w, r, draft, err)
 }
 
 func (a MenuAPI) publishCompanyDraft(w http.ResponseWriter, r *http.Request) {
@@ -196,14 +337,16 @@ func (a MenuAPI) publishCompanyDraft(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	var input struct {
-		ExpectedVersion int64 `json:"expected_version"`
-	}
+	var input publishCompanyCheckedRequest
 	if err := decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
 		return
 	}
-	result, err := a.Catalog.PublishCompanyDraft(r.Context(), tenantID, actor.SubjectID, input.ExpectedVersion)
+	if input.PreviewFingerprint == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request")
+		return
+	}
+	result, err := a.Catalog.PublishCompanyDraftChecked(r.Context(), tenantID, actor.SubjectID, input.ExpectedVersion, input.PreviewFingerprint)
 	var blocked *catalog.PublicationValidationError
 	if errors.As(err, &blocked) {
 		writeJSON(w, http.StatusBadRequest, struct {
@@ -238,11 +381,6 @@ func (a MenuAPI) detachStore(w http.ResponseWriter, r *http.Request) {
 		respondMenu(w, nil, err)
 		return
 	}
-	request := authz.Request{Actor: actor, Permission: authz.Permission("menu.detach"), Resource: authz.Scope{TenantID: scope.TenantID}, AllowedRoles: []authz.Role{authz.TenantAdmin}, MFARequiredRoles: []authz.Role{authz.TenantAdmin}}
-	if err = a.Authorizer.Authorize(r.Context(), request); err != nil {
-		respondMenu(w, nil, authz.ErrDenied)
-		return
-	}
 	var input detachMenuRequest
 	if err = decodeJSON(w, r, &input); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request")
@@ -253,16 +391,16 @@ func (a MenuAPI) detachStore(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a MenuAPI) storeMenu(w http.ResponseWriter, r *http.Request) {
-	scope, _, ok := a.authorizeStore(w, r, "menu.store.read", []authz.Role{authz.StoreManager}, []authz.Role{authz.StoreManager})
+	scope, actor, ok := a.authorizeStore(w, r, "menu.store.read", []authz.Role{authz.Staff, authz.StoreManager, authz.TenantAdmin}, []authz.Role{authz.StoreManager, authz.TenantAdmin})
 	if !ok {
 		return
 	}
-	menu, err := a.Catalog.ReadStoreMenu(r.Context(), scope)
+	projection, err := a.Catalog.ReadStoreAdminProjection(r.Context(), scope)
 	if err != nil {
 		respondMenu(w, nil, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, safeAdminStoreMenu(menu))
+	writeMenuJSON(w, r, safeStoreAdminProjection(a, r.Context(), actor, scope, projection))
 }
 
 func (a MenuAPI) getStoreDraft(w http.ResponseWriter, r *http.Request) {
@@ -271,7 +409,7 @@ func (a MenuAPI) getStoreDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, err := a.Catalog.GetStoreDraft(r.Context(), scope)
-	respondMenu(w, draft, err)
+	respondMenuRequest(w, r, draft, err)
 }
 
 func (a MenuAPI) saveStoreDraft(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +423,7 @@ func (a MenuAPI) saveStoreDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	draft, err := a.Catalog.SaveStoreDraft(r.Context(), scope, actor.SubjectID, input.Version, input.CatalogData)
-	respondMenu(w, draft, err)
+	respondMenuRequest(w, r, draft, err)
 }
 
 func (a MenuAPI) publishStoreDraft(w http.ResponseWriter, r *http.Request) {
@@ -418,6 +556,22 @@ func (a MenuAPI) authorizeStore(w http.ResponseWriter, r *http.Request, permissi
 		return catalog.StoreScope{}, authz.Actor{}, false
 	}
 	return scope, actor, true
+}
+
+func writeMenuJSON(w http.ResponseWriter, r *http.Request, value any) {
+	if r.URL.Query().Get("amounts") == "string" {
+		writeMoneyJSON(w, http.StatusOK, value)
+		return
+	}
+	writeJSON(w, http.StatusOK, value)
+}
+
+func respondMenuRequest(w http.ResponseWriter, r *http.Request, result any, err error) {
+	if err != nil {
+		respondMenu(w, nil, err)
+		return
+	}
+	writeMenuJSON(w, r, result)
 }
 
 func respondMenu(w http.ResponseWriter, result any, err error) {
