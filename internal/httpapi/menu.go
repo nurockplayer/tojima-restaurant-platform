@@ -26,8 +26,10 @@ type resetOverrideRequest struct {
 }
 
 type guestMenu struct {
-	Mode       string          `json:"mode"`
-	Revision   int64           `json:"revision"`
+	Currency   string          `json:"currency"`
+	PriceMode  string          `json:"price_mode"`
+	Mode       string          `json:"mode,omitempty"`
+	Revision   int64           `json:"revision,omitempty"`
 	Categories []guestCategory `json:"categories"`
 }
 type guestCategory struct {
@@ -103,7 +105,11 @@ func safeGuestMenu(menu catalog.PublishedMenu) guestMenu {
 }
 
 func safeMenu(menu catalog.PublishedMenu, includeInactive bool) guestMenu {
-	result := guestMenu{Mode: menu.Mode, Revision: menu.Revision, Categories: make([]guestCategory, 0, len(menu.Categories))}
+	result := guestMenu{Currency: "JPY", PriceMode: "TAX_INCLUSIVE", Categories: make([]guestCategory, 0, len(menu.Categories))}
+	if includeInactive {
+		result.Mode = menu.Mode
+		result.Revision = menu.Revision
+	}
 	for _, category := range menu.Categories {
 		outCategory := guestCategory{Key: category.Key, Name: category.Name, Position: category.Position, Products: make([]guestProduct, 0, len(category.Products))}
 		for _, product := range category.Products {
@@ -372,8 +378,6 @@ func respondMenu(w http.ResponseWriter, result any, err error) {
 		status, code = http.StatusBadRequest, "invalid_menu"
 	case errors.Is(err, catalog.ErrPriceOverflow):
 		status, code = http.StatusUnprocessableEntity, "price_overflow"
-	case errors.Is(err, catalog.ErrTaxUnavailable):
-		status, code = http.StatusServiceUnavailable, "tax_unavailable"
 	}
 	writeError(w, status, code)
 }

@@ -31,6 +31,6 @@ S0 以暫存 SQLite 驗證基礎 SQL 的空庫 up/down/reapply，未建立產品
 
 - Production hosting/vendor/configuration、環境與費用負責人、backup/restore 需求與可接受的復原目標。PostgreSQL 測試 engine 已批准，以下未決項目不阻擋測試環境 schema。
 - Existing Firebase integration/migration inventory, if later authorized; it is not a prerequisite for this standalone scaffold.
-- JPY tax inclusive/exclusive and rounding policy remains unapproved; no money-changing production use before decision and tests. No floating-point financial arithmetic.
+- Initial Japanese inclusive-JPY tax and per-rate floor rounding are now approved by the 2026-10-18 Owner update: see [ADR-0004](0004-japan-tax-calculation.md). Tax is not a P-77 blocker. No floating-point financial arithmetic; receipt/payment integration retains its S4/S5 acceptance.
 
 See [schema contract](../contracts.md). Sources: [P-17](https://linear.app/higashijima-manage-system/issue/P-17), [P-37](https://linear.app/higashijima-manage-system/issue/P-37), [P-75](https://linear.app/higashijima-manage-system/issue/P-75).

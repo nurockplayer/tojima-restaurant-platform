@@ -83,10 +83,14 @@ func (s *Service) SaveCompanyDraft(ctx context.Context, tenantID, actor string, 
 	if err = saveDraft(ctx, tx, id, actor, expectedVersion, data); err != nil {
 		return Draft{}, err
 	}
+	draft, err := readDraft(ctx, tx, id)
+	if err != nil {
+		return Draft{}, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return Draft{}, err
 	}
-	return readDraftConsistent(ctx, s.db, id)
+	return draft, nil
 }
 
 func (s *Service) PublishCompanyDraft(ctx context.Context, tenantID, actor string, expectedVersion int64) (PublishResult, error) {
@@ -190,10 +194,14 @@ func (s *Service) SaveStoreDraft(ctx context.Context, scope StoreScope, actor st
 	if err = saveDraft(ctx, tx, id, actor, expectedVersion, data); err != nil {
 		return Draft{}, err
 	}
+	draft, err := readDraft(ctx, tx, id)
+	if err != nil {
+		return Draft{}, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		return Draft{}, err
 	}
-	return readDraftConsistent(ctx, s.db, id)
+	return draft, nil
 }
 
 func (s *Service) PublishStoreDraft(ctx context.Context, scope StoreScope, actor string, expectedVersion int64) (PublishResult, error) {
@@ -353,13 +361,19 @@ func (s *Service) SetStorePriceOverride(ctx context.Context, scope StoreScope, a
 	if err != nil {
 		return PriceOverride{}, err
 	}
-	var oldAmount *int64
+	previousPrice := base
+	previousSource := "COMPANY_PRICE"
+	var storedPrice int64
+	var storedActive bool
 	var oldVersion int64
-	err = tx.QueryRow(ctx, `SELECT price_minor,version FROM store_product_price_overrides WHERE tenant_id=$1 AND store_id=$2 AND product_key=$3 FOR UPDATE`, scope.TenantID, scope.StoreID, productKey).Scan(&oldAmount, &oldVersion)
+	err = tx.QueryRow(ctx, `SELECT price_minor,active,version FROM store_product_price_overrides WHERE tenant_id=$1 AND store_id=$2 AND product_key=$3 FOR UPDATE`, scope.TenantID, scope.StoreID, productKey).Scan(&storedPrice, &storedActive, &oldVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		oldVersion = 0
 	} else if err != nil {
 		return PriceOverride{}, err
+	} else if storedActive {
+		previousPrice = storedPrice
+		previousSource = "STORE_OVERRIDE"
 	}
 	if oldVersion != expectedVersion {
 		return PriceOverride{}, ErrStale
@@ -379,12 +393,8 @@ func (s *Service) SetStorePriceOverride(ctx context.Context, scope StoreScope, a
 	if err != nil {
 		return PriceOverride{}, err
 	}
-	var oldAmountArg any
-	if oldAmount != nil {
-		oldAmountArg = *oldAmount
-	}
 	if _, err = tx.Exec(ctx, `INSERT INTO menu_admin_audit(tenant_id,store_id,actor,operation,entity_key,before_value,after_value,before_amount,after_amount,before_version,after_version)
-		VALUES($1,$2,$3,'STORE_PRICE_OVERRIDE',$4,$5,$6,$7,$8,$9,$10)`, scope.TenantID, scope.StoreID, actor, productKey, formatPrice(oldAmount), formatPrice(&amount), oldAmountArg, amount, oldVersion, newVersion); err != nil {
+		VALUES($1,$2,$3,'STORE_PRICE_OVERRIDE',$4,$5,'STORE_OVERRIDE',$6,$7,$8,$9)`, scope.TenantID, scope.StoreID, actor, productKey, previousSource, previousPrice, amount, oldVersion, newVersion); err != nil {
 		return PriceOverride{}, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -579,16 +589,6 @@ func Quote(menu PublishedMenu, productKey string, selected []OptionSelection) (P
 		}
 	}
 	return PriceQuote{ProductKey: product.Key, UnitMinor: amount}, nil
-}
-
-func TaxQuote(ctx context.Context, policy TaxPolicy, input TaxInput) (TaxResult, error) {
-	if input.AmountMinor < 0 {
-		return TaxResult{}, ErrInvalid
-	}
-	if policy == nil {
-		policy = UnavailableTaxPolicy{}
-	}
-	return policy.Calculate(ctx, input)
 }
 
 func ensureCatalog(ctx context.Context, tx pgx.Tx, tenantID, kind, storeID string) (int64, error) {
@@ -813,6 +813,13 @@ func writeRevision(ctx context.Context, tx pgx.Tx, catalogID int64, actor string
 				}
 			}
 		}
+	}
+	command, err := tx.Exec(ctx, `UPDATE menu_catalog_revisions SET sealed=true WHERE catalog_id=$1 AND revision=$2 AND NOT sealed`, catalogID, revision)
+	if err != nil {
+		return PublishResult{}, err
+	}
+	if command.RowsAffected() != 1 {
+		return PublishResult{}, ErrConflict
 	}
 	return PublishResult{Revision: revision, DraftVersion: draftVersion}, nil
 }

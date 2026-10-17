@@ -22,6 +22,7 @@ CREATE TABLE menu_catalog_revisions (
     draft_version bigint NOT NULL CHECK (draft_version > 0),
     published_at timestamptz NOT NULL DEFAULT now(),
     published_by text NOT NULL,
+    sealed boolean NOT NULL DEFAULT false,
     PRIMARY KEY (catalog_id, revision),
     UNIQUE (catalog_id, draft_version)
 );
@@ -33,6 +34,24 @@ ALTER TABLE menu_catalogs ADD CONSTRAINT menu_catalog_draft_base_revision_fk
     FOREIGN KEY (catalog_id, draft_base_revision)
     REFERENCES menu_catalog_revisions(catalog_id, revision)
     DEFERRABLE INITIALLY DEFERRED;
+
+CREATE FUNCTION require_sealed_menu_current_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE revision_sealed boolean;
+BEGIN
+    IF NEW.current_revision IS NULL THEN
+        RETURN NEW;
+    END IF;
+    SELECT sealed INTO revision_sealed FROM menu_catalog_revisions
+        WHERE catalog_id=NEW.catalog_id AND revision=NEW.current_revision;
+    IF NOT FOUND OR NOT revision_sealed THEN
+        RAISE EXCEPTION 'current menu revision must be sealed before publication';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER menu_catalog_current_revision_sealed
+    BEFORE INSERT OR UPDATE OF current_revision ON menu_catalogs
+    FOR EACH ROW EXECUTE FUNCTION require_sealed_menu_current_revision();
 
 CREATE TABLE menu_draft_categories (
     category_id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -208,13 +227,59 @@ CREATE TABLE menu_admin_audit (
 );
 CREATE INDEX menu_admin_audit_scope_idx ON menu_admin_audit(tenant_id, store_id, occurred_at DESC);
 
+CREATE FUNCTION protect_menu_revision_seal() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        RAISE EXCEPTION 'menu revisions cannot be deleted';
+    END IF;
+    IF TG_OP = 'INSERT' THEN
+        IF NEW.sealed THEN
+            RAISE EXCEPTION 'menu revisions must be inserted unsealed';
+        END IF;
+        RETURN NEW;
+    END IF;
+    IF OLD.sealed OR NOT NEW.sealed
+       OR NEW.catalog_id IS DISTINCT FROM OLD.catalog_id
+       OR NEW.revision IS DISTINCT FROM OLD.revision
+       OR NEW.draft_version IS DISTINCT FROM OLD.draft_version
+       OR NEW.published_at IS DISTINCT FROM OLD.published_at
+       OR NEW.published_by IS DISTINCT FROM OLD.published_by THEN
+        RAISE EXCEPTION 'menu revision permits only a one-way seal transition';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+CREATE TRIGGER menu_revision_seal_transition
+    BEFORE INSERT OR UPDATE OR DELETE ON menu_catalog_revisions
+    FOR EACH ROW EXECUTE FUNCTION protect_menu_revision_seal();
+
+CREATE FUNCTION reject_child_insert_for_sealed_revision() RETURNS trigger LANGUAGE plpgsql AS $$
+DECLARE revision_sealed boolean;
+BEGIN
+    SELECT sealed INTO revision_sealed FROM menu_catalog_revisions
+        WHERE catalog_id=NEW.catalog_id AND revision=NEW.revision FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'menu revision must exist before its children';
+    END IF;
+    IF revision_sealed THEN
+        RAISE EXCEPTION 'cannot add a child to a sealed menu revision';
+    END IF;
+    RETURN NEW;
+END;
+$$;
 CREATE FUNCTION reject_menu_revision_mutation() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
     RAISE EXCEPTION 'published menu revisions are immutable';
 END;
 $$;
-CREATE TRIGGER menu_revision_immutable BEFORE UPDATE OR DELETE ON menu_catalog_revisions
-    FOR EACH ROW EXECUTE FUNCTION reject_menu_revision_mutation();
+CREATE TRIGGER menu_revision_categories_insert_guard BEFORE INSERT ON menu_revision_categories
+    FOR EACH ROW EXECUTE FUNCTION reject_child_insert_for_sealed_revision();
+CREATE TRIGGER menu_revision_products_insert_guard BEFORE INSERT ON menu_revision_products
+    FOR EACH ROW EXECUTE FUNCTION reject_child_insert_for_sealed_revision();
+CREATE TRIGGER menu_revision_groups_insert_guard BEFORE INSERT ON menu_revision_option_groups
+    FOR EACH ROW EXECUTE FUNCTION reject_child_insert_for_sealed_revision();
+CREATE TRIGGER menu_revision_options_insert_guard BEFORE INSERT ON menu_revision_options
+    FOR EACH ROW EXECUTE FUNCTION reject_child_insert_for_sealed_revision();
 CREATE TRIGGER menu_revision_categories_immutable BEFORE UPDATE OR DELETE ON menu_revision_categories
     FOR EACH ROW EXECUTE FUNCTION reject_menu_revision_mutation();
 CREATE TRIGGER menu_revision_products_immutable BEFORE UPDATE OR DELETE ON menu_revision_products

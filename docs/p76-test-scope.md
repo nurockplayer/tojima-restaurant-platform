@@ -59,5 +59,5 @@ The paired PostgreSQL migrations and their ledger are tested for apply, rollback
 - Session/grant/PIN lifetimes and abuse thresholds are validated test parameters, not Owner-approved operating numbers. Production acceptance must select and measure those values.
 - Staff authentication is still a MOD-08 integration gate. No test fixture qualifies a real IdP or production account.
 - Close checks for unpaid cash, unresolved payment/refund/settlement, manager review and unserved orders remain with the owning S4/S7 stages. S1 exposes a fail-closed policy boundary, not forced close.
-- Hosting, backup/restore objectives, deployment configuration, tax/rounding and UI are not approved by the PostgreSQL test decision.
+- Hosting, backup/restore objectives, deployment configuration and UI are not approved by the PostgreSQL test decision. Initial Japanese tax/rounding was separately approved in the subsequent [ADR-0004](adr/0004-japan-tax-calculation.md).
 - P-77 depends on P-76 acceptance. P-78 also depends on P-77. No menu, payment or cart implementation is implied by an S1 test PASS.

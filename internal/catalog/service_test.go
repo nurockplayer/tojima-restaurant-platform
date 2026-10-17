@@ -1,7 +1,6 @@
 package catalog
 
 import (
-	"context"
 	"errors"
 	"math"
 	"testing"
@@ -31,11 +30,5 @@ func TestQuoteValidatesSelectionsAndIntegerOverflow(t *testing.T) {
 	menu.Categories[0].Products[0].EffectivePriceMinor = math.MaxInt64
 	if _, err := Quote(menu, "soup", []OptionSelection{{GroupKey: "size", OptionKey: "large"}}); !errors.Is(err, ErrPriceOverflow) {
 		t.Fatalf("overflowing integer quote returned %v", err)
-	}
-}
-
-func TestTaxQuoteFailsClosedWithoutOwnerPolicy(t *testing.T) {
-	if _, err := TaxQuote(context.Background(), nil, TaxInput{TenantID: "t", StoreID: "s", AmountMinor: 100}); !errors.Is(err, ErrTaxUnavailable) {
-		t.Fatalf("tax quote without confirmed policy returned %v", err)
 	}
 }

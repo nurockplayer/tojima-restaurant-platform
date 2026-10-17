@@ -21,6 +21,7 @@ type migration struct {
 var migrations = []migration{
 	{version: 1, up: "001_table_sessions.up.sql", down: "001_table_sessions.down.sql"},
 	{version: 2, up: "002_menu_catalog.up.sql", down: "002_menu_catalog.down.sql"},
+	{version: 3, up: "003_tax_rates.up.sql", down: "003_tax_rates.down.sql"},
 }
 
 // Up applies all migrations atomically and serializes concurrent processes.

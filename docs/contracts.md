@@ -14,10 +14,11 @@ This records the staged relational contracts, not production deployment approval
 | KDS/outbox | Unique card per committed order; release policy and outbox in transaction; delivery retry safe | S4 |
 | refunds/audit | Immutable original payment reference; pending/failed not REFUNDED; scoped actor and outcome, no secrets | S7 / P-82 |
 | company catalog/store overrides/hold | Atomic publication; tenant/store isolation; old order snapshots unchanged | S2/S6 |
+| legal tax schedule/calculation snapshot | Central dated enacted rules; inclusive integer JPY; one floor per invoice rate; saved order snapshots never use later rules | S2/S3; receipt boundary S4/S5 |
 | grants | TABLE_JOIN, ORDER_READ and CHECKOUT_RESUME are separate capabilities; bounded expiry/revocation; no checkout secret in shared summaries | S1/S5/S8 |
 
 日本語：Go が認可・価格・注文確定・決済状態の権威。scope 判定は実データと最新 membership から行い、client の tenant/store/price/paid を信用しない。S0 の型・fixture テストは将来の DB race/IDOR/transaction 検証の代替ではない。
 
 繁體中文：Go 是授權、定價、送單與付款狀態權威。必須用服務端資料所屬與目前 membership 驗權；S0 的型別／契約測試只是後續實作的起點，尚未證明真實 DB 併發與交易安全。
 
-P-75 and P-76 are integrated through PR #1 and PR #2 with independent review and PostgreSQL CI. The PostgreSQL test engine decision is resolved. The P-77 non-tax catalog candidate retains the [tax gate and S6 boundaries](p77-test-scope.md); P-78 still requires P-77 acceptance. Historical specification issue hierarchy alone does not establish readiness.
+P-75 and P-76 are integrated through PR #1 and PR #2 with independent review and PostgreSQL CI. PostgreSQL test implementation and the [initial Japanese tax policy](adr/0004-japan-tax-calculation.md) are approved. P-77 retains its [S6 boundaries](p77-test-scope.md); P-78 requires P-77 acceptance and must persist the actual tax snapshot atomically with order creation. Historical specification issue hierarchy alone does not establish readiness.

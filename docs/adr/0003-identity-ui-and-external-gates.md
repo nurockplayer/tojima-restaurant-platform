@@ -12,7 +12,7 @@ P-17/P-58 の最新版（2026-10-18、Step35 まで確認）に基づく vendor 
 
 Web/UI は未選定。Go の最小 HTML、TypeScript Web、既存 Flutter との境界を後続 UI 要件で比較する。S0 は UI/framework/package manager 依存を追加しない。JS を採用する場合は pnpm、CI は frozen lockfile、不要な lifecycle script を加えない。
 
-Stripe は後続 S5。merchant/Connect の責任、test account、Webhook signing secret、test credentials、live activation は別 gate。S0 は secret を取得・埋込せず、決済 API を呼ばない。顧客 grant TTL、税丸め、試験店舗・監視/backup の商用受入も未解決。
+Stripe は後続 S5。merchant/Connect の責任、test account、Webhook signing secret、test credentials、live activation は別 gate。S0 は secret を取得・埋込せず、決済 API を呼ばない。顧客 grant TTL、試験店舗・監視/backup の商用受入は未解決。初期税率・丸めは後続の [ADR-0004](0004-japan-tax-calculation.md) で承認済み。
 
 ## 繁體中文
 
@@ -20,6 +20,6 @@ Stripe は後続 S5。merchant/Connect の責任、test account、Webhook signin
 
 驗收須包含 Web/Flutter 原生 Passkey、原生一次性 MFA 備援碼、管理高權限 MFA、邀請與固定角色、逐請求現行 membership、撤銷後舊 token 即拒、30天絕對 Session、5分鐘固定 step-up、安全信箱變更與90天安全日誌。平台全帳號安全停用狀態不明即拒；復原不復活舊 token 或已撤銷權限。這些是既有規格的記錄，不是本次擴張實作。
 
-UI stack 與 IdP 由 Owner 分別決策。S0 不加前端；未來有 JS 使用 pnpm。Stripe 測試帳戶／商家與 webhook 機密留 S5 安全設定，live 投產另行批准。具體 guest TTL、稅務計價與試店條件仍待決。測試替身只能用於 contract，不可帶入正式環境。
+UI stack 與 IdP 由 Owner 分別決策。S0 不加前端；未來有 JS 使用 pnpm。Stripe 測試帳戶／商家與 webhook 機密留 S5 安全設定，live 投產另行批准。具體 guest TTL 與試店條件仍待決；稅務初始規則已由 [ADR-0004](0004-japan-tax-calculation.md) 承接批准。身分測試替身不可帶入正式環境。
 
 Sources: [P-17](https://linear.app/higashijima-manage-system/issue/P-17), [P-58](https://linear.app/higashijima-manage-system/issue/P-58), [P-75](https://linear.app/higashijima-manage-system/issue/P-75).

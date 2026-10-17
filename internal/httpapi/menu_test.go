@@ -19,6 +19,9 @@ func TestSafeMenuHidesInactiveItemsOnlyFromGuests(t *testing.T) {
 		t.Fatal(err)
 	}
 	guestBody := string(guest)
+	if !strings.Contains(guestBody, `"currency":"JPY"`) || !strings.Contains(guestBody, `"price_mode":"TAX_INCLUSIVE"`) {
+		t.Fatalf("guest menu omitted price metadata: %s", guestBody)
+	}
 	for _, hidden := range []string{"Hidden product name", "Hidden option", "Hidden too", "Hidden category"} {
 		if strings.Contains(guestBody, hidden) {
 			t.Errorf("guest menu leaked %q: %s", hidden, guestBody)
@@ -29,6 +32,12 @@ func TestSafeMenuHidesInactiveItemsOnlyFromGuests(t *testing.T) {
 		t.Fatal(err)
 	}
 	adminBody := string(admin)
+	if !strings.Contains(adminBody, `"currency":"JPY"`) || !strings.Contains(adminBody, `"price_mode":"TAX_INCLUSIVE"`) {
+		t.Fatalf("admin menu omitted price metadata: %s", adminBody)
+	}
+	if !strings.Contains(adminBody, `"mode":"LINKED"`) || !strings.Contains(adminBody, `"revision":4`) {
+		t.Fatalf("admin store menu omitted mode or revision identity: %s", adminBody)
+	}
 	for _, retained := range []string{"Hidden product name", "Hidden option", "Hidden too", "Hidden category"} {
 		if !strings.Contains(adminBody, retained) {
 			t.Errorf("store manager menu omitted %q: %s", retained, adminBody)
@@ -36,5 +45,8 @@ func TestSafeMenuHidesInactiveItemsOnlyFromGuests(t *testing.T) {
 	}
 	if strings.Contains(guestBody, "availability_version") || strings.Contains(guestBody, "price_override_version") {
 		t.Fatalf("guest menu exposed admin metadata: %s", guestBody)
+	}
+	if strings.Contains(guestBody, `"mode"`) || strings.Contains(guestBody, `"revision"`) {
+		t.Fatalf("guest menu exposed internal menu identity: %s", guestBody)
 	}
 }

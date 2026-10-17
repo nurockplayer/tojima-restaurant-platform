@@ -96,6 +96,12 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	if strings.Contains(public.Body.String(), "availability_version") || strings.Contains(public.Body.String(), "price_override_version") {
 		t.Fatalf("public menu exposed admin metadata: %s", public.Body.String())
 	}
+	if strings.Contains(public.Body.String(), `"mode"`) || strings.Contains(public.Body.String(), `"revision"`) {
+		t.Fatalf("public menu exposed internal revision identity: %s", public.Body.String())
+	}
+	if !strings.Contains(public.Body.String(), `"currency":"JPY"`) || !strings.Contains(public.Body.String(), `"price_mode":"TAX_INCLUSIVE"`) {
+		t.Fatalf("public menu omitted price metadata: %s", public.Body.String())
+	}
 	if response := requestJSON(t, owner, http.MethodPut, "/v1/admin/tenants/t/menu/draft", `{"version":1,"categories":[],"effective_price_minor":1}`, ""); response.Code != http.StatusBadRequest {
 		t.Fatalf("client authoritative price field accepted: %d %s", response.Code, response.Body.String())
 	}
@@ -104,6 +110,10 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	manager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "manager", MFA: true}}, authz.PolicyAuthorizer{Directory: managerMemberships})
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/t/stores/s1/menu", "", ""); response.Code != http.StatusOK {
 		t.Fatalf("store manager read: %d %s", response.Code, response.Body.String())
+	} else if !strings.Contains(response.Body.String(), `"mode":"LINKED"`) || !strings.Contains(response.Body.String(), `"revision":1`) {
+		t.Fatalf("store manager response omitted menu version identity: %s", response.Body.String())
+	} else if !strings.Contains(response.Body.String(), `"currency":"JPY"`) || !strings.Contains(response.Body.String(), `"price_mode":"TAX_INCLUSIVE"`) {
+		t.Fatalf("store manager response omitted price metadata: %s", response.Body.String())
 	}
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/t/stores/s2/menu", "", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("cross-store manager read allowed: %d %s", response.Code, response.Body.String())

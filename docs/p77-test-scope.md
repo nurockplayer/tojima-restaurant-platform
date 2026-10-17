@@ -4,9 +4,9 @@ Authority: [P-77](https://linear.app/higashijima-manage-system/issue/P-77), [fla
 
 ## Scope and acceptance / 範囲・驗收
 
-日本語：P-76 は PR #2、merge `7b758fd1096f5145275296c902f691db61315f10`、独立 Oracle/Ego-lite review と PostgreSQL CI で受入済み。S2 は同じ Go サービス・共有 PostgreSQL のテスト実装として、会社／店舗 catalog、公開版、基礎売価、単層 options の境界を追加する。P-77 全体の完了判定には税務 gate の解消と、その候補 commit の検証が必要。
+日本語：P-76 は PR #2、merge `7b758fd1096f5145275296c902f691db61315f10`、独立 Oracle/Ego-lite review と PostgreSQL CI で受入済み。S2 は同じ Go サービス・共有 PostgreSQL として、会社／店舗 catalog、公開版、税込売価、単層 options と実税計算を追加する。2026-10-18 の最新 Owner 決定により初期税務ルールは承認済み。
 
-繁中：本包接續已驗收的 P-76，以同一 Go／PostgreSQL 工程建立菜單與價格資料基礎。這不是訂單、收款或正式上線驗收。P-47 的稅率／端數規則尚待 Owner 決定；非稅務部分的測試通過不能代替 P-77 完整驗收，也不會自動解除 P-78 的依賴。
+繁中：本包接續已驗收的 P-76，以同一 Go／PostgreSQL 工程建立菜單、含稅價格及真實稅額計算。最新稅務規格 v1.0 已解除稅務待決，不再要求逐店批准法定稅率。P-77 仍須完成確切候選版本的測試及獨立審查；通過後才解除 P-78 依賴。
 
 ## Catalog contracts / 菜單契約
 
@@ -14,28 +14,30 @@ Authority: [P-77](https://linear.app/higashijima-manage-system/issue/P-77), [fla
 | --- | --- |
 | Company and store ownership | One catalog model with explicit tenant and COMPANY/STORE owner; server resolves actual ownership before authorization |
 | Draft | Mutable data with expected-version checks; stale writes are rejected; draft edits do not affect guest reads |
-| Publication | Immutable complete revision and one current pointer; publication switches atomically; failed or stale publication leaves the previous revision available |
+| Publication | Complete revision sealed before the current pointer changes; sealed revisions reject later INSERT/UPDATE/DELETE of their contents; failed or stale publication leaves the previous revision available |
 | LINKED | Default store mode; current published company revision, stable product keys, absolute store base-price override when active, company option prices |
 | Price override | Nonnegative integer amount with version checks; master price changes retain the override; clear returns to the current master price; actor/time/before/after recorded transactionally |
 | DETACHED | Explicit company-admin action copies current effective prices into a STORE-owned catalog with new category/product/group/option IDs; later master changes and old linked overrides do not affect it |
 | Flat options | One level, required min/max, no duplicate selection, no nested groups or option quantities; active option surcharge is a nonnegative integer |
 | Availability | Product and option state is store-scoped; absent readiness means PENDING_CONFIRMATION; paused/pending options cannot satisfy a required group |
-| Public menu | Published names, prices, options and safe status only; no drafts, internal reasons, actor or administrative audit data |
+| Public menu | Published visible names, inclusive JPY prices, options and safe status only; no drafts, internal reasons, actor, management topology/version or audit data |
 | Shared price validation | Server resolves current published data and selections; reject invalid selection, negative amount and integer overflow; client effective price is never authority |
 
 Removing an entry from a later draft must not rewrite an earlier published revision. Disabling an item preserves its historical snapshot. No order history is implemented by S2; later order creation must persist its own immutable names, selected options, prices, tax policy/result and publication identity.
 
 DETACH copies menu data only. It does not clone tables, QR modes, staff, identity, payment settings, tax settings or order history. Administrative permissions use the existing MOD-08 adapter boundary and current membership: TENANT_ADMIN with MFA controls the company catalog and detachment; STORE_MANAGER with MFA controls its authorized store's prices, availability and detached draft. Another store's role cannot contribute privileges.
 
-## Tax gate / 税務 gate・稅務待決
+## Tax implementation / 税計算・稅額計算
 
-P-47 explicitly says: 「日本適用稅率/端數計算要在實作前確認，不可臆測。」 The PostgreSQL test approval does not select tax rates, tax classes, inclusive/exclusive prices, rounding grain or rounding method. No approved tax policy has been supplied for this implementation.
+The latest P-77/P-47 and [ADR-0004](adr/0004-japan-tax-calculation.md) supersede the earlier missing-policy hold. All product and option selling prices are inclusive integer JPY. Current dine-in uses the central effective standard rule, initially 10%; eligible reduced food 8% is represented for future classification without adding a takeaway flow.
 
-The tax port therefore returns unavailable. No Japanese rate or rounding default is inferred. Integer base/option price tests establish arithmetic safety only; they do not establish tax correctness or a customer-payable total. A table QR locator allows reading the public menu, not authorizing an order or a payment.
+The real Go engine groups gross amounts by normalized rate, then computes exact inclusive tax with floor once per group. Rules have effective dates and legal status; missing/ambiguous/unsupported data is an explicit error. Persistable copied snapshots retain calculation inputs, rule versions and amounts without consulting later schedules. These are real formulas and approved initial data, not test-double tax values.
 
-日本語：税区分・税込／税別・端数処理は未決。税計算を無効のままにし、Owner の回答を正式な範囲付き判断として記録した後に、必要な fixture と検証を追加する。
+`catalog.Service.QuoteDineIn` accepts product/option keys and quantities, reads one repeatable database snapshot, applies the current published prices and store overrides, validates availability and selections, and resolves the effective central dine-in rule for the trusted server instant's Japanese date. It returns copied item/option names and prices together with the real tax snapshot. Guests cannot supply prices, rates or an arbitrary tax class through this contract. S3 must perform its order-admission revalidation and persist the accepted snapshot in the order transaction; this read-only quote does not reserve a price or admit an order.
 
-繁中：正式稅務規則未批准；不從範例售價猜稅率或捨入方式。若 Owner 僅允許測試替身，仍必須保留正式報價／收款停用，並明確記錄該測試授權的限制。
+日本語：P-78 で注文確定と同時に税 snapshot を保存する。P-79/P-80 で Stripe 注文別領収と CASH まとめ収書の invoice 境界・税額・返金 E2E を確認する。cart quote を正式 invoice と見なさない。
+
+繁中：法定稅率及首版捨入規則已明確，不再列為阻礙。後續訂單保存當時快照，未來法改不回算歷史金額；金流及收據仍依既定工作包驗收。
 
 ## API seam / API 境界
 
@@ -72,4 +74,4 @@ Until those gates and real MOD-08 integration are accepted, the executable remai
 
 Run `make test-postgres` against its disposable loopback-only PostgreSQL container. CI uses its own PostgreSQL service. Tests must execute actual database publication, isolation, stale writes, overrides, detachment, options, immutable history and API authorization; a run with database integration tests skipped is not acceptance.
 
-Migration 002 is paired with a down migration; the embedded test migration runner applies both S1 and S2 atomically and rolls them back in reverse order. This is destructive test-schema teardown, not a production data rollback procedure. Never point the test harness at a production or shared business database. The separate S0 SQLite smoke remains historical infrastructure evidence.
+Migrations 002 (menu) and 003 (central legal rates) have paired down migrations; the embedded test migration runner applies the complete set atomically and rolls it back in reverse order. This is destructive test-schema teardown, not a production data rollback procedure. Never point the test harness at a production or shared business database. The separate S0 SQLite smoke remains historical infrastructure evidence.

@@ -3,7 +3,6 @@
 package catalog
 
 import (
-	"context"
 	"errors"
 	"strings"
 )
@@ -26,7 +25,6 @@ var (
 	ErrNotDetached     = errors.New("store menu is linked")
 	ErrAlreadyDetached = errors.New("store menu is already detached")
 	ErrPriceOverflow   = errors.New("integer price overflow")
-	ErrTaxUnavailable  = errors.New("tax policy is not configured")
 )
 
 type StoreScope struct{ TenantID, StoreID string }
@@ -135,29 +133,6 @@ type OptionSelection struct {
 type PriceQuote struct {
 	ProductKey string `json:"product_key"`
 	UnitMinor  int64  `json:"unit_minor"`
-}
-
-type TaxInput struct {
-	TenantID    string
-	StoreID     string
-	AmountMinor int64
-}
-
-type TaxResult struct {
-	TaxMinor   int64
-	TotalMinor int64
-}
-
-// TaxPolicy is a future MOD-05 tax seam. No default rate or rounding rule is
-// assumed while the owner decision is pending.
-type TaxPolicy interface {
-	Calculate(context.Context, TaxInput) (TaxResult, error)
-}
-
-type UnavailableTaxPolicy struct{}
-
-func (UnavailableTaxPolicy) Calculate(context.Context, TaxInput) (TaxResult, error) {
-	return TaxResult{}, ErrTaxUnavailable
 }
 
 func cleanKey(s string) bool { return strings.TrimSpace(s) == s && s != "" }

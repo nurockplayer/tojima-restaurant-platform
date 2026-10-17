@@ -16,3 +16,6 @@ ALTER TABLE menu_catalogs DROP CONSTRAINT menu_catalog_draft_base_revision_fk;
 DROP TABLE menu_catalog_revisions;
 DROP TABLE menu_catalogs;
 DROP FUNCTION reject_menu_revision_mutation();
+DROP FUNCTION reject_child_insert_for_sealed_revision();
+DROP FUNCTION protect_menu_revision_seal();
+DROP FUNCTION require_sealed_menu_current_revision();
