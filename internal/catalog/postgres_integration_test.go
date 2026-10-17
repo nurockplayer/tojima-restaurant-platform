@@ -59,8 +59,8 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ('t','Tenant'),('other','Other');
-		INSERT INTO stores(tenant_id,store_id,name) VALUES ('t','s1','One'),('t','s2','Two'),('other','s1','Other one');
+	if _, err = pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ('t','Tenant'),('other','Other'),('fk-fixture','FK fixture');
+		INSERT INTO stores(tenant_id,store_id,name) VALUES ('t','s1','One'),('t','s2','Two'),('other','s1','Other one'),('fk-fixture','store','Foreign-key fixture');
 		INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES ('t','s1','table','Table one','locator-one'),('t','s2','table','Table two','locator-two'),('other','s1','table','Other table','other-locator')`); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 			t.Fatalf("company publish changed detached store: %+v %v", detached, err)
 		}
 		var foreignCatalogID int64
-		if err = pool.QueryRow(ctx, `INSERT INTO menu_catalogs(tenant_id,owner_kind,store_id) VALUES('other','STORE','s1') RETURNING catalog_id`).Scan(&foreignCatalogID); err != nil {
+		if err = pool.QueryRow(ctx, `INSERT INTO menu_catalogs(tenant_id,owner_kind,store_id) VALUES('fk-fixture','STORE','store') RETURNING catalog_id`).Scan(&foreignCatalogID); err != nil {
 			t.Fatal(err)
 		}
 		_, err = pool.Exec(ctx, `INSERT INTO store_menu_bindings(tenant_id,store_id,mode,catalog_id,detached_by) VALUES('t','s2','DETACHED',$1,'bad')`, foreignCatalogID)
@@ -250,10 +250,23 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 		if _, err = service.PublishCompanyDraft(ctx, "other", "owner", draft.Version); err != nil {
 			t.Fatalf("healthy publication retry failed: %v", err)
 		}
-		// Competing company publication and detach both take the company row before
-		// store rows. A bounded context turns a lock-order regression into a failure.
+		// Establish the publish-first winner explicitly: after publication moves
+		// the company pointer, a detach request based on the prior revision must be stale.
 		next := sampleMenu("Other v2", 600, false)
 		draft, err = service.SaveCompanyDraft(ctx, "other", "owner", 1, next)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = service.PublishCompanyDraft(ctx, "other", "owner", draft.Version); err != nil {
+			t.Fatalf("publish-first preparation failed: %v", err)
+		}
+		if _, err = service.DetachStore(ctx, StoreScope{"other", "s1"}, "owner", 1); !errors.Is(err, ErrStale) {
+			t.Fatalf("detach based on pre-publish revision returned %v", err)
+		}
+		// Race the next publication against detach. A detach-first outcome
+		// snapshots revision 2; a publish-first outcome rejects the stale detach.
+		next = sampleMenu("Other v3", 700, false)
+		draft, err = service.SaveCompanyDraft(ctx, "other", "owner", 2, next)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -268,7 +281,7 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 		}()
 		go func() {
 			<-start
-			_, e := service.DetachStore(deadline, StoreScope{"other", "s1"}, "owner", 1)
+			_, e := service.DetachStore(deadline, StoreScope{"other", "s1"}, "owner", 2)
 			results <- e
 		}()
 		close(start)
