@@ -3,6 +3,7 @@ import { checkoutClient } from './checkout';
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
 });
 
 describe('checkout proof browser API', () => {
@@ -86,6 +87,67 @@ describe('checkout proof browser API', () => {
       expect(init.credentials).toBe('same-origin');
       expect(init.referrerPolicy).toBe('no-referrer');
     }
+  });
+
+  it('uses the configured same-origin API prefix for guest proof and staff calls', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', '/api');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValue(json({ order_id: 'order-1', state: 'OPEN', payment_review_required: false, resume_available: true }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutClient.ensureContext('session-1', 'join-secret');
+    await checkoutClient.status('session-1', 'join-secret', 'order-1');
+    await checkoutClient.resume('session-1', 'order-1');
+    await checkoutClient.staffStatus({ tenantID: 'tenant-1', storeID: 'store-1' }, 'staff-secret', 'table-1', 'session-1', 'order-1');
+    await checkoutClient.reconcile({ tenantID: 'tenant-1', storeID: 'store-1' }, 'staff-secret', 'table-1', 'session-1', 'order-1');
+
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      'http://localhost/api/v1/guest/sessions/session-1/checkout-context',
+      'http://localhost/api/v1/guest/sessions/session-1/orders/order-1/checkout',
+      'http://localhost/api/v1/guest/sessions/session-1/orders/order-1/checkout/resume',
+      'http://localhost/api/v1/staff/tenants/tenant-1/stores/store-1/tables/table-1/sessions/session-1/orders/order-1/payment',
+      'http://localhost/api/v1/staff/tenants/tenant-1/stores/store-1/tables/table-1/sessions/session-1/orders/order-1/payment/reconcile',
+    ]);
+    const [contextInit, statusInit, resumeInit] = fetchMock.mock.calls.slice(0, 3).map(([, init]) => init as RequestInit);
+    expect(new Headers(contextInit?.headers).get('authorization')).toBe('Bearer join-secret');
+    expect(contextInit?.credentials).toBe('same-origin');
+    expect(statusInit?.credentials).toBe('same-origin');
+    expect(resumeInit?.credentials).toBe('same-origin');
+    expect(new Headers(resumeInit?.headers).has('authorization')).toBe(false);
+  });
+
+  it('preserves an external staff API base path when composing payment routes', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test/gateway/api/');
+    const fetchMock = vi.fn().mockResolvedValue(json({ order_id: 'order-1', state: 'PAID', payment_review_required: false, resume_available: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutClient.staffStatus({ tenantID: 'tenant-1', storeID: 'store-1' }, 'staff-secret', 'table-1', 'session-1', 'order-1');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('https://api.example.test/gateway/api/v1/staff/tenants/tenant-1/stores/store-1/tables/table-1/sessions/session-1/orders/order-1/payment');
+  });
+
+  it('keeps a double-leading-slash path on its configured same origin', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'http://localhost//foreign.example.test/api');
+    const fetchMock = vi.fn().mockResolvedValue(json({ order_id: 'order-1', state: 'OPEN', payment_review_required: false, resume_available: false }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    await checkoutClient.status('session-1', 'join-secret', 'order-1');
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost//foreign.example.test/api/v1/guest/sessions/session-1/orders/order-1/checkout');
+  });
+
+  it.each([
+    'https://other.example.test/api',
+    '//other.example.test/api',
+    '/\\other.example.test/api',
+  ])('rejects cross-origin or unsupported guest API base %s before forwarding credentials', async (base) => {
+    vi.stubEnv('VITE_API_BASE_URL', base);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(checkoutClient.ensureContext('session-1', 'join-secret')).rejects.toThrow('checkout_context_unavailable');
+    await expect(checkoutClient.status('session-1', 'join-secret', 'order-1')).rejects.toThrow('checkout_context_unavailable');
+    await expect(checkoutClient.resume('session-1', 'order-1')).rejects.toThrow('checkout_context_unavailable');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

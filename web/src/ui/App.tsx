@@ -119,6 +119,7 @@ export function App() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
   const [checkoutOrderID, setCheckoutOrderID] = useState('');
+  const [checkoutPollEpoch, setCheckoutPollEpoch] = useState(0);
   const checkoutOrderRef = useRef('');
   checkoutOrderRef.current = checkoutOrderID;
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus | null>(null);
@@ -145,6 +146,10 @@ export function App() {
   const checkoutReadsInFlight = useRef(new Set<string>());
   const replay = useRef<Replay | null>(null);
   const inFlight = useRef(false);
+
+  const invalidateCheckoutRequests = useCallback(() => {
+    checkoutRequestSequence.current++;
+  }, []);
 
   const invalidateGrant = useCallback((sessionID: string) => {
     checkoutRequestSequence.current++;
@@ -295,13 +300,18 @@ export function App() {
       disposed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       if (timer !== undefined) window.clearInterval(timer);
-      checkoutRequestSequence.current++;
+      invalidateCheckoutRequests();
     };
-  }, [checkoutOrderID, entry, refreshCheckoutStatus, tab]);
+  }, [checkoutOrderID, checkoutPollEpoch, entry, invalidateCheckoutRequests, refreshCheckoutStatus, tab]);
 
   const selectCheckoutOrder = (orderID: string) => {
     checkoutViewEpoch.current++;
     resumeRequestSequence.current++;
+    if (checkoutOrderRef.current === orderID) {
+      setCheckoutStatus(null); setCheckoutError(''); setResumingOrderID('');
+      setCheckoutPollEpoch((epoch) => epoch + 1);
+      return;
+    }
     checkoutOrderRef.current = orderID;
     setCheckoutOrderID(orderID); setCheckoutStatus(null); setCheckoutError(''); setResumingOrderID('');
   };
@@ -695,7 +705,7 @@ export function App() {
               {checkoutStatus?.order_id === order.order_id && checkoutStatus.resume_available && <button className="button small primary" disabled={resumingOrderID === order.order_id} onClick={() => void resumeCheckout(order.order_id)}>{resumingOrderID === order.order_id ? t.checkoutLoading : t.continueCheckout}</button>}
               {checkoutStatus?.order_id === order.order_id && !checkoutStatus.resume_available && !['PAID', 'EXPIRED', 'FAILED'].includes(checkoutStatus.state) && <p className="notice">{t.checkoutSupport}</p>}
             </>}
-            <button className="button small quiet" disabled={resumingOrderID === order.order_id} onClick={() => selectCheckoutOrder(order.order_id)}>{t.checkCheckout}</button>
+            <button className="button small quiet" onClick={() => selectCheckoutOrder(order.order_id)}>{t.checkCheckout}</button>
           </div>}
           {order.quote?.lines.map((line) => <div className="order-line" key={line.line_id}><span>{line.name} × {line.quantity}{line.options.map((option) => <small className="order-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>{option.name} +{safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}</span><strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong></div>)}
           <div className="order-total"><span>{t.total}</span><strong>{safeAmount(order.quote?.tax.total_gross_jpy ?? order.total_gross_jpy)}</strong></div><div className="tax-row"><span>{t.tax}</span><span>{safeAmount(order.quote?.tax.total_tax_jpy)}</span></div><small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
