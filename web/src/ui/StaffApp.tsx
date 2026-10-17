@@ -12,6 +12,8 @@ type View = 'tables' | 'kds';
 type Dialog = 'cash' | 'close' | null;
 const CONTEXT_KEY = 'tojima.staff.context';
 const TOKEN_KEY = 'tojima.staff.access-token';
+// The HTTP client has no timeout, so a hung KDS poll is released (and the board marked stale) after this.
+const KDS_POLL_TIMEOUT_MS = 10000;
 
 const copy = {
   ja: {
@@ -263,16 +265,19 @@ export function StaffApp() {
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;
     let timer: number | undefined;
+    let cancelled = false;
     const schedule = () => {
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') timer = window.setInterval(() => {
         if (kdsPoll.current) return;
-        const poll = loadKds(context, token).catch(() => setKdsStale(true)).finally(() => { if (kdsPoll.current === poll) kdsPoll.current = null; });
+        let watchdog: number | undefined;
+        const timeout = new Promise<never>((_resolve, reject) => { watchdog = window.setTimeout(() => reject(new Error('kds_poll_timeout')), KDS_POLL_TIMEOUT_MS); });
+        const poll = Promise.race([loadKds(context, token), timeout]).catch(() => { if (!cancelled) setKdsStale(true); }).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
         kdsPoll.current = poll;
       }, 2500);
     };
     schedule(); document.addEventListener('visibilitychange', schedule);
-    return () => { document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
+    return () => { cancelled = true; document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
   }, [capabilities?.can_kitchen, connected, context, loadKds, token, view]);
 
   const refreshDetail = useCallback(async () => {
