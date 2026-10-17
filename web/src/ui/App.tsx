@@ -6,6 +6,8 @@ import type { GuestOperations, GuestOrderStatus } from '../api/operations';
 import { checkoutClient, checkoutNavigation } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
+import { DemoBanner } from './DemoBanner';
+import type { DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
 const copy = {
@@ -28,7 +30,7 @@ const copy = {
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
     error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
     selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
-    noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中',
+    noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
   },
   zh: {
     brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
@@ -49,7 +51,7 @@ const copy = {
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
     error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
     selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
-    noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語',
+    noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
 } satisfies Record<Locale, Record<string, string>>;
 
@@ -106,7 +108,7 @@ function checkoutStateLabel(state: CheckoutState | string, locale: Locale): stri
   return (labels[state] ?? labels.UNKNOWN!)[locale];
 }
 
-export function App() {
+export function App({ demo = false }: DemoSurfaceProps) {
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
   const query = useMemo(entryFromURL, []);
@@ -125,7 +127,7 @@ export function App() {
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
   const [resumingOrderID, setResumingOrderID] = useState('');
-  const [payment, setPayment] = useState<'STRIPE' | 'CASH'>('STRIPE');
+  const [payment, setPayment] = useState<'STRIPE' | 'CASH'>(demo ? 'CASH' : 'STRIPE');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -403,7 +405,10 @@ export function App() {
   }, [entry, tab, refreshCart]);
 
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
-  useEffect(() => { if (guestOperations?.cash_enabled === false && payment === 'CASH') setPayment('STRIPE'); }, [guestOperations?.cash_enabled, payment]);
+  useEffect(() => {
+    if (demo && payment === 'STRIPE') setPayment('CASH');
+    else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
+  }, [demo, guestOperations?.cash_enabled, payment]);
   useEffect(() => {
     if (preview && cart && (preview.generation !== cart.generation || preview.version !== cart.version)) {
       dispatchCart({ type: 'preview-cleared' });
@@ -580,9 +585,9 @@ export function App() {
     } finally { setBusy(false); }
   };
 
-  if (loading) return <Shell locale={locale} setLocale={setLocale} t={t}><div className="loading-card" role="status">{t.loading}</div></Shell>;
+  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}><div className="loading-card" role="status">{t.loading}</div></Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
-  if (!entry || blocked) return <Shell locale={locale} setLocale={setLocale} t={t}>
+  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <section className="entry-card" aria-labelledby="entry-title">
       <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title">{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ?? query.sessionID ?? '—'}</strong></div>
@@ -599,7 +604,7 @@ export function App() {
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
-  return <Shell locale={locale} setLocale={setLocale} t={t}>
+  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <div className="workspace">
       <header className="welcome">
         <div><div className="eyebrow">{t.menu}</div><h1>{entry.locator ? `${t.table} ${entry.locator}` : t.brand}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
@@ -653,8 +658,8 @@ export function App() {
             </article>)}</div>
             <div className="total-row"><span>{t.total}</span><strong>{safeAmount(preview.quote.tax.total_gross_jpy)}</strong></div>
             <div className="tax-row"><span>{t.tax}</span><span>{safeAmount(preview.quote.tax.total_tax_jpy)}</span></div>
-            <fieldset className="payment-choice"><legend>{t.method}</legend><label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label>{guestOperations?.cash_enabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{t.cash}</label>}</fieldset>
-            <p className="payment-note">{payment === 'STRIPE' ? t.stripeNote : t.cashNote}</p>
+            <fieldset className="payment-choice"><legend>{t.method}</legend>{!demo && <label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label>}{guestOperations?.cash_enabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{demo ? t.demoCash : t.cash}</label>}</fieldset>
+            <p className="payment-note">{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>
             {!previewAmountsSafe && <p className="error" role="alert">{t.amountError}</p>}
             {previewMatchesCart && <button className="button primary wide" disabled={busy || unavailable || uncertain || !previewAmountsSafe} onClick={() => void confirmOrder()}>{busy ? t.working : t.confirm}</button>}
             <button className="button quiet wide" disabled={busy} onClick={clearPreview}>{t.cancelPreview}</button>
@@ -694,7 +699,7 @@ export function App() {
 
       {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
-          <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : t.cash}</span></div>
+          <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
           {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
           {order.payment_method === 'STRIPE' && <div className="checkout-status-panel">
             <strong>{t.checkoutStatus}</strong>
@@ -716,6 +721,6 @@ export function App() {
   </Shell>;
 }
 
-function Shell({ children, locale, setLocale, t }: { children: React.ReactNode; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
-  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header>{children}</main>;
+function Shell({ children, demo = false, locale, setLocale, t }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
+  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}</main>;
 }

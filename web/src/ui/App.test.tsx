@@ -78,6 +78,46 @@ describe('guest app mount', () => {
     expect(host.textContent).toContain('¥1,210');
   });
 
+  it('keeps demo pricing labeled, tolerates omitted option groups, and commits only the synthetic cash method', async () => {
+    window.history.replaceState({}, '', '/?table=table-1');
+    const initialCart = { session_id: 'session-1', generation: 1, version: 0, lines: [] };
+    const addedCart = { ...initialCart, version: 1, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: 'シロナガスクジラ定食', product_available: true, quantity: 1, options: [] }] };
+    const preview = { session_id: 'session-1', generation: 1, version: 1, fingerprint: 'demo-preview', quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: 'シロナガスクジラ定食', base_gross_jpy: '960', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '960', total_net_jpy: '873', total_tax_jpy: '87', buckets: [] } } };
+    const committed = { outcome: 'COMMITTED', order: { order_id: 'demo-order', session_id: 'session-1', generation: 1, payment_method: 'CASH', requires_staff_acceptance: false, quote: preview.quote, created_at: '2026-10-18T00:00:00Z' }, cart: { ...addedCart, generation: 2, version: 0, lines: [] } };
+    const menu = { currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '定食', position: 0, products: [{ key: 'meal', name: 'シロナガスクジラ定食', description: 'DEMO / 歴史資料の参考価格・現行店内価格未確認', effective_price_minor: '960', position: 0, availability: 'AVAILABLE', selectable: true }] }] };
+    const writes: Array<{ url: string; method: string; body: string }> = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/table-1')) return json(table);
+      if (url.endsWith('/v1/guest/tables/table-1/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/table-1/menu?amounts=string')) return json(menu);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(initialCart);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [committed.order] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/cart/lines') && init.method === 'POST') { writes.push({ url, method: init.method, body: String(init.body) }); return json(addedCart); }
+      if (url.endsWith('/cart/preview') && init.method === 'POST') return json(preview);
+      if (url.endsWith('/cart/commit') && init.method === 'POST') { writes.push({ url, method: init.method, body: String(init.body) }); return json(committed); }
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => { root?.render(<App demo />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host.textContent).toContain('博多餃子酒場 シロナガスクジラ');
+    expect(host.textContent).toContain('参考価格 · 現行店内価格未確認');
+    expect(host.textContent).toContain('実店舗への注文・支払いは行われません');
+    expect(host.textContent).toContain('歴史資料の参考価格');
+    expect(host.textContent).toContain('シロナガスクジラ定食');
+    await clickButton(host, 'カートに追加');
+    await clickButton(host, '金額を確認する');
+    expect(host.textContent).not.toContain('クレジットカード');
+    expect(host.textContent).toContain('現金（デモ・テスト専用）');
+    await clickButton(host, 'この内容で注文を確定');
+
+    expect(JSON.parse(writes.find((write) => write.url.endsWith('/cart/commit'))!.body).payment_method).toBe('CASH');
+    expect(writes.some((write) => write.url.endsWith('/checkout-context'))).toBe(false);
+  });
+
   it.each([
     { name: 'STAFF_OPEN PAY_LATER', mode: 'STAFF_OPEN', cashMode: 'PAY_LATER', fulfillment: 'ACCEPTED', requires: false, expected: '受付済み · 未払い' },
     { name: 'STAFF_OPEN PREPAID', mode: 'STAFF_OPEN', cashMode: 'PREPAID', fulfillment: 'WAITING', requires: false, expected: '調理開始待ち · 未払い' },

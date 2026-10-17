@@ -15,6 +15,19 @@ afterEach(() => {
 });
 
 describe('catalog admin UI', () => {
+  it('shows the demo identity across catalog entry and language changes, and stays hidden in normal mode', async () => {
+    user = userEvent.setup();
+    const { rerender } = render(<CatalogApp demo />);
+    expect(screen.getByRole('note', { name: 'DEMO' }).textContent).toContain('博多餃子酒場 シロナガスクジラ');
+    expect(screen.getByRole('note', { name: 'DEMO' }).textContent).toContain('参考価格 · 現行店内価格未確認');
+    expect(screen.getByRole('note', { name: 'DEMO' }).textContent).toContain('実店舗への注文・支払いは行われません');
+    await user.click(screen.getByRole('button', { name: /繁體中文/ }));
+    expect(screen.getByRole('note', { name: 'DEMO' }).textContent).toContain('參考價格 · 目前店內價格未確認');
+    expect(screen.getByRole('note', { name: 'DEMO' }).textContent).toContain('不會向實際店家送出訂單或付款');
+    rerender(<CatalogApp />);
+    expect(screen.queryByRole('note', { name: 'DEMO' })).toBeNull();
+  });
+
   it('keeps the document language aligned with the Japanese and Traditional Chinese toggle', async () => {
     user = userEvent.setup();
     render(<CatalogApp />);

@@ -7,10 +7,13 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nurockplayer/tojima-restaurant-platform/docs/demo"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/operations"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
@@ -25,6 +28,9 @@ type Fixture struct {
 	Orders        *ordering.Service
 	Operations    *operations.Service
 	Locator       string
+	TenantID      string
+	StoreID       string
+	TableID       string
 	Schema        string
 	admin         *pgx.Conn
 	schemaCreated bool
@@ -33,8 +39,9 @@ type Fixture struct {
 // Options are explicit test-fixture settings and never select production
 // restaurant defaults.
 type Options struct {
-	CashEnabled bool
-	CashMode    operations.CashMode
+	CashEnabled           bool
+	CashMode              operations.CashMode
+	DemoShironagasukujira bool
 }
 
 // New requires an explicit loopback test database and creates a random schema.
@@ -48,6 +55,9 @@ func New(ctx context.Context, dsn string) (f *Fixture, err error) {
 func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixture, err error) {
 	if options.CashMode != operations.Prepaid && options.CashMode != operations.PayLater {
 		return nil, errors.New("invalid test cash mode")
+	}
+	if options.DemoShironagasukujira && (!options.CashEnabled || options.CashMode != operations.PayLater) {
+		return nil, errors.New("Shironagasukujira demo requires the explicit synthetic CASH/PAY_LATER test setting")
 	}
 	if dsn == "" {
 		return nil, errors.New("TEST_DATABASE_URL is required")
@@ -63,7 +73,14 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	if _, err = rand.Read(raw[:]); err != nil {
 		return nil, err
 	}
-	f = &Fixture{Locator: "test-table", Schema: "p78_guest_" + hex.EncodeToString(raw[:])}
+	f = &Fixture{Locator: "test-table", TenantID: "test-tenant", StoreID: "test-store", TableID: "table-01", Schema: "p78_guest_" + hex.EncodeToString(raw[:])}
+	tenantName, storeName, tableName := "P78 test tenant", "P78 test store", "テーブル 01"
+	if options.DemoShironagasukujira {
+		f.Schema = "p85_demo_" + hex.EncodeToString(raw[:])
+		f.TenantID, f.StoreID, f.TableID = "demo-synthetic", "demo-shironagasukujira", "table-05"
+		f.Locator = "demo-shironagasukujira-table-05"
+		tenantName, storeName, tableName = "Synthetic demo tenant", "DEMO — 博多餃子酒場 シロナガスクジラ（historical reference）", "テーブル 05"
+	}
 	f.admin, err = pgx.ConnectConfig(ctx, cfg.ConnConfig)
 	if err != nil {
 		return nil, err
@@ -92,9 +109,13 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	if err != nil {
 		return nil, err
 	}
-	_, err = f.Pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ('test-tenant','P78 test tenant');
-	 INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode) VALUES ('test-tenant','test-store','P78 test store','DIRECT_SCAN');
-	 INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES ('test-tenant','test-store','table-01','テーブル 01','test-table')`)
+	_, err = f.Pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ($1,$2)`, f.TenantID, tenantName)
+	if err == nil {
+		_, err = f.Pool.Exec(ctx, `INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode) VALUES ($1,$2,$3,'DIRECT_SCAN')`, f.TenantID, f.StoreID, storeName)
+	}
+	if err == nil {
+		_, err = f.Pool.Exec(ctx, `INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES ($1,$2,$3,$4,$5)`, f.TenantID, f.StoreID, f.TableID, tableName, f.Locator)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +139,24 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 		{Key: "teishoku", Name: "東島の定食", Description: "焼き魚・小鉢・ごはん・お味噌汁", BasePriceMinor: 1100, Active: true, Groups: []catalog.OptionGroup{{Key: "rice", Name: "ごはんの量", MinSelect: 1, MaxSelect: 1, Options: []catalog.Option{{Key: "regular", Name: "普通", Active: true}, {Key: "large", Name: "大盛り", PriceDeltaMinor: 110, Active: true}}}}},
 		{Key: "tea", Name: "ほうじ茶", Description: "香ばしい温かなお茶", BasePriceMinor: 330, Active: true, Groups: []catalog.OptionGroup{{Key: "aroma", Name: "香り（任意）", MinSelect: 0, MaxSelect: 1, Options: []catalog.Option{{Key: "yuzu", Name: "ゆず", Active: true}, {Key: "ginger", Name: "生姜", Active: true}}}}},
 	}}}}
-	draft, e := f.Menus.SaveCompanyDraft(ctx, "test-tenant", "fixture-bootstrap", 0, data)
+	if options.DemoShironagasukujira {
+		evidence, loadErr := demo.LoadShironagasukujira()
+		if loadErr != nil {
+			return nil, fmt.Errorf("load Shironagasukujira demo evidence: %w", loadErr)
+		}
+		data, err = shironagasukujiraCatalogData(evidence)
+		if err != nil {
+			return nil, err
+		}
+	}
+	draft, e := f.Menus.SaveCompanyDraft(ctx, f.TenantID, "fixture-bootstrap", 0, data)
 	if e != nil {
 		return nil, e
 	}
-	if _, err = f.Menus.PublishCompanyDraft(ctx, "test-tenant", "fixture-bootstrap", draft.Version); err != nil {
+	if _, err = f.Menus.PublishCompanyDraft(ctx, f.TenantID, "fixture-bootstrap", draft.Version); err != nil {
 		return nil, err
 	}
-	scope := catalog.StoreScope{TenantID: "test-tenant", StoreID: "test-store"}
+	scope := catalog.StoreScope{TenantID: f.TenantID, StoreID: f.StoreID}
 	m, e := f.Menus.ReadStoreMenu(ctx, scope)
 	if e != nil {
 		return nil, e
@@ -150,10 +181,76 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	if err != nil {
 		return nil, err
 	}
-	if _, err = f.Operations.SetCashSettings(ctx, operations.StoreScope{TenantID: "test-tenant", StoreID: "test-store"}, "fixture-bootstrap", options.CashEnabled, options.CashMode, 0); err != nil {
+	if _, err = f.Operations.SetCashSettings(ctx, operations.StoreScope{TenantID: f.TenantID, StoreID: f.StoreID}, "fixture-bootstrap", options.CashEnabled, options.CashMode, 0); err != nil {
 		return nil, err
 	}
 	return f, nil
+}
+
+func shironagasukujiraCatalogData(evidence demo.Evidence) (catalog.CatalogData, error) {
+	if err := demo.ValidateShironagasukujira(evidence); err != nil {
+		return catalog.CatalogData{}, err
+	}
+	categoryPositions := make(map[string]int, len(evidence.Categories))
+	categories := make([]catalog.Category, len(evidence.Categories))
+	for i, category := range evidence.Categories {
+		categoryPositions[category.Key] = i
+		categories[i] = catalog.Category{Key: category.Key, Name: category.LabelJA, Position: i, Products: []catalog.Product{}}
+	}
+	for _, item := range evidence.Items {
+		if !item.OrderableInDemo || item.ReferenceChannel != "DINE_IN_HISTORICAL" || item.ReferencePriceJPY == nil {
+			continue
+		}
+		position, found := categoryPositions[item.CategoryKey]
+		if !found {
+			return catalog.CatalogData{}, demo.ErrInvalidEvidence
+		}
+		sourceLabel, ok := shironagasukujiraSourceLabel(item.SourceID)
+		if !ok {
+			return catalog.CatalogData{}, demo.ErrInvalidEvidence
+		}
+		basePrice := *item.ReferencePriceJPY
+		product := catalog.Product{
+			Key:            strings.ToLower(strings.ReplaceAll(item.DemoKey, "-", "_")),
+			Name:           item.NameJA,
+			Description:    fmt.Sprintf("DEMO / 歴史資料の参考価格・現行店内価格未確認 — %s", sourceLabel),
+			BasePriceMinor: basePrice, Active: true, Position: len(categories[position].Products),
+			Groups: []catalog.OptionGroup{},
+		}
+		if item.DemoKey == "LUNCH-SHIRO" {
+			group := evidence.DemoOptionGroups[0]
+			regularPrice := *item.ReferencePriceJPY + group.Options[0].PriceDeltaJPY
+			smallPrice := *item.ReferencePriceJPY + group.Options[1].PriceDeltaJPY
+			regularAdjustment := regularPrice - smallPrice
+			product.BasePriceMinor = smallPrice
+			product.Description += fmt.Sprintf("；ごはん普通%d円・小（100g）%d円", regularPrice, smallPrice)
+			product.Groups = []catalog.OptionGroup{{
+				Key: "rice", Name: group.NameJA, MinSelect: 1, MaxSelect: 1, Position: 0,
+				Options: []catalog.Option{
+					{Key: group.Options[0].Key, Name: group.Options[0].NameJA, PriceDeltaMinor: regularAdjustment, Position: 0, Active: true},
+					{Key: group.Options[1].Key, Name: group.Options[1].NameJA, PriceDeltaMinor: 0, Position: 1, Active: true},
+				},
+			}}
+		}
+		categories[position].Products = append(categories[position].Products, product)
+	}
+	orderableCategories := make([]catalog.Category, 0, len(categories))
+	for _, category := range categories {
+		if len(category.Products) != 0 {
+			orderableCategories = append(orderableCategories, category)
+		}
+	}
+	return catalog.CatalogData{Categories: orderableCategories}, nil
+}
+
+func shironagasukujiraSourceLabel(sourceID string) (string, bool) {
+	labels := map[string]string{
+		"tabelog_menu_photo":  "食べログの過去の投稿メニュー写真",
+		"tabelog_2026_review": "2026年6月の口コミ",
+		"dinner_2025_blog":    "2025年2月の食記",
+	}
+	label, ok := labels[sourceID]
+	return label, ok
 }
 
 func (f *Fixture) Close(ctx context.Context) {

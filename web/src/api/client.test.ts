@@ -39,6 +39,20 @@ describe('guest cart API', () => {
     expect(amountJPY(1200)).toBe('¥1,200');
   });
 
+  it('normalizes products whose wire contract omits option_groups', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response({
+      currency: 'JPY', price_mode: 'TAX_INCLUSIVE',
+      categories: [{ key: 'food', name: '食事', position: 0, products: [{
+        key: 'meal', name: '定食', effective_price_minor: '960', position: 0,
+        availability: 'AVAILABLE', selectable: true,
+      }] }],
+    })));
+
+    const menu = await cartClient.menuForTable('table-1');
+
+    expect(menu.categories[0]?.products[0]?.option_groups).toEqual([]);
+  });
+
   it('lets the caller retry the exact mutation payload with the original idempotency key', async () => {
     const first = newOperationKey();
     const fetch = vi.fn().mockRejectedValueOnce(new TypeError('connection closed')).mockResolvedValueOnce(response(cart));

@@ -3,13 +3,16 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -53,19 +56,30 @@ func run() error {
 	webRoot := flag.String("web-dist", "web/dist", "built staff/guest SPA directory")
 	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
 	catalogFixture := flag.Bool("catalog-fixture", false, "enable isolated catalog admin routes and local test credentials")
+	demoShironagasukujira := flag.Bool("demo-shironagasukujira", false, "seed the isolated Shironagasukujira reference-data demo")
 	flag.Parse()
+	if err := validateFixtureMode(*demoShironagasukujira, *withPayments); err != nil {
+		return err
+	}
 	if strings.TrimSpace(*credentialsPath) == "" {
 		return errors.New("-credentials is required")
 	}
 	if err := validateWebRoot(*webRoot); err != nil {
 		return err
 	}
+	if *demoShironagasukujira {
+		if err := validateDemoWebRoot(*webRoot); err != nil {
+			return err
+		}
+	}
 	if err := validateCredentialsOutsideWebRoot(*credentialsPath, *webRoot); err != nil {
 		return err
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	fixture, err := testguest.NewWithOptions(ctx, os.Getenv("TEST_DATABASE_URL"), testguest.Options{CashEnabled: true, CashMode: "PAY_LATER"})
+	fixture, err := testguest.NewWithOptions(ctx, os.Getenv("TEST_DATABASE_URL"), testguest.Options{
+		CashEnabled: true, CashMode: "PAY_LATER", DemoShironagasukujira: *demoShironagasukujira,
+	})
 	if err != nil {
 		return fmt.Errorf("create isolated database fixture: %w", err)
 	}
@@ -80,24 +94,16 @@ func run() error {
 		}
 	}
 
+	useCatalogFixture := catalogFixtureEnabled(*catalogFixture, *demoShironagasukujira)
 	newCredentials := testoperations.NewCredentialSet
-	if *catalogFixture {
+	if useCatalogFixture {
 		newCredentials = testoperations.NewCatalogCredentialSet
 	}
-	identity, directory, credentials, err := newCredentials("test-tenant", "test-store")
+	identity, directory, credentials, err := newCredentials(fixture.TenantID, fixture.StoreID)
 	if err != nil {
 		return err
 	}
-	doc := credentialDocument{
-		BaseURL: "http://127.0.0.1:8082", StaffURL: "http://127.0.0.1:8082/staff",
-		KitchenURL: "http://127.0.0.1:8082/kitchen", GuestURL: "http://127.0.0.1:8082/",
-		TenantID: "test-tenant", StoreID: "test-store", TableID: "table-01",
-		TableLocator: fixture.Locator, Schema: fixture.Schema, Credentials: credentials,
-		PaymentFixture: *withPayments, WebhookFixtureSecret: webhookSecret,
-	}
-	if *catalogFixture {
-		doc.CatalogURL = doc.BaseURL + "/catalog"
-	}
+	doc := buildCredentialDocument(fixture, credentials, useCatalogFixture, *demoShironagasukujira, *withPayments, webhookSecret)
 	ownedFile, err := writeCredentials(*credentialsPath, doc)
 	if err != nil {
 		return err
@@ -116,12 +122,20 @@ func run() error {
 		}
 	}
 	api := http.NewServeMux()
-	if *catalogFixture {
+	if useCatalogFixture {
 		api.Handle("/v1/admin/", httpapi.NewMenuHandler(fixture.Menus, identity, authz.PolicyAuthorizer{Directory: directory}))
 	}
-	api.Handle("/v1/", runtime)
+	if *demoShironagasukujira {
+		api.Handle("/v1/", rejectDemoStripeCommit(runtime))
+	} else {
+		api.Handle("/v1/", runtime)
+	}
 	api.Handle("/healthz", httpapi.NewHandler())
-	api.Handle("/", spaHandler(*webRoot))
+	if *demoShironagasukujira {
+		api.Handle("/", demoSPAHandler(*webRoot))
+	} else {
+		api.Handle("/", spaHandler(*webRoot))
+	}
 	server := &http.Server{
 		Addr:              "127.0.0.1:8082",
 		Handler:           api,
@@ -155,6 +169,62 @@ func run() error {
 		}
 		return err
 	}
+}
+
+func validateFixtureMode(demoShironagasukujira, paymentsFixture bool) error {
+	if demoShironagasukujira && paymentsFixture {
+		return errors.New("-demo-shironagasukujira cannot be combined with -payments-fixture")
+	}
+	return nil
+}
+
+func catalogFixtureEnabled(catalogFixture, demoShironagasukujira bool) bool {
+	return catalogFixture || demoShironagasukujira
+}
+
+func buildCredentialDocument(fixture *testguest.Fixture, credentials testoperations.CredentialSet, catalogFixture, demoShironagasukujira, paymentFixture bool, webhookSecret string) credentialDocument {
+	baseURL := "http://127.0.0.1:8082"
+	doc := credentialDocument{
+		BaseURL: baseURL, StaffURL: baseURL + "/staff", KitchenURL: baseURL + "/kitchen", GuestURL: baseURL + "/",
+		TenantID: fixture.TenantID, StoreID: fixture.StoreID, TableID: fixture.TableID,
+		TableLocator: fixture.Locator, Schema: fixture.Schema, Credentials: credentials,
+		PaymentFixture: paymentFixture, WebhookFixtureSecret: webhookSecret,
+	}
+	if catalogFixture {
+		doc.CatalogURL = baseURL + "/catalog"
+	}
+	if demoShironagasukujira {
+		doc.GuestURL = baseURL + "/?table=" + url.QueryEscape(fixture.Locator)
+	}
+	return doc
+}
+
+func rejectDemoStripeCommit(next http.Handler) http.Handler {
+	type commitProbe struct {
+		PaymentMethod string `json:"payment_method"`
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/v1/guest/sessions/") || !strings.HasSuffix(r.URL.Path, "/cart/commit") {
+			next.ServeHTTP(w, r)
+			return
+		}
+		const maxProbeBytes = 16 << 10
+		body, err := io.ReadAll(io.LimitReader(r.Body, maxProbeBytes+1))
+		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
+		if err == nil && len(body) <= maxProbeBytes {
+			var probe commitProbe
+			if json.Unmarshal(body, &probe) == nil && probe.PaymentMethod == "STRIPE" {
+				w.Header().Set("Cache-Control", "no-store")
+				w.Header().Set("Referrer-Policy", "no-referrer")
+				w.Header().Set("X-Content-Type-Options", "nosniff")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": "payment_unavailable"})
+				return
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 type ownedCredentialsFile struct {
@@ -223,6 +293,17 @@ func validateWebRoot(path string) error {
 	return nil
 }
 
+func validateDemoWebRoot(path string) error {
+	index, err := os.ReadFile(filepath.Join(path, "index.html"))
+	if err != nil {
+		return fmt.Errorf("demo SPA index unavailable: %w", err)
+	}
+	if _, err = injectDemoMarker(index); err != nil {
+		return fmt.Errorf("demo SPA index cannot be safely gated: %w", err)
+	}
+	return nil
+}
+
 func validateCredentialsOutsideWebRoot(credentialsPath, webRoot string) error {
 	root, err := filepath.Abs(webRoot)
 	if err != nil {
@@ -252,6 +333,14 @@ func validateCredentialsOutsideWebRoot(credentialsPath, webRoot string) error {
 }
 
 func spaHandler(root string) http.Handler {
+	return newSPAHandler(root, false)
+}
+
+func demoSPAHandler(root string) http.Handler {
+	return newSPAHandler(root, true)
+}
+
+func newSPAHandler(root string, demo bool) http.Handler {
 	absRoot, err := filepath.Abs(root)
 	if err != nil {
 		return http.NotFoundHandler()
@@ -266,7 +355,7 @@ func spaHandler(root string) http.Handler {
 		if resolved, resolveErr := filepath.EvalSymlinks(candidate); resolveErr == nil {
 			if rel, relErr := filepath.Rel(absRoot, resolved); relErr == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator)) {
 				if info, statErr := os.Stat(resolved); statErr == nil && !info.IsDir() {
-					http.ServeFile(w, r, resolved)
+					serveSPAFile(w, r, resolved, demo)
 					return
 				}
 			}
@@ -276,6 +365,45 @@ func spaHandler(root string) http.Handler {
 			http.NotFound(w, r)
 			return
 		}
-		http.ServeFile(w, r, index)
+		serveSPAFile(w, r, index, demo)
 	})
+}
+
+func serveSPAFile(w http.ResponseWriter, r *http.Request, path string, demo bool) {
+	if !demo || !strings.EqualFold(filepath.Ext(path), ".html") {
+		http.ServeFile(w, r, path)
+		return
+	}
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		http.Error(w, "demo page unavailable", http.StatusInternalServerError)
+		return
+	}
+	contents, err = injectDemoMarker(contents)
+	if err != nil {
+		http.Error(w, "demo page cannot be safely gated", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(contents)
+	}
+}
+
+func injectDemoMarker(contents []byte) ([]byte, error) {
+	const rootTag = `<div id="root">`
+	const markedRoot = `<div id="root" data-demo="shironagasukujira">`
+	if bytes.Count(contents, []byte(`id="root"`)) != 1 {
+		return nil, errors.New("missing or duplicate SPA root element")
+	}
+	if bytes.Count(contents, []byte(markedRoot)) == 1 {
+		return append([]byte(nil), contents...), nil
+	}
+	if bytes.Count(contents, []byte(rootTag)) != 1 {
+		return nil, errors.New("SPA root element does not match the pinned template")
+	}
+	return bytes.Replace(contents, []byte(rootTag), []byte(markedRoot), 1), nil
 }
