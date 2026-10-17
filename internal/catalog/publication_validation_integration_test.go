@@ -389,7 +389,7 @@ func TestPostgresP81PublishRechecksAvailabilityAfterStoreLockWait(t *testing.T) 
 		_, publishErr := fixture.Menus.PublishCompanyDraft(ctx, scope.TenantID, "p81-lock-wait", draft.Version)
 		publishResult <- publishErr
 	}()
-	waitForLinkedStoreLockWait(t, ctx, fixture.Pool)
+	waitForLinkedStoreLockWait(t, ctx, fixture.Pool, int32(held.Conn().PgConn().PID()))
 
 	var oldVersion int64
 	if err = held.QueryRow(ctx, `SELECT version FROM store_option_availability
@@ -445,7 +445,7 @@ func TestPostgresP81PublishRechecksAvailabilityAfterStoreLockWait(t *testing.T) 
 	}
 }
 
-func waitForLinkedStoreLockWait(t *testing.T, ctx context.Context, pool *pgxpool.Pool) {
+func waitForLinkedStoreLockWait(t *testing.T, ctx context.Context, pool *pgxpool.Pool, blockerPID int32) {
 	t.Helper()
 	deadline := time.NewTimer(5 * time.Second)
 	defer deadline.Stop()
@@ -455,7 +455,8 @@ func waitForLinkedStoreLockWait(t *testing.T, ctx context.Context, pool *pgxpool
 		var waiting bool
 		err := pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_stat_activity
 			WHERE datname=current_database() AND state='active' AND wait_event_type='Lock'
-			AND lower(query) LIKE '%select s.store_id from stores s where s.tenant_id=$1%')`).Scan(&waiting)
+			AND $1::int=ANY(pg_blocking_pids(pid))
+			AND lower(query) LIKE '%select s.store_id from stores s where s.tenant_id=$1%')`, blockerPID).Scan(&waiting)
 		if err != nil {
 			t.Fatal(err)
 		}
