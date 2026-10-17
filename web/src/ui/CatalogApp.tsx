@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ApiError, amountJPY } from '../api/client';
+import { ApiError, amountJPY, newOperationKey } from '../api/client';
 import { useFieldArray, useForm, type Control, type UseFormRegister } from 'react-hook-form';
 import {
   catalogClient,
@@ -15,6 +15,8 @@ import type {
   CatalogData,
   CatalogProduct,
   CompanyDraft,
+  CompanyProductEmergencyHold,
+  CompanyProductEmergencyHoldRequest,
   CompanyPreview,
   CompanyPublished,
   PublicationIssue,
@@ -35,6 +37,7 @@ const copy = {
     changeSummaryTitle: '公開内容の変更概要', changeSummaryAdvisory: 'この概要は草稿と公開版の差分です。公開可否は下記のサーバー検証結果を確認してください。', noCatalogChanges: '公開版からの変更はありません。',
     addedCategory: '追加カテゴリ', removedCategory: '削除カテゴリ', addedProduct: '追加商品', removedProduct: '削除商品', addedGroup: '追加選択肢グループ', removedGroup: '削除選択肢グループ', addedOption: '追加選択肢', removedOption: '削除選択肢', changedText: '名称・説明の変更', changedPrice: '価格の変更', changedRequiredRule: '必須選択ルールの変更', changedSalesStatus: '販売対象の変更', moreItems: (count: number) => `ほか${count}件`,
     modeLinked: '本部メニューと連動', modeDetached: 'この店舗の専用メニュー', sourcePrice: '本部基本価格', detachedBasePrice: '店舗メニューの基本価格', overridePrice: 'この店舗の価格', effectivePrice: '現在の販売価格', resetPrice: '本部価格に戻す', savePrice: '店舗価格を保存', availability: '販売状態', pending: '店舗確認待ち', available: '販売中', paused: '一時停止', confirmSale: '販売を確認', pause: '販売を一時停止', reopen: '販売を再開', reason: '停止理由', reasonRequired: '停止理由を入力してください。',
+    manageHold: '緊急販売停止を確認', holdTitle: '連動店舗への緊急販売停止', holdActive: '連動店舗で販売停止中', holdInactive: '本部緊急停止なし', holdLinked: '対象の連動店舗', holdRevision: '確認した公開版', holdVersion: '状態バージョン', holdExplain: '連動店舗にのみ適用し、専用メニューの店舗には影響しません。解除後も各店舗の一時停止・店舗確認待ちは有効です。確定済み注文は変更しません。', holdOn: '連動店舗すべての販売を停止', holdOff: '本部の販売停止を解除', holdConfirmOn: '販売停止を確定', holdConfirmOff: '販売停止解除を確定', holdSaved: '現在の販売停止状態を再読込しました。', holdConflict: '状態が更新されています。最新状態を読み込みました。内容を確認して操作をやり直してください。', holdUncertain: '結果を確認できません。同じ内容・同じ操作番号で再試行してください。', holdReload: '現在の状態を再読込', holdRetry: '同じ操作を再試行', holdReloadRequired: '最新状態を確認できるまで変更できません。', holdReadUnavailable: '販売停止状態を確認できません。', holdKey: '商品キー', holdLookup: 'キーで販売停止状態を確認', holdLookupHelp: '公開メニューから外れた商品も、キーを指定して既存の販売停止状態を確認できます。', holdCannotActivate: '有効な公開商品ではないため、新たな販売停止は開始できません。既存の停止状態がある場合のみ解除できます。', companyHoldActive: '本部による連動店舗販売停止中',
     detach: '専用メニューに切り替える', detachExplain: '現在の公開メニューを複製します。以後、本部の公開はこの店舗に反映されません。', detachConfirm: '複製して切り替える', cancel: 'キャンセル', detachedDraft: '店舗専用メニューの草稿', saveStoreDraft: '店舗草稿を保存', publishStoreDraft: '店舗メニューを公開',
     unauthorized: 'この認証情報では表示できません。許可されたテスト用アクセストークンを確認してください。', network: '通信を完了できませんでした。最新状態を更新してから操作してください。', genericError: '操作を完了できませんでした。最新状態を確認してください。',
     empty: 'メニューがありません。', noCompany: '本部メニューを利用できません。', noStore: 'この店舗のメニューを利用できません。', amountUnsupported: '金額を安全に編集できません。より小さい整数を入力してください。',
@@ -49,6 +52,7 @@ const copy = {
     changeSummaryTitle: '發布內容變更摘要', changeSummaryAdvisory: '此摘要比較草稿與已發布版本。是否可發布仍以以下伺服器檢查結果為準。', noCatalogChanges: '與已發布版本相比沒有變更。',
     addedCategory: '新增分類', removedCategory: '刪除分類', addedProduct: '新增商品', removedProduct: '刪除商品', addedGroup: '新增選項群組', removedGroup: '刪除選項群組', addedOption: '新增選項', removedOption: '刪除選項', changedText: '名稱或說明變更', changedPrice: '價格變更', changedRequiredRule: '必選規則變更', changedSalesStatus: '販售狀態變更', moreItems: (count: number) => `另有 ${count} 項`,
     modeLinked: '連動總部菜單', modeDetached: '分店專用菜單', sourcePrice: '總部基本價格', detachedBasePrice: '分店菜單基本價格', overridePrice: '本店價格', effectivePrice: '目前售價', resetPrice: '恢復總部價格', savePrice: '儲存分店價格', availability: '販售狀態', pending: '待分店確認', available: '販售中', paused: '暫停販售', confirmSale: '確認開放販售', pause: '暫停販售', reopen: '恢復販售', reason: '停售原因', reasonRequired: '請輸入停售原因。',
+    manageHold: '查看緊急停售狀態', holdTitle: '連動分店緊急停售', holdActive: '連動分店販售已停止', holdInactive: '總部緊急停售未啟用', holdLinked: '受影響的連動分店', holdRevision: '確認的發布版本', holdVersion: '狀態版本', holdExplain: '只會套用於連動分店，分店專用菜單不受影響。解除後，各分店自己的暫停或待確認狀態仍有效。已成立訂單不會變更。', holdOn: '停止所有連動分店販售', holdOff: '解除總部緊急停售', holdConfirmOn: '確認停止販售', holdConfirmOff: '確認解除停售', holdSaved: '已重新讀取目前停售狀態。', holdConflict: '狀態已更新，已載入最新狀態。請確認後重新操作。', holdUncertain: '無法確認操作結果。請使用相同內容與操作編號重試。', holdReload: '重新讀取目前狀態', holdRetry: '使用相同操作重試', holdReloadRequired: '確認最新狀態前無法變更。', holdReadUnavailable: '目前無法確認停售狀態。', holdKey: '商品鍵', holdLookup: '依商品鍵確認停售狀態', holdLookupHelp: '已從發布菜單移除的商品，也可以輸入商品鍵檢查既有停售狀態。', holdCannotActivate: '此商品不是有效的已發布商品，無法新增停售；若已有停售狀態，仍可解除。', companyHoldActive: '總部已停止連動分店販售',
     detach: '切換為分店專用菜單', detachExplain: '複製目前已發布菜單。之後總部發布內容不會套用至此分店。', detachConfirm: '複製並切換', cancel: '取消', detachedDraft: '分店專用菜單草稿', saveStoreDraft: '儲存分店草稿', publishStoreDraft: '發布分店菜單',
     unauthorized: '此權杖無法檢視此內容。請確認使用已授權的測試用存取權杖。', network: '無法完成連線。請先更新最新狀態，再重新操作。', genericError: '無法完成操作，請確認最新狀態。',
     empty: '目前沒有菜單。', noCompany: '無法使用總部菜單。', noStore: '無法使用此分店菜單。', amountUnsupported: '金額無法安全編輯，請輸入較小的整數。',
@@ -90,8 +94,21 @@ export function CatalogApp({ demo = false }: DemoSurfaceProps) {
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [pauseTarget, setPauseTarget] = useState('');
   const [confirmDetach, setConfirmDetach] = useState(false);
+  const [holdProductKey, setHoldProductKey] = useState('');
+  const [holdLookupKey, setHoldLookupKey] = useState('');
+  const [holdState, setHoldState] = useState<CompanyProductEmergencyHold | null>(null);
+  const [holdLoading, setHoldLoading] = useState(false);
+  const [holdBusy, setHoldBusy] = useState(false);
+  const [holdError, setHoldError] = useState('');
+  const [holdReason, setHoldReason] = useState('');
+  const [holdConfirm, setHoldConfirm] = useState(false);
+  const [holdIntent, setHoldIntent] = useState<CompanyProductEmergencyHoldRequest | null>(null);
+  const [holdUncertain, setHoldUncertain] = useState(false);
+  const [holdReloadRequired, setHoldReloadRequired] = useState(false);
+  const holdProductKeyRef = useRef('');
   const epoch = useRef(0);
   const previewEpoch = useRef(0);
+  const holdRequestSequence = useRef(0);
   const autoRestored = useRef(false);
 
   const companyDirty = !!companyDraft && !!companySaved && !sameCatalog(companyDraft, companySaved);
@@ -103,11 +120,88 @@ export function CatalogApp({ demo = false }: DemoSurfaceProps) {
     && preview.published_revision === published.revision ? preview : null;
   const resetData = useCallback(() => {
     previewEpoch.current++;
+    holdRequestSequence.current++;
     setPreviewBusy(false);
+    holdProductKeyRef.current = '';
+    setHoldProductKey(''); setHoldLookupKey(''); setHoldState(null); setHoldLoading(false); setHoldBusy(false); setHoldError(''); setHoldReason(''); setHoldConfirm(false); setHoldIntent(null); setHoldUncertain(false); setHoldReloadRequired(false);
     setPublished(null); setCompanySaved(null); setCompanyDraft(null); setPreview(null);
     setStoreMenu(null); setStoreSaved(null); setStoreDraft(null); setPriceInputs({}); setReasons({}); setPauseTarget(''); setConfirmDetach(false);
     setCompanyError(''); setStoreError(''); setNotice('');
   }, []);
+
+  const loadHold = useCallback(async (current: StoredContext, productKey: string): Promise<boolean> => {
+    const requestEpoch = epoch.current;
+    const requestSequence = ++holdRequestSequence.current;
+    const isCurrentRequest = () => isCurrentHoldRead(requestSequence, holdRequestSequence.current, requestEpoch, epoch.current, productKey, holdProductKeyRef.current);
+    setHoldLoading(true); setHoldError(''); setHoldState(null); setHoldReloadRequired(true);
+    try {
+      const result = await catalogClient.companyProductEmergencyHold(current.tenantID, productKey, current.token);
+      if (!isCurrentRequest()) return false;
+      setHoldState(result); setHoldIntent(null); setHoldUncertain(false); setHoldReloadRequired(false); setHoldReason('');
+      return true;
+    } catch (cause) {
+      if (!isCurrentRequest()) return false;
+      setHoldState(null); setHoldError(errorCopy(cause, locale)); setHoldReloadRequired(true);
+      return false;
+    } finally {
+      if (isCurrentRequest()) setHoldLoading(false);
+    }
+  }, [locale]);
+
+  const openHold = async (productKey: string) => {
+    if (!context || (holdUncertain && holdProductKey !== productKey)) return;
+    if (holdUncertain && holdProductKey === productKey) return;
+    holdProductKeyRef.current = productKey;
+    setHoldProductKey(productKey); setHoldState(null); setHoldReason(''); setHoldConfirm(false); setHoldIntent(null); setHoldUncertain(false); setHoldReloadRequired(true);
+    setHoldLookupKey(productKey);
+    await loadHold(context, productKey);
+  };
+
+  const sendHoldIntent = async (intent: CompanyProductEmergencyHoldRequest) => {
+    if (!context) return;
+    const requestEpoch = epoch.current;
+    setHoldBusy(true); setHoldError('');
+    try {
+      await catalogClient.setCompanyProductEmergencyHold(context.tenantID, holdProductKey, context.token, intent);
+      if (epoch.current !== requestEpoch) return;
+      const loaded = await loadHold(context, holdProductKey);
+      if (epoch.current === requestEpoch) {
+        if (loaded) setNotice(t.holdSaved);
+        else setHoldError(t.holdReloadRequired);
+      }
+    } catch (cause) {
+      if (epoch.current !== requestEpoch) return;
+      if (cause instanceof ApiError && cause.status === 409) {
+        setHoldIntent(null); setHoldUncertain(false);
+        const loaded = await loadHold(context, holdProductKey);
+        if (epoch.current === requestEpoch) setHoldError(loaded ? t.holdConflict : t.holdReloadRequired);
+      } else if (!(cause instanceof ApiError) || cause.status >= 500) {
+        setHoldIntent(intent); setHoldUncertain(true); setHoldError(t.holdUncertain);
+      } else {
+        setHoldIntent(null); setHoldUncertain(false); setHoldState(null); setHoldReloadRequired(true);
+        setHoldError(errorCopy(cause, locale));
+      }
+    } finally {
+      if (epoch.current === requestEpoch) setHoldBusy(false);
+    }
+  };
+
+  const requestHoldTransition = () => {
+    if (!context || !holdState || holdReloadRequired || holdUncertain || !holdReason.trim()) return;
+    setHoldConfirm(true);
+  };
+
+  const confirmHoldTransition = () => {
+    if (!holdState || !holdReason.trim() || holdReloadRequired || holdUncertain) return;
+    const intent: CompanyProductEmergencyHoldRequest = {
+      active: !holdState.active,
+      reason: holdReason.trim(),
+      expected_version: holdState.version,
+      idempotency_key: newOperationKey(),
+    };
+    setHoldIntent(intent); setHoldConfirm(false);
+    void sendHoldIntent(intent);
+  };
 
   // This is an explicit snapshot editor, not a read/poll screen; refreshes stay user- or mutation-triggered.
   const loadCompany = useCallback(async (current: StoredContext, requestEpoch: number) => {
@@ -360,7 +454,32 @@ export function CatalogApp({ demo = false }: DemoSurfaceProps) {
       {notice && <p className="notice catalog-notice" role="status">{notice}</p>}
       {panel === 'company' && hasCompany && companyDraft && <section className="catalog-panel" aria-label={t.company}>
         <div className="catalog-summary"><span>{t.revision}: <strong>{published?.revision}</strong></span><span>{t.draftVersion}: <strong>{companyDraft.version}</strong></span>{preview && <span>{t.linkedCount}: <strong>{preview.linked_store_count}</strong></span>}</div>
-        {published && <details className="catalog-published-snapshot"><summary>{t.currentPublished}</summary>{published.categories.length === 0 ? <p className="muted">{t.empty}</p> : published.categories.map((category) => <section key={category.key}><h3>{category.name}</h3><ul>{category.products.map((product) => <li key={product.key}><span>{product.name}</span><strong>{amountJPY(product.base_price_minor)}</strong>{product.option_groups.length > 0 && <ul>{product.option_groups.map((group) => <li key={group.key}>{group.name}: {group.options.map((option) => `${option.name} (+${amountJPY(option.price_delta_minor)})`).join('、')}</li>)}</ul>}</li>)}</ul></section>)}</details>}
+        {published && <details className="catalog-published-snapshot"><summary>{t.currentPublished}</summary>{published.categories.length === 0 ? <p className="muted">{t.empty}</p> : published.categories.map((category) => <section key={category.key}><h3>{category.name}</h3><ul>{category.products.map((product) => <li key={product.key}><div className={styles.publishedProduct}><span>{product.name}</span><strong>{amountJPY(product.base_price_minor)}</strong><button type="button" className="text-button" disabled={holdBusy || (holdUncertain && holdProductKey !== product.key)} onClick={() => void openHold(product.key)}>{t.manageHold}</button></div>{product.option_groups.length > 0 && <ul>{product.option_groups.map((group) => <li key={group.key}>{group.name}: {group.options.map((option) => `${option.name} (+${amountJPY(option.price_delta_minor)})`).join('、')}</li>)}</ul>}</li>)}</ul></section>)}</details>}
+        <section className={styles.holdLookup} aria-label={t.holdLookup}>
+          <p>{t.holdLookupHelp}</p>
+          <label className="field">{t.holdKey}<input value={holdLookupKey} onChange={(event) => setHoldLookupKey(event.target.value)} disabled={holdBusy || holdUncertain} /></label>
+          <button type="button" className="button small quiet" disabled={!holdLookupKey.trim() || holdBusy || (holdUncertain && holdProductKey !== holdLookupKey.trim())} onClick={() => void openHold(holdLookupKey.trim())}>{t.holdLookup}</button>
+        </section>
+        {holdProductKey && <section className={styles.holdPanel} aria-label={t.holdTitle}>
+          <h3>{t.holdTitle}: {findPublishedProduct(published, holdProductKey)?.name ?? holdProductKey}</h3>
+          {holdLoading && <p role="status">{t.loading}</p>}
+          {holdState && <>
+            <p className={holdState.active ? styles.holdActive : styles.holdClear}>{holdState.active ? t.holdActive : t.holdInactive}</p>
+            <dl className={styles.holdFacts}><div><dt>{t.holdRevision}</dt><dd>{holdState.published_revision}</dd></div><div><dt>{t.holdLinked}</dt><dd>{holdState.linked_store_count}</dd></div><div><dt>{t.reason}</dt><dd>{holdState.reason || '—'}</dd></div><div><dt>{t.holdVersion}</dt><dd>{holdState.version}</dd></div></dl>
+            <p className="muted">{t.holdExplain}</p>
+            <label className="field">{t.reason}<textarea value={holdReason} onChange={(event) => setHoldReason(event.target.value)} rows={2} disabled={holdBusy || holdUncertain || holdReloadRequired} required /></label>
+            {holdState.active || findPublishedProduct(published, holdProductKey)?.active === true
+              ? <button type="button" className="button quiet" disabled={holdBusy || holdUncertain || holdReloadRequired || !holdReason.trim()} onClick={requestHoldTransition}>{holdState.active ? t.holdOff : t.holdOn}</button>
+              : <p className="muted">{t.holdCannotActivate}</p>}
+          </>}
+          {holdConfirm && holdState && <div className="confirm-dialog" role="alertdialog" aria-label={holdState.active ? t.holdConfirmOff : t.holdConfirmOn}>
+            <p>{t.holdExplain}</p><p>{t.holdLinked}: {holdState.linked_store_count} · {t.holdRevision}: {holdState.published_revision}</p><p>{t.reason}: {holdReason.trim()}</p>
+            <button type="button" className="button quiet" disabled={holdBusy} onClick={() => setHoldConfirm(false)}>{t.cancel}</button><button type="button" className="button primary" disabled={holdBusy} onClick={confirmHoldTransition}>{holdState.active ? t.holdConfirmOff : t.holdConfirmOn}</button>
+          </div>}
+          {holdUncertain && holdIntent && <button type="button" className="button retry" disabled={holdBusy} onClick={() => void sendHoldIntent(holdIntent)}>{t.holdRetry}</button>}
+          {holdReloadRequired && !holdUncertain && <><p className="muted">{t.holdReloadRequired}</p><button type="button" className="button quiet" disabled={holdLoading || holdBusy} onClick={() => context && void loadHold(context, holdProductKey)}>{t.holdReload}</button></>}
+          {holdError && <p className="error" role="alert">{holdError}</p>}
+        </section>}
         <p className="muted">{t.newProductPending}</p>
         <CatalogEditor key={`company-${companyDraft.version}-${companyFormEpoch}`} data={companyDraft} disabled={busy} onChange={editCompany} t={t} />
         {companyDirty && !companyCanSave && <p className="error" role="alert">{t.amountUnsupported}</p>}
@@ -470,7 +589,7 @@ function StoreCatalogView({ menu, priceInputs, setPriceInputs, reasons, setReaso
 }) {
   return <div className="catalog-store-list">{menu.categories.map((category) => <section className="catalog-store-category" key={category.key}><h2>{category.name}</h2>
     {category.products.map((product) => <article className="catalog-store-product" key={product.key}>
-      <header><div><h3>{product.name}</h3><p>{product.description}</p></div><AvailabilityBadge value={product.availability ?? 'PENDING_CONFIRMATION'} t={t} /></header>
+      <header><div><h3>{product.name}</h3><p>{product.description}</p>{product.company_emergency_hold_active && <p className={styles.storeHoldIndicator}>{t.companyHoldActive}</p>}</div><AvailabilityBadge value={product.availability ?? 'PENDING_CONFIRMATION'} t={t} /></header>
       <div className={`catalog-price-grid ${menu.mode === 'DETACHED' ? 'is-detached' : ''}`}><div><span>{menu.mode === 'LINKED' ? t.sourcePrice : t.detachedBasePrice}</span><strong>{amountJPY(product.base_price_minor)}</strong></div>{menu.mode === 'LINKED' && <div><label>{t.overridePrice}<input inputMode="numeric" pattern="[0-9]*" value={priceInputs[product.key] ?? ''} disabled={!menu.can_edit_prices || busy} onChange={(event) => setPriceInputs({ ...priceInputs, [product.key]: event.target.value })} /></label></div>}<div><span>{t.effectivePrice}</span><strong>{amountJPY(product.effective_price_minor)}</strong></div></div>
       {menu.mode === 'LINKED' && menu.can_edit_prices && <div className="catalog-price-actions"><button type="button" className="button small quiet" disabled={busy} onClick={() => onPrice(product, false)}>{t.savePrice}</button>{product.override_active && <button type="button" className="text-button" disabled={busy} onClick={() => onPrice(product, true)}>{t.resetPrice}</button>}</div>}
       <AvailabilityControl targetKey={`p:${product.key}`} label={t.availability} value={product.availability ?? 'PENDING_CONFIRMATION'} version={product.availability_version ?? 0} target={{ kind: 'PRODUCT', product_key: product.key }} canPause={menu.can_pause_availability} canConfirm={menu.can_confirm_availability} reason={reasons[`p:${product.key}`] ?? ''} setReason={(value) => setReasons({ ...reasons, [`p:${product.key}`]: value })} pauseTarget={pauseTarget} setPauseTarget={setPauseTarget} busy={busy} onChange={onAvailability} t={t} />
@@ -560,6 +679,12 @@ function summarizeChanges(published: CatalogData, candidate: CatalogData, t: typ
 }
 
 function sameCatalog(a: CatalogData, b: CatalogData) { return JSON.stringify(a.categories) === JSON.stringify(b.categories); }
+export function isCurrentHoldRead(requestSequence: number, currentSequence: number, requestEpoch: number, currentEpoch: number, requestProductKey: string, currentProductKey: string) {
+  return requestSequence === currentSequence && requestEpoch === currentEpoch && requestProductKey === currentProductKey;
+}
+function findPublishedProduct(published: CompanyPublished | null, productKey: string): CatalogProduct | undefined {
+  return published?.categories.flatMap((category) => category.products).find((product) => product.key === productKey);
+}
 function canWriteDraft(draft: CompanyDraft) { try { toNumericDraft(draft); return true; } catch { return false; } }
 function positiveAmount(value: string | number) { try { return BigInt(String(value)) > 0n; } catch { return false; } }
 function newKey(prefix: string) { return `${prefix}-${globalThis.crypto?.randomUUID?.().replaceAll('-', '') ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`}`; }

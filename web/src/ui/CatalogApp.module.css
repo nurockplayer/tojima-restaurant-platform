@@ -33,6 +33,118 @@
   margin: 12px 0;
 }
 
+.publishedProduct {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 16px;
+}
+
+.publishedProduct > span {
+  flex: 1 1 160px;
+}
+
+.holdLookup {
+  margin: 14px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+
+.holdLookup > p {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.holdLookup input {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #dfe5de;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+}
+
+.holdPanel {
+  margin: 14px 0;
+  padding: 16px;
+  border: 1px solid #d7b88b;
+  border-radius: 11px;
+  background: #fffaf1;
+}
+
+.holdPanel h3 {
+  margin: 0 0 10px;
+  color: #59442b;
+  font-size: 14px;
+}
+
+.holdPanel > p {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.holdPanel textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid #dfe5de;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--ink);
+  font: inherit;
+  resize: vertical;
+}
+
+.holdFacts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 14px;
+  margin: 12px 0;
+}
+
+.holdFacts > div {
+  min-width: 0;
+}
+
+.holdFacts dt {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.holdFacts dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.holdActive {
+  color: #98483c;
+  font-weight: 700;
+}
+
+.holdClear {
+  color: #416d50;
+  font-weight: 700;
+}
+
+.storeHoldIndicator {
+  color: #98483c;
+  font-weight: 700;
+}
+
+@media (max-width: 620px) {
+  .holdFacts {
+    grid-template-columns: 1fr;
+  }
+}
+
 .catalogScope :global(.catalog-panel) {
   padding: 22px;
   border: 1px solid var(--line);

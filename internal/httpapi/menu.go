@@ -52,16 +52,17 @@ type guestCategory struct {
 	Products []guestProduct `json:"products"`
 }
 type guestProduct struct {
-	Key                  string               `json:"key"`
-	Name                 string               `json:"name"`
-	Description          string               `json:"description,omitempty"`
-	EffectivePriceMinor  int64                `json:"effective_price_minor"`
-	Position             int                  `json:"position"`
-	Availability         catalog.Availability `json:"availability"`
-	Selectable           bool                 `json:"selectable"`
-	AvailabilityVersion  int64                `json:"availability_version,omitempty"`
-	PriceOverrideVersion int64                `json:"price_override_version,omitempty"`
-	Groups               []guestGroup         `json:"option_groups"`
+	Key                        string               `json:"key"`
+	Name                       string               `json:"name"`
+	Description                string               `json:"description,omitempty"`
+	EffectivePriceMinor        int64                `json:"effective_price_minor"`
+	Position                   int                  `json:"position"`
+	Availability               catalog.Availability `json:"availability"`
+	Selectable                 bool                 `json:"selectable"`
+	CompanyEmergencyHoldActive bool                 `json:"company_emergency_hold_active"`
+	AvailabilityVersion        int64                `json:"availability_version,omitempty"`
+	PriceOverrideVersion       int64                `json:"price_override_version,omitempty"`
+	Groups                     []guestGroup         `json:"option_groups"`
 }
 type guestGroup struct {
 	Key       string        `json:"key"`
@@ -189,7 +190,7 @@ func safeMenu(menu catalog.PublishedMenu, includeInactive bool) guestMenu {
 			if !includeInactive && !product.Active {
 				continue
 			}
-			outProduct := guestProduct{Key: product.Key, Name: product.Name, Description: product.Description, EffectivePriceMinor: product.EffectivePriceMinor, Position: product.Position, Availability: product.Availability, Selectable: product.Selectable, Groups: make([]guestGroup, 0, len(product.Groups))}
+			outProduct := guestProduct{Key: product.Key, Name: product.Name, Description: product.Description, EffectivePriceMinor: product.EffectivePriceMinor, Position: product.Position, Availability: product.Availability, Selectable: product.Selectable, CompanyEmergencyHoldActive: product.CompanyEmergencyHoldActive, Groups: make([]guestGroup, 0, len(product.Groups))}
 			for _, group := range product.Groups {
 				outGroup := guestGroup{Key: group.Key, Name: group.Name, MinSelect: group.MinSelect, MaxSelect: group.MaxSelect, Position: group.Position, Options: make([]guestOption, 0, len(group.Options))}
 				for _, option := range group.Options {

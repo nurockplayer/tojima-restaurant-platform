@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -57,10 +58,11 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	if _, err = pool.Exec(ctx, `
 		INSERT INTO tenants(tenant_id,name) VALUES ('hold-tenant','Hold tenant'),('other-tenant','Other tenant');
 		INSERT INTO stores(tenant_id,store_id,name) VALUES
-			('hold-tenant','hold-store','Hold store'),('hold-tenant','other-store','Other store'),('other-tenant','hold-store','Foreign store');
+			('hold-tenant','hold-store','Hold store'),('hold-tenant','other-store','Other store'),('hold-tenant','detached-store','Detached store'),('other-tenant','hold-store','Foreign store');
 		INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES
 			('hold-tenant','hold-store','table','Table','hold-public'),
 			('hold-tenant','other-store','table','Other table','other-store-public'),
+			('hold-tenant','detached-store','table','Detached table','detached-public'),
 			('other-tenant','hold-store','table','Foreign table','foreign-public')`); err != nil {
 		t.Fatal(err)
 	}
@@ -75,6 +77,16 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	}
 	if _, err = service.PublishCompanyDraft(ctx, "hold-tenant", "owner", 1); err != nil {
 		t.Fatalf("publish company catalog: %v", err)
+	}
+	if _, err = service.DetachStore(ctx, catalog.StoreScope{TenantID: "hold-tenant", StoreID: "detached-store"}, "owner", 1); err != nil {
+		t.Fatalf("detach store for public projection check: %v", err)
+	}
+	for _, storeID := range []string{"hold-store", "other-store", "detached-store"} {
+		if _, err = service.SetStoreAvailability(ctx, catalog.StoreScope{TenantID: "hold-tenant", StoreID: storeID}, "manager", catalog.AvailabilityChange{
+			Target: catalog.AvailabilityTarget{Kind: catalog.ProductAvailability, ProductKey: "meal"}, Status: catalog.Available, ExpectedVersion: 1,
+		}); err != nil {
+			t.Fatalf("confirm product availability for %s: %v", storeID, err)
+		}
 	}
 
 	holdPath := "/v1/admin/tenants/hold-tenant/menu/products/meal/emergency-hold"
@@ -109,6 +121,8 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	if response := requestJSON(t, owner, http.MethodGet, "/v1/admin/tenants/hold-tenant/menu/products/not-published/emergency-hold", "", ""); response.Code != http.StatusNotFound {
 		t.Fatalf("unknown company product GET returned %d %s", response.Code, response.Body.String())
 	}
+	guest := NewMenuHandler(service, nil, nil)
+	assertPublicProductHold(t, requestJSON(t, guest, http.MethodGet, "/v1/guest/tables/hold-public/menu", "", ""), false, true)
 
 	initial := requestJSON(t, owner, http.MethodGet, holdPath, "", "")
 	if initial.Code != http.StatusOK || initial.Header().Get("Cache-Control") != "no-store" {
@@ -142,6 +156,9 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 		t.Fatalf("activate emergency hold: %d %s", on.Code, on.Body.String())
 	}
 	assertHoldResponse(t, on.Body.String(), true, 1, "emergency-incident-reason")
+	assertPublicProductHold(t, requestJSON(t, guest, http.MethodGet, "/v1/guest/tables/hold-public/menu", "", ""), true, false)
+	assertPublicProductHold(t, requestJSON(t, guest, http.MethodGet, "/v1/guest/tables/other-store-public/menu", "", ""), true, false)
+	assertPublicProductHold(t, requestJSON(t, guest, http.MethodGet, "/v1/guest/tables/detached-public/menu", "", ""), false, true)
 	if replay := requestJSON(t, owner, http.MethodPut, holdPath, onBody, ""); replay.Code != http.StatusOK || replay.Body.String() != on.Body.String() {
 		t.Fatalf("same-identity exact replay did not return immutable result: %d %s", replay.Code, replay.Body.String())
 	}
@@ -190,9 +207,9 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	if response := requestJSON(t, otherStoreManager, http.MethodGet, storeMenuPath, "", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("other-store manager read indicator: %d %s", response.Code, response.Body.String())
 	}
-	public := requestJSON(t, NewMenuHandler(service, nil, nil), http.MethodGet, "/v1/guest/tables/hold-public/menu", "", "")
-	if public.Code != http.StatusOK || !strings.Contains(public.Body.String(), `"selectable":false`) || strings.Contains(public.Body.String(), "company_emergency_hold_active") || strings.Contains(public.Body.String(), "emergency-incident-reason") || strings.Contains(public.Body.String(), "activated_by") {
-		t.Fatalf("guest menu exposed hold internals or D1-only indicator: %d %s", public.Code, public.Body.String())
+	foreignPublic := requestJSON(t, guest, http.MethodGet, "/v1/guest/tables/foreign-public/menu", "", "")
+	if foreignPublic.Code == http.StatusOK || strings.Contains(foreignPublic.Body.String(), "company_emergency_hold_active") || strings.Contains(foreignPublic.Body.String(), "emergency-incident-reason") {
+		t.Fatalf("foreign tenant received company hold projection: %d %s", foreignPublic.Code, foreignPublic.Body.String())
 	}
 
 	ownerMemberships.mu.Lock()
@@ -200,6 +217,37 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	ownerMemberships.mu.Unlock()
 	if replay := requestJSON(t, owner, http.MethodPut, holdPath, onBody, ""); replay.Code != http.StatusForbidden {
 		t.Fatalf("revoked current membership replayed prior hold: %d %s", replay.Code, replay.Body.String())
+	}
+}
+
+func assertPublicProductHold(t *testing.T, response *httptest.ResponseRecorder, holdActive, selectable bool) {
+	t.Helper()
+	if response.Code != http.StatusOK {
+		t.Fatalf("public menu returned %d %s", response.Code, response.Body.String())
+	}
+	var payload struct {
+		Categories []struct {
+			Products []struct {
+				Key                        string `json:"key"`
+				Selectable                 bool   `json:"selectable"`
+				CompanyEmergencyHoldActive bool   `json:"company_emergency_hold_active"`
+			} `json:"products"`
+		} `json:"categories"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode public menu %q: %v", response.Body.String(), err)
+	}
+	if len(payload.Categories) != 1 || len(payload.Categories[0].Products) != 1 {
+		t.Fatalf("company hold changed public product visibility: %s", response.Body.String())
+	}
+	product := payload.Categories[0].Products[0]
+	if product.Key != "meal" || product.CompanyEmergencyHoldActive != holdActive || product.Selectable != selectable {
+		t.Fatalf("public product hold/selectable = %q/%v/%v; want meal/%v/%v: %s", product.Key, product.CompanyEmergencyHoldActive, product.Selectable, holdActive, selectable, response.Body.String())
+	}
+	for _, forbidden := range []string{"emergency-incident-reason", "second incident", "activated_by", "cleared_by", "linked_store_count", "company_emergency_hold_version"} {
+		if strings.Contains(response.Body.String(), forbidden) {
+			t.Fatalf("public menu exposed hold detail %q: %s", forbidden, response.Body.String())
+		}
 	}
 }
 

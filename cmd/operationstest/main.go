@@ -16,6 +16,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -57,7 +58,11 @@ func run() error {
 	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
 	catalogFixture := flag.Bool("catalog-fixture", false, "enable isolated catalog admin routes and local test credentials")
 	demoShironagasukujira := flag.Bool("demo-shironagasukujira", false, "seed the isolated Shironagasukujira reference-data demo")
+	port := flag.Int("port", 8082, "test-only HTTP port on loopback (1024..65535)")
 	flag.Parse()
+	if err := validateTestPort(*port); err != nil {
+		return err
+	}
 	if err := validateFixtureMode(*demoShironagasukujira, *withPayments); err != nil {
 		return err
 	}
@@ -103,7 +108,7 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	doc := buildCredentialDocument(fixture, credentials, useCatalogFixture, *demoShironagasukujira, *withPayments, webhookSecret)
+	doc := buildCredentialDocument(fixture, credentials, useCatalogFixture, *demoShironagasukujira, *withPayments, webhookSecret, *port)
 	ownedFile, err := writeCredentials(*credentialsPath, doc)
 	if err != nil {
 		return err
@@ -137,13 +142,13 @@ func run() error {
 		api.Handle("/", spaHandler(*webRoot))
 	}
 	server := &http.Server{
-		Addr:              "127.0.0.1:8082",
+		Addr:              testListenAddress(*port),
 		Handler:           api,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	listener, err := net.Listen("tcp", server.Addr)
 	if err != nil {
-		return fmt.Errorf("listen on loopback 127.0.0.1:8082: %w", err)
+		return fmt.Errorf("listen on loopback %s: %w", server.Addr, err)
 	}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
@@ -151,7 +156,7 @@ func run() error {
 		defer runPaymentFixtureWorker(ctx, paymentService)()
 		fmt.Fprintln(os.Stdout, "keyless payment fixture enabled; reserved .invalid Checkout URLs cannot accept payments")
 	}
-	fmt.Fprintln(os.Stdout, "isolated operations test runtime listening on http://127.0.0.1:8082; credentials are in the requested 0600 file")
+	fmt.Fprintf(os.Stdout, "isolated operations test runtime listening on http://%s; credentials are in the requested 0600 file\n", server.Addr)
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -178,12 +183,23 @@ func validateFixtureMode(demoShironagasukujira, paymentsFixture bool) error {
 	return nil
 }
 
+func validateTestPort(port int) error {
+	if port < 1024 || port > 65535 {
+		return fmt.Errorf("-port must be between 1024 and 65535")
+	}
+	return nil
+}
+
+func testListenAddress(port int) string {
+	return net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+}
+
 func catalogFixtureEnabled(catalogFixture, demoShironagasukujira bool) bool {
 	return catalogFixture || demoShironagasukujira
 }
 
-func buildCredentialDocument(fixture *testguest.Fixture, credentials testoperations.CredentialSet, catalogFixture, demoShironagasukujira, paymentFixture bool, webhookSecret string) credentialDocument {
-	baseURL := "http://127.0.0.1:8082"
+func buildCredentialDocument(fixture *testguest.Fixture, credentials testoperations.CredentialSet, catalogFixture, demoShironagasukujira, paymentFixture bool, webhookSecret string, port int) credentialDocument {
+	baseURL := "http://" + testListenAddress(port)
 	doc := credentialDocument{
 		BaseURL: baseURL, StaffURL: baseURL + "/staff", KitchenURL: baseURL + "/kitchen", GuestURL: baseURL + "/",
 		TenantID: fixture.TenantID, StoreID: fixture.StoreID, TableID: fixture.TableID,

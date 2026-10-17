@@ -42,6 +42,23 @@ describe('catalog wire normalization', () => {
     expect(publishedResult).toEqual({ revision: 5, draft_version: 7 });
     expect(fetchMock).toHaveBeenCalledTimes(7);
   });
+
+  it('reads and changes emergency hold state with the version and idempotency key in the frozen body', async () => {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => json({ product_key: 'meal/1', active: true, version: 4, reason: 'safety review', published_revision: 9, linked_store_count: 3 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const state = await catalogClient.companyProductEmergencyHold('tenant/1', 'meal/1', 'admin-token');
+    expect(state).toMatchObject({ active: true, version: 4, linked_store_count: 3 });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/admin/tenants/tenant%2F1/menu/products/meal%2F1/emergency-hold');
+    expect(new Headers(fetchMock.mock.calls[0]?.[1]?.headers).get('authorization')).toBe('Bearer admin-token');
+
+    const change = { active: false, reason: 'review complete', expected_version: 4, idempotency_key: 'hold-off-key' };
+    await catalogClient.setCompanyProductEmergencyHold('tenant/1', 'meal/1', 'admin-token', change);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/v1/admin/tenants/tenant%2F1/menu/products/meal%2F1/emergency-hold');
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe('PUT');
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual(change);
+    expect(new Headers(fetchMock.mock.calls[1]?.[1]?.headers).get('authorization')).toBe('Bearer admin-token');
+  });
 });
 
 function json(body: unknown, status = 200): Response {

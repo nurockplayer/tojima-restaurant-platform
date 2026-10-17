@@ -36,6 +36,8 @@ export interface CatalogProduct {
   availability?: Availability;
   availability_version?: number;
   selectable?: boolean;
+  /** Safe public/store projection only; admin hold history is read separately. */
+  company_emergency_hold_active?: boolean;
   option_groups: CatalogOptionGroup[];
 }
 
@@ -80,6 +82,26 @@ export interface PublishResult { revision: number; draft_version: number }
 export interface PriceOverride { product_key: string; price_minor: string; active: boolean; version: number }
 export interface AvailabilityResult { status: Availability; version: number }
 
+export interface CompanyProductEmergencyHold {
+  product_key: string;
+  active: boolean;
+  version: number;
+  reason: string;
+  activated_by?: string;
+  activated_at?: string;
+  cleared_by?: string;
+  cleared_at?: string;
+  published_revision: number;
+  linked_store_count: number;
+}
+
+export interface CompanyProductEmergencyHoldRequest {
+  active: boolean;
+  reason: string;
+  expected_version: number;
+  idempotency_key: string;
+}
+
 export interface CatalogContext { tenantID: string; storeID: string }
 
 type CatalogProductWire = Omit<CatalogProduct, 'option_groups'> & { option_groups?: CatalogOptionGroup[] | null };
@@ -109,6 +131,8 @@ export const catalogClient = {
   saveCompanyDraft: (tenantID: string, token: string, draft: CompanyDraft) => request<unknown>(`${tenantBase(tenantID)}/menu/draft`, token, putJSON(toNumericDraft(draft))),
   previewCompany: (tenantID: string, token: string, expectedVersion: number) => request<CompanyPreview>(`${tenantBase(tenantID)}/menu/preview`, token, json({ expected_version: expectedVersion })),
   publishCompany: (tenantID: string, token: string, expectedVersion: number, fingerprint: string) => request<PublishResult>(`${tenantBase(tenantID)}/menu/publish`, token, json({ expected_version: expectedVersion, preview_fingerprint: fingerprint })),
+  companyProductEmergencyHold: (tenantID: string, productKey: string, token: string) => request<CompanyProductEmergencyHold>(`${tenantBase(tenantID)}/menu/products/${enc(productKey)}/emergency-hold`, token),
+  setCompanyProductEmergencyHold: (tenantID: string, productKey: string, token: string, change: CompanyProductEmergencyHoldRequest) => request<CompanyProductEmergencyHold>(`${tenantBase(tenantID)}/menu/products/${enc(productKey)}/emergency-hold`, token, putJSON(change)),
   storeMenu: async (ctx: CatalogContext, token: string) => normalizeStoreCatalog(await request<StoreCatalogWire>(`${storeBase(ctx)}/menu?amounts=string`, token)),
   storeDraft: async (ctx: CatalogContext, token: string) => normalizeCompanyDraft(await request<CompanyDraftWire>(`${storeBase(ctx)}/menu/draft?amounts=string`, token)),
   saveStoreDraft: (ctx: CatalogContext, token: string, draft: CompanyDraft) => request<unknown>(`${storeBase(ctx)}/menu/draft`, token, putJSON(toNumericDraft(draft))),
