@@ -38,6 +38,7 @@ describe('guest app mount', () => {
         quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: 'カレー', base_gross_jpy: '1100', quantity: 1, options: [{ group_key: 'rice', option_key: 'large', name: '大盛り', price_gross_jpy: '110' }] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1210', total_net_jpy: '1100', total_tax_jpy: '110', buckets: [] } },
         created_at: '2026-10-18T00:00:00Z',
       }] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [{ id: 'order-1', payment_status: 'UNPAID', fulfillment_status: 'WAITING', requires_staff_acceptance: true, staff_accepted: false, cash_mode: 'PREPAID' }], cash_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -71,6 +72,29 @@ describe('guest app mount', () => {
     expect(host.textContent).toContain('¥1,100 × 1');
     expect(host.textContent).toContain('大盛り +¥110 × 1');
     expect(host.textContent).toContain('¥1,210');
+  });
+
+  it.each([
+    { name: 'STAFF_OPEN PAY_LATER', mode: 'STAFF_OPEN', cashMode: 'PAY_LATER', fulfillment: 'ACCEPTED', requires: false, expected: '受付済み · 未払い' },
+    { name: 'STAFF_OPEN PREPAID', mode: 'STAFF_OPEN', cashMode: 'PREPAID', fulfillment: 'WAITING', requires: false, expected: '調理開始待ち · 未払い' },
+    { name: 'SESSION_PIN PAY_LATER', mode: 'SESSION_PIN', cashMode: 'PAY_LATER', fulfillment: 'ACCEPTED', requires: false, expected: '受付済み · 未払い' },
+    { name: 'SESSION_PIN PREPAID', mode: 'SESSION_PIN', cashMode: 'PREPAID', fulfillment: 'WAITING', requires: false, expected: '調理開始待ち · 未払い' },
+    { name: 'DIRECT_SCAN requires staff acceptance', mode: 'DIRECT_SCAN', cashMode: undefined, fulfillment: 'WAITING', requires: true, expected: '店員の受付待ち · 未払い' },
+  ])('uses server acceptance requirements for $name', async (scenario) => {
+    const mode = scenario.mode as 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN';
+    const order = { order_id: 'order-1', session_id: 'session-1', generation: 1, payment_method: scenario.cashMode ? 'CASH' : 'STRIPE', requires_staff_acceptance: scenario.requires, total_gross_jpy: '1100', created_at: '2026-10-18T00:00:00Z' };
+    const guestOperation = { id: 'order-1', payment_status: 'UNPAID', fulfillment_status: scenario.fulfillment, requires_staff_acceptance: scenario.requires, staff_accepted: false, ...(scenario.cashMode ? { cash_mode: scenario.cashMode } : {}) };
+    await mountGuestStatus(mode, order, guestOperation);
+    await act(async () => {
+      [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('注文履歴'))?.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(host?.querySelector('.guest-order-status')?.textContent, host?.textContent).toBe(scenario.expected);
+    if (!scenario.requires) expect(host?.querySelector('.guest-order-status')?.textContent).not.toContain('店員の受付待ち');
+    if (scenario.cashMode === 'PREPAID') {
+      await clickButton(host!, '繁中');
+      expect(host?.querySelector('.guest-order-status')?.textContent).toBe('等待開始製作 · 尚未付款');
+    }
   });
 
   it('refreshes the menu without changing the cart and leaves requoted orders for explicit reconfirmation', async () => {
@@ -256,6 +280,45 @@ describe('guest app mount', () => {
     expect(clearPayload.options).toEqual([{ group_key: 'size', option_key: 'small' }]);
   });
 });
+
+async function mountGuestStatus(
+  mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN',
+  order: unknown,
+  operation: unknown,
+) {
+  window.history.replaceState({}, '', '/?table=table-1');
+  const modeTable = { ...table, mode };
+  const modeGrant = { ...grant, session: { ...grant.session, mode } };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith('/v1/guest/tables/table-1')) return json(modeTable);
+    if (url.endsWith('/v1/guest/tables/table-1/join')) return json(modeGrant);
+    if (url.endsWith('/v1/guest/sessions/session-1/join')) return json(modeGrant);
+    if (url.endsWith('/v1/guest/tables/table-1/menu?amounts=string')) return json(guestMenu);
+    if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(cart);
+    if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [order] });
+    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [operation], cash_enabled: true });
+    throw new Error(`Unexpected API request: ${url}`);
+  });
+  vi.stubGlobal('fetch', fetchMock);
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  if (mode !== 'DIRECT_SCAN') {
+    if (mode === 'SESSION_PIN') await setTextField(host, 'テーブル PIN', '1234');
+    await clickButton(host, '参加する');
+  }
+}
+
+async function setTextField(container: Element, label: string, value: string) {
+  const field = [...container.querySelectorAll('label.field')].find((item) => item.textContent?.includes(label));
+  const input = field?.querySelector('input');
+  if (!input) throw new Error(`Missing field: ${label}`);
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+  await act(async () => { setter?.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
+}
 
 async function clickOption(fieldset: Element, name: string) {
   const input = findOption(fieldset, name);

@@ -88,15 +88,21 @@ func TestOperationsHTTPPermissionsAndCashJourney(t *testing.T) {
 	if adminCaps["can_manage"] != true || adminCaps["can_cash"] != false || adminCaps["can_serve"] != false {
 		t.Fatalf("tenant admin gained cashier access: %v", adminCaps)
 	}
+	decode(request("GET", base+"/operations/kds", "", cashier, ""), 403)
+	decode(request("GET", base+"/operations/kds", "", manager, ""), 403)
 	decode(request("POST", sb+"/cash/preview", "{}", manager, ""), 403)
 	decode(request("POST", sb+"/close", "{}", manager, ""), 403)
 	directory.Set(creds.Manager.SubjectID, []authz.Membership{{TenantID: "test-tenant", StoreID: "test-store", Role: authz.StoreManager}})
+	decode(request("GET", base+"/operations/kds", "", manager, ""), 403)
 	decode(request("GET", base+"/operations/tables", "", guest, ""), 403)
 	decode(request("GET", gb+"/operations", "", cashier, ""), 403)
 	decode(request("POST", gb+"/cart/lines", `{"expected_generation":1,"expected_version":1,"product_key":"tea","quantity":2,"options":[]}`, guest, "add"), 200)
 	preview := decode(request("POST", gb+"/cart/preview", `{"expected_generation":1,"expected_version":2}`, guest, ""), 200)
 	order := decode(request("POST", gb+"/cart/commit", fmt.Sprintf(`{"expected_generation":1,"expected_version":2,"preview_fingerprint":%q,"payment_method":"CASH"}`, preview["fingerprint"]), guest, "commit"), 200)["order"].(map[string]any)
 	oid := order["order_id"].(string)
+	if order["requires_staff_acceptance"] != true {
+		t.Fatalf("DIRECT_SCAN order omitted staff-acceptance snapshot: %v", order)
+	}
 	ob := sb + "/orders/" + oid
 	states := decode(request("GET", sb+"/operations", "", cashier, ""), 200)
 	first := states["orders"].([]any)[0].(map[string]any)
@@ -134,7 +140,11 @@ func TestOperationsHTTPPermissionsAndCashJourney(t *testing.T) {
 	// Only guest-safe state crosses the TABLE_JOIN endpoint; receipts and staff
 	// identities remain staff-only, amounts remain exact decimal strings.
 	g := request("GET", gb+"/operations", "", guest, "")
-	decode(g, 200)
+	guestState := decode(g, 200)
+	guestOrders := guestState["orders"].([]any)
+	if len(guestOrders) != 1 || guestOrders[0].(map[string]any)["requires_staff_acceptance"] != true {
+		t.Fatalf("guest order omitted staff-acceptance snapshot: %v", guestState)
+	}
 	for _, private := range []string{"cashier_id", "tenant_id", "store_id", "register_session_ref", "receipts", cashier} {
 		if strings.Contains(g.Body.String(), private) {
 			t.Fatalf("guest leak %s", private)

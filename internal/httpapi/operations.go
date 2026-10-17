@@ -166,7 +166,7 @@ func (a OperationsAPI) tables(w http.ResponseWriter, r *http.Request) {
 	operationRespond(w, map[string]any{"tables": v}, err)
 }
 func (a OperationsAPI) kds(w http.ResponseWriter, r *http.Request) {
-	s, _, ok := a.authorize(w, r, "operations.kds.read", operationReadRoles)
+	s, _, ok := a.authorize(w, r, "operations.kds.read", []authz.Role{authz.Kitchen})
 	if !ok {
 		return
 	}

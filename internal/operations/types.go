@@ -165,11 +165,12 @@ type SessionDetail struct {
 }
 
 type GuestOrderState struct {
-	ID                string            `json:"id"`
-	PaymentStatus     PaymentStatus     `json:"payment_status"`
-	FulfillmentStatus FulfillmentStatus `json:"fulfillment_status"`
-	StaffAccepted     bool              `json:"staff_accepted"`
-	CashMode          CashMode          `json:"cash_mode,omitempty"`
+	ID                      string            `json:"id"`
+	PaymentStatus           PaymentStatus     `json:"payment_status"`
+	FulfillmentStatus       FulfillmentStatus `json:"fulfillment_status"`
+	RequiresStaffAcceptance bool              `json:"requires_staff_acceptance"`
+	StaffAccepted           bool              `json:"staff_accepted"`
+	CashMode                CashMode          `json:"cash_mode,omitempty"`
 }
 
 type GuestOperations struct {

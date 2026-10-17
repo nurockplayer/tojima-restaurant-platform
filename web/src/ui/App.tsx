@@ -72,12 +72,15 @@ function isSafeAmount(amount: string | number | undefined): boolean {
 
 function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
   const fulfillment: Record<GuestOrderStatus['fulfillment_status'], string> = locale === 'ja'
-    ? { WAITING: '受付確認中', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
-    : { WAITING: '等待店員確認', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
+    ? { WAITING: '調理開始待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
+    : { WAITING: '等待開始製作', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
   const payment: Record<GuestOrderStatus['payment_status'], string> = locale === 'ja'
     ? { UNPAID: '未払い', PAID: '支払済み', PENDING: '支払確認中', UNKNOWN: '支払状態を確認中' }
     : { UNPAID: '尚未付款', PAID: '已付款', PENDING: '付款確認中', UNKNOWN: '付款狀態確認中' };
-  return `${order.staff_accepted ? fulfillment[order.fulfillment_status] : (locale === 'ja' ? '店員の受付待ち' : '等待店員接單')} · ${payment[order.payment_status]}`;
+  const fulfillmentLabel = order.requires_staff_acceptance && !order.staff_accepted
+    ? (locale === 'ja' ? '店員の受付待ち' : '等待店員接單')
+    : fulfillment[order.fulfillment_status];
+  return `${fulfillmentLabel} · ${payment[order.payment_status]}`;
 }
 
 export function App() {
