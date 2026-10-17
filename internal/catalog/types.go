@@ -5,6 +5,7 @@ package catalog
 import (
 	"errors"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
@@ -23,15 +24,16 @@ const (
 )
 
 var (
-	ErrNotFound        = errors.New("catalog resource not found")
-	ErrDenied          = errors.New("catalog access denied")
-	ErrConflict        = errors.New("catalog state conflict")
-	ErrStale           = errors.New("catalog draft or state is stale")
-	ErrInvalid         = errors.New("catalog data is invalid")
-	ErrNotPublished    = errors.New("no published menu")
-	ErrNotDetached     = errors.New("store menu is linked")
-	ErrAlreadyDetached = errors.New("store menu is already detached")
-	ErrPriceOverflow   = errors.New("integer price overflow")
+	ErrNotFound           = errors.New("catalog resource not found")
+	ErrDenied             = errors.New("catalog access denied")
+	ErrConflict           = errors.New("catalog state conflict")
+	ErrStale              = errors.New("catalog draft or state is stale")
+	ErrInvalid            = errors.New("catalog data is invalid")
+	ErrNotPublished       = errors.New("no published menu")
+	ErrNotDetached        = errors.New("store menu is linked")
+	ErrAlreadyDetached    = errors.New("store menu is already detached")
+	ErrPriceOverflow      = errors.New("integer price overflow")
+	ErrCompanyProductHeld = errors.New("company product emergency hold is active")
 )
 
 type StoreScope struct{ TenantID, StoreID string }
@@ -48,20 +50,22 @@ type Category struct {
 }
 
 type Product struct {
-	Key                  string        `json:"key"`
-	Name                 string        `json:"name"`
-	Description          string        `json:"description,omitempty"`
-	BasePriceMinor       int64         `json:"base_price_minor"`
-	EffectivePriceMinor  int64         `json:"-"`
-	PriceOverrideVersion int64         `json:"-"`
-	PriceOverrideActive  bool          `json:"-"`
-	PriceOverrideMinor   *int64        `json:"-"`
-	Position             int           `json:"position"`
-	Active               bool          `json:"active"`
-	Availability         Availability  `json:"-"`
-	AvailabilityVersion  int64         `json:"-"`
-	Selectable           bool          `json:"-"`
-	Groups               []OptionGroup `json:"option_groups,omitempty"`
+	Key                         string        `json:"key"`
+	Name                        string        `json:"name"`
+	Description                 string        `json:"description,omitempty"`
+	BasePriceMinor              int64         `json:"base_price_minor"`
+	EffectivePriceMinor         int64         `json:"-"`
+	PriceOverrideVersion        int64         `json:"-"`
+	PriceOverrideActive         bool          `json:"-"`
+	PriceOverrideMinor          *int64        `json:"-"`
+	CompanyEmergencyHoldActive  bool          `json:"-"`
+	CompanyEmergencyHoldVersion int64         `json:"-"`
+	Position                    int           `json:"position"`
+	Active                      bool          `json:"active"`
+	Availability                Availability  `json:"-"`
+	AvailabilityVersion         int64         `json:"-"`
+	Selectable                  bool          `json:"-"`
+	Groups                      []OptionGroup `json:"option_groups,omitempty"`
 }
 
 type OptionGroup struct {
@@ -138,6 +142,22 @@ type StoreProductPrice struct {
 	OverridePriceMinor   *int64 `json:"override_price_minor"`
 	EffectivePriceMinor  int64  `json:"effective_price_minor"`
 	OverrideVersion      int64  `json:"override_version"`
+}
+
+// CompanyProductEmergencyHold is the current company-level emergency gate for
+// one stable product key. It is separate from every store's manual availability
+// state and survives product retirement and later publications.
+type CompanyProductEmergencyHold struct {
+	ProductKey        string     `json:"product_key"`
+	Active            bool       `json:"active"`
+	Version           int64      `json:"version"`
+	Reason            string     `json:"reason"`
+	ActivatedBy       string     `json:"activated_by,omitempty"`
+	ActivatedAt       *time.Time `json:"activated_at,omitempty"`
+	ClearedBy         string     `json:"cleared_by,omitempty"`
+	ClearedAt         *time.Time `json:"cleared_at,omitempty"`
+	PublishedRevision int64      `json:"published_revision"`
+	LinkedStoreCount  int        `json:"linked_store_count"`
 }
 
 // PublicationIssue is a safe, machine-readable reason why a company draft

@@ -273,6 +273,9 @@ func (s *Service) DetachStore(ctx context.Context, scope StoreScope, actor strin
 	if err != nil {
 		return PublishResult{}, err
 	}
+	if err = rejectDetachWithActiveCompanyHolds(ctx, tx, scope.TenantID, companyID, data); err != nil {
+		return PublishResult{}, err
+	}
 	rows, err := tx.Query(ctx, `SELECT product_key,price_minor FROM store_product_price_overrides WHERE tenant_id=$1 AND store_id=$2 AND active`, scope.TenantID, scope.StoreID)
 	if err != nil {
 		return PublishResult{}, err
@@ -549,6 +552,9 @@ func Quote(menu PublishedMenu, productKey string, selected []OptionSelection) (P
 	}
 	if product == nil {
 		return PriceQuote{}, ErrNotFound
+	}
+	if product.CompanyEmergencyHoldActive {
+		return PriceQuote{}, ErrCompanyProductHeld
 	}
 	if !product.Active || product.Availability != Available || !product.Selectable {
 		return PriceQuote{}, ErrDenied
@@ -1106,9 +1112,39 @@ func readStoreMenu(ctx context.Context, tx pgx.Tx, scope StoreScope) (PublishedM
 	if err != nil {
 		return PublishedMenu{}, err
 	}
+	type companyHoldState struct {
+		active  bool
+		version int64
+	}
+	companyHolds := map[string]companyHoldState{}
+	if mode == "LINKED" {
+		rows, queryErr := tx.Query(ctx, `SELECT product_key,active,version FROM company_product_emergency_holds
+			WHERE tenant_id=$1 AND company_catalog_id=$2 ORDER BY product_key`, scope.TenantID, catalogID)
+		if queryErr != nil {
+			return PublishedMenu{}, queryErr
+		}
+		for rows.Next() {
+			var key string
+			var hold companyHoldState
+			if queryErr = rows.Scan(&key, &hold.active, &hold.version); queryErr != nil {
+				rows.Close()
+				return PublishedMenu{}, queryErr
+			}
+			companyHolds[key] = hold
+		}
+		if queryErr = rows.Err(); queryErr != nil {
+			rows.Close()
+			return PublishedMenu{}, queryErr
+		}
+		rows.Close()
+	}
 	for ci := range data.Categories {
 		for pi := range data.Categories[ci].Products {
 			product := &data.Categories[ci].Products[pi]
+			if hold, exists := companyHolds[product.Key]; exists {
+				product.CompanyEmergencyHoldActive = hold.active
+				product.CompanyEmergencyHoldVersion = hold.version
+			}
 			product.Availability, product.AvailabilityVersion, err = readProductAvailability(ctx, tx, scope, product.Key)
 			if err != nil {
 				return PublishedMenu{}, err
@@ -1131,7 +1167,7 @@ func readStoreMenu(ctx context.Context, tx pgx.Tx, scope StoreScope) (PublishedM
 					}
 				}
 			}
-			product.Selectable = product.Active && product.Availability == Available
+			product.Selectable = product.Active && product.Availability == Available && !product.CompanyEmergencyHoldActive
 			for gi := range product.Groups {
 				group := &product.Groups[gi]
 				availableCount := 0
@@ -1351,6 +1387,32 @@ func flattenProducts(data CatalogData) map[string]Product {
 		}
 	}
 	return result
+}
+
+// rejectDetachWithActiveCompanyHolds keeps a company-level hold effective
+// across snapshot detachment. The caller already holds the company catalog
+// parent row FOR SHARE, which serializes this check with hold transitions.
+func rejectDetachWithActiveCompanyHolds(ctx context.Context, tx pgx.Tx, tenantID string, companyCatalogID int64, data CatalogData) error {
+	keys := make([]string, 0)
+	for _, category := range data.Categories {
+		for _, product := range category.Products {
+			keys = append(keys, product.Key)
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	var held bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS (
+		SELECT 1 FROM company_product_emergency_holds
+		WHERE tenant_id=$1 AND company_catalog_id=$2 AND active AND product_key=ANY($3::text[])
+	)`, tenantID, companyCatalogID, keys).Scan(&held); err != nil {
+		return err
+	}
+	if held {
+		return ErrConflict
+	}
+	return nil
 }
 
 func validAvailability(status Availability) bool {
