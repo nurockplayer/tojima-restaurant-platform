@@ -1,0 +1,516 @@
+{
+  "metadata": {
+    "schema": "tojima-demo-menu-evidence-v1",
+    "created_on": "2026-10-18",
+    "restaurant_id": "shironagasukujira-iidabashi-demo",
+    "name_ja": "博多餃子酒場 シロナガスクジラ",
+    "address_ja": "東京都新宿区下宮比町3-12 明成ビル101",
+    "restaurant_owner_reported_by_user": true,
+    "currency": "JPY",
+    "service": "DEMO_ONLY",
+    "business_contact": "03-6265-3933",
+    "not_official_menu": "第三方公開資料彙整，不等於業者核准目前價格/品項",
+    "production_import_allowed": false,
+    "live_payment_enabled": false,
+    "seed_tenant": "DEMO_SYNTHETIC",
+    "seed_store": "DEMO_SHIRONAGASUKUJIRA",
+    "notes": [
+      "食べログ用戶照片為歷史菜單（且不一定有拍攝日期），非店家當期核准菜單",
+      "Uber Eats 參考價格不可套用至店內；外送只保留資料比對",
+      "未有店家同意的圖片授權，不直接把第三方照片搬到App",
+      "保留現有 tenant/store/table/carts/go price authority, 不用固定店鋪ID作跨租戶產品唯一鍵",
+      "正式匯入須由東島さん提供當期店內紙本/POS菜單、商品/選項售價、酒水價格、稅務及上下架授權"
+    ]
+  },
+  "sources": {
+    "official_line": {
+      "url": "https://page.line.me/268exiib",
+      "kind": "店家官方 LINE 菜色介紹",
+      "date": "crawled 2026-10"
+    },
+    "tabelog_menu_photo": {
+      "url": "https://tabelog.com/tokyo/A1309/A130905/13244567/dtlmenu/photo/",
+      "kind": "顧客上傳菜單照片（非即時）",
+      "date": "historical; menu photo dates vary"
+    },
+    "tabelog_2026_review": {
+      "url": "https://tabelog.com/tokyo/A1309/A130905/13244567/dtlrvwlst/B530472747/",
+      "kind": "2026年6月用餐食記",
+      "date": "2026-06"
+    },
+    "tabelog_2025_review": {
+      "url": "https://tabelog.com/tokyo/A1309/A130905/13244567/dtlrvwlst/B515820731/",
+      "kind": "2025年10月用餐食記",
+      "date": "2025-10"
+    },
+    "dinner_2025_blog": {
+      "url": "https://ameblo.jp/ameblo-bob22/entry-12888696152.html",
+      "kind": "2025年2月用餐食記",
+      "date": "2025-02-26"
+    },
+    "ubereats": {
+      "url": "https://www.ubereats.com/jp/store/%E5%8D%9A%E5%A4%9A%E9%A4%83%E5%AD%90%E9%85%92%E5%A0%B4-%E3%82%B7%E3%83%AD%E3%83%8A%E3%82%AC%E3%82%B9%E3%82%AF%E3%82%B8%E3%83%A9/nUc-CCyaTyGBkvXcdx5ddw",
+      "kind": "Uber Eats外送價格（非店內售價）",
+      "date": "retrieved 2026-10"
+    }
+  },
+  "categories": [
+    {
+      "key": "lunch",
+      "label_ja": "ランチ定食"
+    },
+    {
+      "key": "gyoza",
+      "label_ja": "博多餃子"
+    },
+    {
+      "key": "small_plate",
+      "label_ja": "酒肴・小皿"
+    },
+    {
+      "key": "hotpot",
+      "label_ja": "鍋"
+    },
+    {
+      "key": "grill",
+      "label_ja": "鉄板料理"
+    },
+    {
+      "key": "drinks",
+      "label_ja": "ドリンク"
+    },
+    {
+      "key": "delivery_bento",
+      "label_ja": "Uber Eats 弁当参考"
+    },
+    {
+      "key": "delivery_rice",
+      "label_ja": "Uber Eats ご飯参考"
+    },
+    {
+      "key": "delivery_sides",
+      "label_ja": "Uber Eats サイド参考"
+    }
+  ],
+  "items": [
+    {
+      "demo_key": "LUNCH-SHIRO",
+      "name_ja": "シロナガスクジラ定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 980,
+      "source_id": "tabelog_2026_review",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "2026-06食記；ごはん小(100g)時960円，選項調價-20円（僅限當時）"
+    },
+    {
+      "demo_key": "LUNCH-KARAAGE",
+      "name_ja": "塩唐揚げ定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 960,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "LUNCH-GYOZA",
+      "name_ja": "餃子定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 1200,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "LUNCH-CHICKENNANBAN",
+      "name_ja": "タルタルチキン南蛮定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 980,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "LUNCH-BEEF-CURRY",
+      "name_ja": "牛すじカレー定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 1000,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "LUNCH-SABA",
+      "name_ja": "サバの味噌煮定食",
+      "category_key": "lunch",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 1080,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-IRON-GYOZA",
+      "name_ja": "博多鉄板餃子（12個）",
+      "category_key": "gyoza",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 1150,
+      "source_id": "dinner_2025_blog",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "2025-02-26食記價格；份量12個"
+    },
+    {
+      "demo_key": "DINNER-TAKANA-POTATO",
+      "name_ja": "高菜明太ポテトサラダ",
+      "category_key": "small_plate",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 560,
+      "source_id": "dinner_2025_blog",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-TSUKEMONO",
+      "name_ja": "三種の漬物盛り合わせ",
+      "category_key": "small_plate",
+      "reference_channel": "DINE_IN_HISTORICAL",
+      "reference_price_jpy": 720,
+      "source_id": "dinner_2025_blog",
+      "owner_verified": false,
+      "orderable_in_demo": true,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-HITOKUCHI-GYOZA",
+      "name_ja": "博多一口餃子",
+      "category_key": "gyoza",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-TEBA-GYOZA",
+      "name_ja": "手羽餃子",
+      "category_key": "gyoza",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-KAMATAMA",
+      "name_ja": "釜玉水餃子",
+      "category_key": "gyoza",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "tabelog_menu_photo",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-MOTSU",
+      "name_ja": "博多もつ鍋",
+      "category_key": "hotpot",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DINNER-HORMONE",
+      "name_ja": "鉄板ホルモン焼き",
+      "category_key": "grill",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DRINK-LEMON",
+      "name_ja": "すりおろしレモンサワー",
+      "category_key": "drinks",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DRINK-HIGHBALL",
+      "name_ja": "角ハイボール",
+      "category_key": "drinks",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DRINK-BEER",
+      "name_ja": "生ビール",
+      "category_key": "drinks",
+      "reference_channel": "DINE_IN_UNPRICED",
+      "reference_price_jpy": null,
+      "source_id": "official_line",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "歷史或第三方資料；非即時店內售價"
+    },
+    {
+      "demo_key": "DELIV-TARTAR-BENTO",
+      "name_ja": "タルタル鶏南蛮弁当",
+      "category_key": "delivery_bento",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1472,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-YURINCHI-BENTO",
+      "name_ja": "油淋鶏弁当",
+      "category_key": "delivery_bento",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1472,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-KARAAGE-BENTO",
+      "name_ja": "唐揚げ弁当",
+      "category_key": "delivery_bento",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1472,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-SABA-BENTO",
+      "name_ja": "サバの味噌煮弁当",
+      "category_key": "delivery_bento",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1472,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-SICILIAN",
+      "name_ja": "シシリアンライス",
+      "category_key": "delivery_rice",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1472,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-KEEMA",
+      "name_ja": "特製キーマカレー",
+      "category_key": "delivery_rice",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1357,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-GYOZA-DON",
+      "name_ja": "餃子の餡を使った餃子丼",
+      "category_key": "delivery_rice",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1357,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-FRIES",
+      "name_ja": "めんたいマヨのフライドポテト",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 978,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-TEBA",
+      "name_ja": "手羽餃子２本",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1127,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-SALAD",
+      "name_ja": "シシリアンサラダ",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 1150,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-POTATO",
+      "name_ja": "辛子高菜のポテトサラダ",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 713,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-GURUGURU",
+      "name_ja": "博多鶏皮ぐるぐる串3本",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 909,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-KARAAGE",
+      "name_ja": "単品唐揚げ3個入り",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 782,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-TARTAR",
+      "name_ja": "単品タルタル鶏南蛮3個入り",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 909,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    },
+    {
+      "demo_key": "DELIV-YURINCHI",
+      "name_ja": "単品油淋鶏3個入り",
+      "category_key": "delivery_sides",
+      "reference_channel": "DELIVERY_ONLY",
+      "reference_price_jpy": 897,
+      "source_id": "ubereats",
+      "owner_verified": false,
+      "orderable_in_demo": false,
+      "eligible_for_real_payment": false,
+      "notes": "Uber Eats 外送價，禁止自動用於店內 QR 點餐"
+    }
+  ],
+  "demo_option_groups": [
+    {
+      "demo_key": "RICE-SIZE",
+      "name_ja": "ごはんの量",
+      "required": true,
+      "max_select": 1,
+      "product_keys": [
+        "LUNCH-SHIRO"
+      ],
+      "options": [
+        {
+          "key": "regular",
+          "name_ja": "普通",
+          "price_delta_jpy": 0
+        },
+        {
+          "key": "small",
+          "name_ja": "小（100g）",
+          "price_delta_jpy": -20
+        }
+      ],
+      "owner_verified": false,
+      "source_id": "tabelog_2026_review",
+      "notes": "2026年6月食記，實際正式店菜單須核對"
+    }
+  ],
+  "implementation_guardrails": {
+    "use_test_tenant_only": true,
+    "no_real_stripe_or_cash": true,
+    "never_claim_live_menu": true,
+    "do_not_import_delivery_prices_into_dine_in": true,
+    "all_items_pending_owner_confirmation": true,
+    "stable_demo_keys_not_production_product_ids": true,
+    "images_require_owner_permission": true
+  }
+}

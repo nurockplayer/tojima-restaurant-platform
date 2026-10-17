@@ -2,7 +2,7 @@
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { SurfaceBoundary, surfaceFor } from './surface';
+import { demoEnabled, initialStaffViewFor, SurfaceBoundary, surfaceFor } from './surface';
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
@@ -29,6 +29,23 @@ describe('surface selection', () => {
     expect(surfaceFor('/catalog')).toBe('catalog');
     expect(surfaceFor('/catalog/')).toBe('catalog');
     expect(surfaceFor('/catalog/items')).toBe('guest');
+  });
+
+  it('routes the kitchen entry to staff and selects KDS for the kitchen path', () => {
+    expect(surfaceFor('/kitchen')).toBe('staff');
+    expect(surfaceFor('/kitchen/')).toBe('staff');
+    expect(initialStaffViewFor('/kitchen')).toBe('kds');
+    expect(initialStaffViewFor('/kitchen/')).toBe('kds');
+    expect(initialStaffViewFor('/staff')).toBe('tables');
+  });
+
+  it('enables demo only for the exact server-provided root attribute', () => {
+    const rootElement = document.createElement('div');
+    expect(demoEnabled(rootElement)).toBe(false);
+    rootElement.dataset.demo = 'true';
+    expect(demoEnabled(rootElement)).toBe(false);
+    rootElement.dataset.demo = 'shironagasukujira';
+    expect(demoEnabled(rootElement)).toBe(true);
   });
 });
 

@@ -6,6 +6,8 @@ import {
   toNumericDraft,
 } from '../api/catalog';
 import styles from './CatalogApp.module.css';
+import { DemoBanner } from './DemoBanner';
+import type { DemoSurfaceProps } from './DemoBanner';
 import type {
   Availability,
   CatalogCategory,
@@ -62,7 +64,7 @@ void localeKeysMatch;
 
 interface StoredContext extends CatalogContext { token: string }
 
-export function CatalogApp() {
+export function CatalogApp({ demo = false }: DemoSurfaceProps) {
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
   const [tenantID, setTenantID] = useState('');
@@ -339,6 +341,7 @@ export function CatalogApp() {
 
   return <main className={`app-shell ${styles.catalogScope}`}>
     <header className="topbar"><a className="brand" href="/catalog" aria-label="Tojima catalog"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button type="button" className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.language} <span>⌄</span></button></header>
+    <DemoBanner demo={demo} locale={locale} />
     {!context ? <section className="entry-card catalog-entry"><div className="eyebrow">M01 / M02</div><h1>{t.title}</h1><p>{t.signInHint}</p>
       <form onSubmit={(event) => { event.preventDefault(); void connect({ tenantID, storeID, token }); }}>
         <label className="field">{t.tenant}<input autoComplete="organization" value={tenantID} onChange={(event) => setTenantID(event.target.value)} required /></label>

@@ -1,0 +1,33 @@
+.banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid #c59b4a;
+  border-radius: 0.75rem;
+  background: #fff6df;
+  color: #503b14;
+}
+
+.identity {
+  font-weight: 700;
+}
+
+.notice {
+  text-align: end;
+  font-size: 0.88rem;
+}
+
+@media (max-width: 520px) {
+  .banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.25rem;
+  }
+
+  .notice {
+    text-align: start;
+  }
+}

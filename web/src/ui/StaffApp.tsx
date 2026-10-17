@@ -5,6 +5,8 @@ import type { Capabilities, CashPreview, CashSettings, OpenedSession, Receipt, S
 import { checkoutClient } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation } from './cart-state';
+import { DemoBanner } from './DemoBanner';
+import type { DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
 type View = 'tables' | 'kds';
@@ -29,7 +31,7 @@ const copy = {
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     retry: '同じ操作を確認して再試行', network: '処理結果を確認できません。再試行は同じ操作を照合します。', stale: '最新情報を読み直しました。内容を確認してから操作してください。',
     error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。',
-    ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: 'キャンセル', session: '卓セッション', updated: '同期済み',
+    ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: 'キャンセル', session: '卓セッション', updated: '同期済み', demoCash: '現金（デモ・テスト専用）', demoCashTitle: '現金精算（デモ・テスト専用）', demoReceipt: 'テスト用領収書 · 実際の入金ではありません', demoClose: 'デモ環境のテーブルを閉じる',
   },
   zh: {
     brand: '東島', subtitle: '店員作業台', tenant: '企業 ID', store: '分店 ID', token: '店員存取權杖', connect: '連線', disconnect: '登出',
@@ -47,21 +49,21 @@ const copy = {
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     retry: '以相同操作確認並重試', network: '目前無法確認操作結果。重試會比對同一筆操作。', stale: '已更新最新狀態，請確認內容後再操作。',
     error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。',
-    ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: '取消', session: '桌次工作階段', updated: '已同步',
+    ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: '取消', session: '桌次工作階段', updated: '已同步', demoCash: '現金（展示測試專用）', demoCashTitle: '現金結帳（展示測試專用）', demoReceipt: '測試收據 · 非實際收款', demoClose: '關閉展示測試桌次',
   },
 } as const;
 
 interface PendingWrite { key: string; epoch: number; run: () => Promise<unknown>; success: (value: unknown) => Promise<void> | void; conflict: () => Promise<void> }
 interface ActiveStaffContext { epoch: number; context: StaffContext; bearer: string; ready: boolean }
 
-export function StaffApp() {
+export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfaceProps) {
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
   const [context, setContext] = useState<StaffContext>({ tenantID: '', storeID: '' });
   const [token, setToken] = useState('');
   const [capabilities, setCapabilities] = useState<Capabilities | null>(null);
   const [connected, setConnected] = useState(false);
-  const [view, setView] = useState<View>('tables');
+  const [view, setView] = useState<View>(initialView);
   const [tables, setTables] = useState<StaffTable[]>([]);
   const [kdsOrders, setKdsOrders] = useState<StaffOrder[]>([]);
   const [settings, setSettings] = useState<CashSettings | null>(null);
@@ -205,11 +207,11 @@ export function StaffApp() {
       const results = await Promise.allSettled(tasks);
       if (!isCurrent(requestEpoch, cleanContext, cleanBearer)) return;
       if (results.some((result) => result.status === 'rejected')) setError(t.error);
-      if (current.can_kitchen && !current.can_serve && !current.can_cash && !current.can_manage) setView('kds');
+      if (current.can_kitchen && (initialView === 'kds' || (!current.can_serve && !current.can_cash && !current.can_manage))) setView('kds');
     } catch (cause) {
       if (active.current?.epoch === requestEpoch) { active.current = null; setConnected(false); setCapabilities(null); sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY); setError(cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? t.accessError : explain(cause, locale)); }
     } finally { if (epoch.current === requestEpoch) setLoading(false); }
-  }, [isCurrent, loadKds, loadSettings, loadTables, locale, t.accessError, t.error]);
+  }, [initialView, isCurrent, loadKds, loadSettings, loadTables, locale, t.accessError, t.error]);
 
   useEffect(() => {
     if (restored.current) return;
@@ -394,7 +396,7 @@ export function StaffApp() {
   const boardOrders = kdsOrders.filter((order) => ['ACCEPTED', 'PREPARING', 'READY'].includes(order.fulfillment_status)).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const blockers = detail?.close_blockers ?? [];
 
-  if (!connected) return <StaffShell locale={locale} setLocale={setLocale} t={t}>
+  if (!connected) return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <form className="entry-card staff-entry" onSubmit={(event) => { event.preventDefault(); void connect(context, token); }}>
       <div className="eyebrow">{t.subtitle}</div><h1>{t.connect}</h1>
       <p>{locale === 'ja' ? '既存のスタッフ認証トークンで店舗に接続します。' : '使用既有店員權杖連線至分店。'}</p>
@@ -406,7 +408,7 @@ export function StaffApp() {
     </form>
   </StaffShell>;
 
-  return <StaffShell locale={locale} setLocale={setLocale} t={t}>
+  return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <div className="workspace staff-workspace">
       <header className="welcome"><div><div className="eyebrow">{t.subtitle}</div><h1>{context.storeID}</h1><p>{context.tenantID}</p></div><button className="text-button" onClick={disconnect}>{t.disconnect}</button></header>
       {noOperations ? <p className="notice">{t.noAccess}</p> : <>
@@ -435,10 +437,10 @@ export function StaffApp() {
           </section>}
           {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
-            <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={() => void openCashPreview()}>{t.cashSettle}</button>}</div>
-            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
+            <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={() => void openCashPreview()}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
+            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
             <div className="staff-section-title"><h3>{t.receipts}</h3></div>
-            {detail.receipts.map((item) => <ReceiptCard key={item.id} receipt={item} t={t} />)}
+            {detail.receipts.map((item) => <ReceiptCard key={item.id} receipt={item} t={t} demo={demo} locale={locale} />)}
             {capabilities.can_serve && <button className="button quiet wide close-table" disabled={busy || uncertain} onClick={() => setDialog('close')}>{t.close}</button>}
           </section>}
         </>}
@@ -449,8 +451,9 @@ export function StaffApp() {
         </section>}
       </>}
     </div>
-    {dialog === 'cash' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-title"><div className="eyebrow">{t.cashTitle}</div><h2 id="cash-title">{receipt ? t.receipt : t.cashTitle}</h2>
-      {receipt ? <ReceiptCard receipt={receipt} t={t} /> : <>
+    {dialog === 'cash' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-title"><div className="eyebrow">{demo ? t.demoCashTitle : t.cashTitle}</div><h2 id="cash-title">{receipt ? t.receipt : demo ? t.demoCashTitle : t.cashTitle}</h2>
+      {demo && <DemoBanner demo locale={locale} />}
+      {receipt ? <ReceiptCard receipt={receipt} t={t} demo={demo} locale={locale} /> : <>
         {!cashPreview ? <p className="muted">{t.loading}</p> : <><p>{t.due} <strong>{amountJPY(cashPreview.due_jpy)}</strong></p><p className="tax-row"><span>{t.tax}</span><span>{amountJPY(cashPreview.tax.tax_jpy)}</span></p><ul className="cash-order-list">{cashPreview.order_ids.map((orderID) => { const order = detail?.orders.find((item) => item.id === orderID); return <li key={orderID}>{order ? `${order.table_name} · #${order.generation} · ${amountJPY(order.total_gross_jpy)}` : orderID}</li>; })}</ul>
           {cashPreview.order_ids.length === 0 && <p className="notice">{t.noCashOrders}</p>}
           <label className="field">{t.tendered}<input inputMode="numeric" pattern="[0-9]*" value={tendered} disabled={busy || uncertain} onChange={(event) => setTendered(event.target.value)} /></label>
@@ -462,7 +465,7 @@ export function StaffApp() {
       {uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}
       {error && <p className="error" role="alert">{error}</p>}
     </section></div>}
-    {dialog === 'close' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title"><div className="eyebrow">{t.close}</div><h2 id="close-title">{t.closeTitle}</h2>
+    {dialog === 'close' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title"><div className="eyebrow">{demo ? t.demoClose : t.close}</div><h2 id="close-title">{t.closeTitle}</h2>{demo && <DemoBanner demo locale={locale} />}
       {blockers.length > 0 ? <><p className="error">{t.blockers}</p><ul className="blocker-list">{blockers.map((blocker, index) => <li key={`${blocker}-${index}`}>{blockerLabel(blocker, locale)}</li>)}</ul></> : <p className="notice">{t.noBlockers}</p>}
       <button className="button primary wide" disabled={busy || uncertain || blockers.length > 0} onClick={closeTable}>{t.closeConfirm}</button>
       <button className="button quiet wide" disabled={busy} onClick={() => setDialog(null)}>{t.closeDialog}</button>
@@ -472,8 +475,8 @@ export function StaffApp() {
   </StaffShell>;
 }
 
-function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, paymentStatus, paymentBusy = false, paymentError = '', canCheckPayment = false, onCheckPayment, onReconcilePayment, onAccept, onStart, onReady, onServe }: {
-  order: StaffOrder; locale: Locale; t: typeof copy[Locale]; canServe: boolean; busy: boolean; compact?: boolean;
+function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, demo = false, paymentStatus, paymentBusy = false, paymentError = '', canCheckPayment = false, onCheckPayment, onReconcilePayment, onAccept, onStart, onReady, onServe }: {
+  order: StaffOrder; locale: Locale; t: typeof copy[Locale]; canServe: boolean; busy: boolean; compact?: boolean; demo?: boolean;
   paymentStatus?: CheckoutStatus; paymentBusy?: boolean; paymentError?: string; canCheckPayment?: boolean;
   onCheckPayment?: () => void; onReconcilePayment?: () => void;
   onAccept?: () => void; onStart?: () => void; onReady?: () => void; onServe?: () => void;
@@ -483,7 +486,7 @@ function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, pay
     <header className="staff-order-head"><div><strong>{order.table_name} · #{order.generation}</strong><small>{new Date(order.created_at).toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'zh-TW', { hour: '2-digit', minute: '2-digit' })} · {order.id}</small></div><span className={`status-chip status-${activeState.toLowerCase()}`}>{statusLabel(activeState, t)}</span></header>
     {order.requires_staff_acceptance && !order.staff_accepted && <p className="notice">{t.waiting}</p>}
     <ul className="staff-order-lines">{order.lines.map((line, index) => <li key={`${line.product_name}-${index}`}><span>{line.product_name} × {line.quantity}{line.options.map((option, optionIndex) => <small key={`${option.group_name}-${option.option_name}-${optionIndex}`}>{option.group_name.trim() ? `${option.group_name}: ` : ''}{option.option_name}</small>)}</span>{!compact && <strong>{amountJPY(line.line_gross_jpy)}</strong>}</li>)}</ul>
-    {!compact && <div className="staff-order-payment"><span>{order.payment_method === 'CASH' ? t.cash : t.stripe}</span><span>{paymentLabel(order.payment_status, t)}</span><strong>{amountJPY(order.total_gross_jpy)}</strong></div>}
+    {!compact && <div className="staff-order-payment"><span>{order.payment_method === 'CASH' && demo ? t.demoCash : order.payment_method === 'CASH' ? t.cash : t.stripe}</span><span>{paymentLabel(order.payment_status, t)}</span><strong>{amountJPY(order.total_gross_jpy)}</strong></div>}
     {!compact && order.payment_method === 'STRIPE' && canCheckPayment && <div className="staff-payment-status">
       <button className="button small quiet" disabled={busy || paymentBusy} onClick={onCheckPayment}>{t.paymentCheck}</button>
       {paymentBusy && <p className="muted" role="status">{t.loading}</p>}
@@ -517,12 +520,12 @@ function checkoutStateLabel(state: CheckoutState | string, locale: Locale): stri
   return (labels[state] ?? labels.UNKNOWN!)[locale];
 }
 
-function ReceiptCard({ receipt, t }: { receipt: Receipt; t: typeof copy[Locale] }) {
-  return <div className="receipt-card"><div><span>{t.receiptID}</span><strong>{receipt.id}</strong></div><div><span>{t.due}</span><strong>{amountJPY(receipt.due_jpy)}</strong></div><div><span>{t.tax}</span><strong>{amountJPY(receipt.tax.tax_jpy)}</strong></div><div><span>{t.tendered}</span><strong>{amountJPY(receipt.tendered_jpy)}</strong></div><div><span>{t.change}</span><strong>{amountJPY(receipt.change_jpy)}</strong></div><div><span>{t.cashier}</span><strong>{receipt.cashier_id}</strong></div><small>{new Date(receipt.created_at).toLocaleString()}</small></div>;
+function ReceiptCard({ receipt, t, demo = false, locale = 'ja' }: { receipt: Receipt; t: typeof copy[Locale]; demo?: boolean; locale?: Locale }) {
+  return <div className="receipt-card">{demo && <><DemoBanner demo locale={locale} /><p role="note">{t.demoReceipt}</p></>}<div><span>{t.receiptID}</span><strong>{receipt.id}</strong></div><div><span>{t.due}</span><strong>{amountJPY(receipt.due_jpy)}</strong></div><div><span>{t.tax}</span><strong>{amountJPY(receipt.tax.tax_jpy)}</strong></div><div><span>{t.tendered}</span><strong>{amountJPY(receipt.tendered_jpy)}</strong></div><div><span>{t.change}</span><strong>{amountJPY(receipt.change_jpy)}</strong></div><div><span>{t.cashier}</span><strong>{receipt.cashier_id}</strong></div><small>{new Date(receipt.created_at).toLocaleString()}</small></div>;
 }
 
-function StaffShell({ children, locale, setLocale, t }: { children: React.ReactNode; locale: Locale; setLocale: (locale: Locale) => void; t: typeof copy[Locale] }) {
-  return <main className="app-shell"><header className="topbar"><a className="brand" href="/staff" aria-label="Tojima staff"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? t.zh : t.ja} <span>⌄</span></button></header>{children}</main>;
+function StaffShell({ children, demo = false, locale, setLocale, t }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: typeof copy[Locale] }) {
+  return <main className="app-shell"><header className="topbar"><a className="brand" href="/staff" aria-label="Tojima staff"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? t.zh : t.ja} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}</main>;
 }
 
 function explain(error: unknown, locale: Locale) {
