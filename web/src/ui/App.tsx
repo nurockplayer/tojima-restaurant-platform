@@ -70,6 +70,10 @@ function entryFromURL(): { locator?: string; sessionID?: string } {
   return { ...(locator ? { locator } : {}), ...(sessionID ? { sessionID } : {}) };
 }
 
+export function displayTableLocator(locator: string, demo: boolean): string {
+  return demo && locator === 'demo-shironagasukujira-table-05' ? '05' : locator;
+}
+
 function storageKey(sessionID: string) { return `tojima.table-join.${sessionID}`; }
 function safeAmount(amount: string | number | undefined): string {
   if (typeof amount === 'number' && !Number.isSafeInteger(amount)) return '—';
@@ -590,7 +594,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <section className="entry-card" aria-labelledby="entry-title">
       <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title">{t.join}</h1><p>{t.joinHint}</p>
-      <div className="table-chip"><span>{t.table}</span><strong>{query.locator ?? query.sessionID ?? '—'}</strong></div>
+      <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
       {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
       {(!query.locator && !query.sessionID) && <p className="notice">テーブル QR からアクセスしてください。</p>}
@@ -607,7 +611,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <div className="workspace">
       <header className="welcome">
-        <div><div className="eyebrow">{t.menu}</div><h1>{entry.locator ? `${t.table} ${entry.locator}` : t.brand}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
+        <div><div className="eyebrow">{t.menu}</div><h1>{entry.locator ? `${t.table} ${displayTableLocator(entry.locator, demo)}` : t.brand}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
         <div className="join-badge"><span className="live-dot" />{t.latest}</div>
       </header>
       <nav className="tabs" aria-label={locale === 'ja' ? '注文メニュー' : '點餐導覽'}>
