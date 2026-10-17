@@ -141,6 +141,7 @@ export function App() {
   const cartRequestSequence = useRef(0);
   const orderRequestSequence = useRef(0);
   const checkoutRequestSequence = useRef(0);
+  const invalidateCheckoutRequests = useCallback(() => { checkoutRequestSequence.current++; }, []);
   const checkoutViewEpoch = useRef(0);
   const resumeRequestSequence = useRef(0);
   const checkoutReadsInFlight = useRef(new Set<string>());

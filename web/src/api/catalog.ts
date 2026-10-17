@@ -1,4 +1,4 @@
-import { ApiError } from './client';
+import { bearerHeaders, request as httpRequest } from '../shared/http';
 
 export type Amount = string | number;
 export type Availability = 'PENDING_CONFIRMATION' | 'AVAILABLE' | 'PAUSED';
@@ -83,19 +83,7 @@ export interface AvailabilityResult { status: Availability; version: number }
 export interface CatalogContext { tenantID: string; storeID: string }
 
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  let response: Response;
-  try {
-    const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, '') ?? '';
-    response = await fetch(`${base}${path}`, {
-      ...init,
-      headers: { accept: 'application/json', authorization: `Bearer ${token}`, ...init.headers },
-    });
-  } catch {
-    throw new Error('network_unavailable');
-  }
-  const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, body as { error: string; [key: string]: unknown });
-  return body as T;
+  return httpRequest<T>(path, { ...init, headers: { ...bearerHeaders(token), ...init.headers } });
 }
 
 const json = (body: unknown): RequestInit => ({

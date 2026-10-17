@@ -1,21 +1,30 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { createRoot, type Root } from 'react-dom/client';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { catalogClient, type CompanyDraft, type StoreCatalog } from '../api/catalog';
 import { CatalogApp } from './CatalogApp';
 
-let root: Root | undefined;
-let host: HTMLDivElement | undefined;
+let user: ReturnType<typeof userEvent.setup>;
 
-afterEach(async () => {
-  if (root) await act(async () => root?.unmount());
-  root = undefined; host?.remove(); host = undefined;
+afterEach(() => {
+  cleanup();
   sessionStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 
 describe('catalog admin UI', () => {
+  it('keeps the document language aligned with the Japanese and Traditional Chinese toggle', async () => {
+    user = userEvent.setup();
+    render(<CatalogApp />);
+    await waitFor(() => expect(document.documentElement.lang).toBe('ja'));
+    await user.click(screen.getByRole('button', { name: /繁體中文/ }));
+    await waitFor(() => expect(document.documentElement.lang).toBe('zh-Hant'));
+    await user.click(screen.getByRole('button', { name: /日本語/ }));
+    await waitFor(() => expect(document.documentElement.lang).toBe('ja'));
+  });
+
   it('does not display a delayed publication preview after the draft changes', async () => {
     const pending = deferred<Awaited<ReturnType<typeof catalogClient.previewCompany>>>();
     installContext();
@@ -25,16 +34,33 @@ describe('catalog admin UI', () => {
     const preview = vi.spyOn(catalogClient, 'previewCompany').mockReturnValue(pending.promise);
     await mount();
 
-    await click('公開前チェック');
+    await user.click(screen.getByRole('button', { name: '公開前チェック' }));
     expect(preview).toHaveBeenCalledWith('tenant-1', 'catalog-token', 7);
-    const description = [...host!.querySelectorAll('label')].find((label) => label.textContent?.includes('説明'))?.querySelector('textarea');
-    expect(description).toBeTruthy();
-    await changeValue(description!, '最新の説明');
+    const description = screen.getByLabelText('説明');
+    await user.clear(description);
+    await user.type(description, '最新の説明');
     await act(async () => { pending.resolve({ draft_version: 7, published_revision: 4, linked_store_count: 2, can_publish: true, issues: [], preview_fingerprint: 'stale-fingerprint' }); await pending.promise; });
 
-    expect(host?.querySelector('.catalog-preview')).toBeNull();
-    const publish = button('確認した内容を公開');
-    expect(publish.disabled).toBe(true);
+    expect(screen.queryByLabelText('公開前チェック')).toBeNull();
+    expect((screen.getByRole('button', { name: '確認した内容を公開' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('adds option groups and options through the dynamic structured editor', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    await mount();
+
+    await user.click(screen.getByRole('button', { name: '選択肢グループを追加' }));
+    await user.type(screen.getByLabelText('グループ名'), 'サイズ');
+    await user.click(screen.getByRole('button', { name: '選択肢を追加' }));
+    const options = screen.getAllByLabelText('選択肢名');
+    expect(options).toHaveLength(2);
+    await user.type(options[0]!, '普通');
+    await user.type(options[1]!, '大盛り');
+    expect(screen.getByLabelText('グループ名')).toHaveProperty('value', 'サイズ');
+    expect(screen.getAllByLabelText('選択肢名').map((input) => (input as HTMLInputElement).value)).toEqual(['普通', '大盛り']);
   });
 
   it('uses server capabilities to expose staff pause without manager price, confirm, or detach actions', async () => {
@@ -44,11 +70,11 @@ describe('catalog admin UI', () => {
     vi.spyOn(catalogClient, 'storeMenu').mockResolvedValue(storeMenu({ can_pause_availability: true, can_confirm_availability: false, can_edit_prices: false, can_detach: false }));
     await mount();
 
-    expect(host?.textContent).toContain('定食');
-    expect(host?.textContent).toContain('販売を一時停止');
-    expect(host?.textContent).not.toContain('販売を確認');
-    expect(host?.textContent).not.toContain('店舗価格を保存');
-    expect(host?.textContent).not.toContain('専用メニューに切り替える');
+    expect(screen.getByText('定食')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '販売を一時停止' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '販売を確認' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '店舗価格を保存' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '専用メニューに切り替える' })).toBeNull();
   });
 
   it('shows tenant-admin actions from server capabilities and requires explicit detach confirmation', async () => {
@@ -59,12 +85,12 @@ describe('catalog admin UI', () => {
     const detach = vi.spyOn(catalogClient, 'detachStore').mockResolvedValue({ revision: 5, draft_version: 0 });
     await mount();
 
-    expect(host?.textContent).toContain('販売を確認');
-    expect(host?.textContent).toContain('店舗価格を保存');
-    await click('専用メニューに切り替える');
+    expect(screen.getByRole('button', { name: '販売を確認' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '店舗価格を保存' })).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '専用メニューに切り替える' }));
     expect(detach).not.toHaveBeenCalled();
-    expect(host?.textContent).toContain('現在の公開メニューを複製します');
-    await click('複製して切り替える');
+    expect(screen.getAllByText('現在の公開メニューを複製します。以後、本部の公開はこの店舗に反映されません。')).toHaveLength(2);
+    await user.click(screen.getByRole('button', { name: '複製して切り替える' }));
     expect(detach).toHaveBeenCalledWith({ tenantID: 'tenant-1', storeID: 'store-1', token: 'catalog-token' }, 'catalog-token', 4);
   });
 
@@ -74,11 +100,11 @@ describe('catalog admin UI', () => {
     vi.spyOn(catalogClient, 'companyDraft').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
     vi.spyOn(catalogClient, 'storeMenu').mockResolvedValue(storeMenu({ can_pause_availability: true, can_confirm_availability: false, can_edit_prices: false, can_detach: false }, 'AVAILABLE', 'DETACHED'));
     await mount();
-    expect(host?.textContent).toContain('この店舗の専用メニュー');
-    expect(host?.textContent).toContain('店舗メニューの基本価格');
-    expect(host?.textContent).toContain('販売を一時停止');
-    expect(host?.textContent).not.toContain('店舗価格を保存');
-    expect(host?.textContent).not.toContain('販売を確認');
+    expect(screen.getByText('この店舗の専用メニュー')).toBeTruthy();
+    expect(screen.getByText('店舗メニューの基本価格')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '販売を一時停止' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '店舗価格を保存' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '販売を確認' })).toBeNull();
   });
 
   it('sends the reviewed draft version with the checked publish fingerprint', async () => {
@@ -100,11 +126,11 @@ describe('catalog admin UI', () => {
     await mount();
     expect(readStore).toHaveBeenCalledTimes(1);
 
-    await click('店舗価格を保存');
+    await user.click(screen.getByRole('button', { name: '店舗価格を保存' }));
 
     expect(writePrice).toHaveBeenCalledTimes(1);
     expect(readStore).toHaveBeenCalledTimes(2);
-    expect(host?.textContent).toContain('内容が更新されています');
+    expect(screen.getByText('内容が更新されています。最新情報を読み込み、もう一度確認してください。')).toBeTruthy();
   });
 
   it('keeps the unpublished company editor available when only its published snapshot is absent', async () => {
@@ -113,15 +139,16 @@ describe('catalog admin UI', () => {
     vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
     vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
     await mount();
-    expect(host?.textContent).toContain('本部メニュー');
-    expect([...host!.querySelectorAll('input')].some((input) => input.value === '定食')).toBe(true);
+    expect(screen.getByRole('button', { name: '本部メニュー' })).toBeTruthy();
+    expect(screen.getByRole('textbox', { name: '商品名' })).toHaveProperty('value', '定食');
   });
 });
 
 async function mount() {
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
-  host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => { root?.render(<CatalogApp />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  user = userEvent.setup();
+  render(<CatalogApp />);
+  await screen.findByRole('button', { name: '切断' });
+  await waitFor(() => expect((screen.getByRole('button', { name: '最新状態に更新' }) as HTMLButtonElement).disabled).toBe(false));
 }
 
 function installContext() {
@@ -134,20 +161,6 @@ function draft(): CompanyDraft {
 
 function storeMenu(capabilities: Pick<StoreCatalog, 'can_pause_availability' | 'can_confirm_availability' | 'can_edit_prices' | 'can_detach'>, availability: 'PENDING_CONFIRMATION' | 'AVAILABLE' = 'AVAILABLE', mode: StoreCatalog['mode'] = 'LINKED'): StoreCatalog {
   return { revision: 4, mode, ...capabilities, categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', base_price_minor: '900', effective_price_minor: '900', override_active: false, override_price_minor: null, price_override_version: 2, position: 1, active: true, availability, availability_version: 3, option_groups: [] }] }] };
-}
-
-function button(label: string) {
-  const found = [...(host?.querySelectorAll('button') ?? [])].find((item) => item.textContent?.includes(label));
-  if (!found) throw new Error(`Missing button: ${label}`);
-  return found;
-}
-
-async function click(label: string) { await act(async () => { button(label).click(); await new Promise((resolve) => setTimeout(resolve, 0)); }); }
-
-async function changeValue(element: HTMLInputElement | HTMLTextAreaElement, value: string) {
-  const prototype = element instanceof HTMLTextAreaElement ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;
-  const setter = Object.getOwnPropertyDescriptor(prototype, 'value')?.set;
-  await act(async () => { setter?.call(element, value); element.dispatchEvent(new Event('input', { bubbles: true })); element.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
 function deferred<T>() {

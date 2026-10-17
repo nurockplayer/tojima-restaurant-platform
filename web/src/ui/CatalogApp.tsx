@@ -1,15 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, amountJPY } from '../api/client';
+import { useFieldArray, useForm, type Control, type UseFormRegister } from 'react-hook-form';
 import {
   catalogClient,
   toNumericDraft,
 } from '../api/catalog';
+import styles from './CatalogApp.module.css';
 import type {
   Availability,
   CatalogCategory,
   CatalogContext,
   CatalogData,
-  CatalogOptionGroup,
   CatalogProduct,
   CompanyDraft,
   CompanyPreview,
@@ -48,6 +49,12 @@ const copy = {
     language: '日本語', ja: '日本語', zh: '繁體中文', signInHint: '此處使用測試用認證資訊，不提供正式登入。', loading: '確認中…', savedCompany: '草稿已儲存，請執行發布前檢查。', savedStore: '分店草稿已儲存，請再次確認內容。', publishDone: '菜單已發布。', detachedDone: '已切換為分店專用菜單。', priceSaved: '分店價格已儲存。', availabilitySaved: '販售狀態已更新。',
   },
 } as const;
+
+type SameKeys<Left, Right> = Exclude<keyof Left, keyof Right> extends never
+  ? Exclude<keyof Right, keyof Left> extends never ? true : false
+  : false;
+const localeKeysMatch: SameKeys<typeof copy.ja, typeof copy.zh> = true;
+void localeKeysMatch;
 
 interface StoredContext extends CatalogContext { token: string }
 
@@ -91,6 +98,7 @@ export function CatalogApp() {
     setCompanyError(''); setStoreError(''); setNotice('');
   }, []);
 
+  // This is an explicit snapshot editor, not a read/poll screen; refreshes stay user- or mutation-triggered.
   const loadCompany = useCallback(async (current: StoredContext, requestEpoch: number) => {
     setCompanyError('');
     const base = { tenantID: current.tenantID, token: current.token };
@@ -179,6 +187,8 @@ export function CatalogApp() {
       }
     } catch { sessionStorage.removeItem(SESSION_KEY); }
   }, [connect]);
+
+  useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
 
   const editCompany = (data: CatalogData) => {
     if (!companyDraft) return;
@@ -314,7 +324,7 @@ export function CatalogApp() {
   const hasCompany = !!published && !!companyDraft;
   const hasStore = !!storeMenu;
 
-  return <main className="app-shell catalog-shell">
+  return <main className={`app-shell ${styles.catalogScope}`}>
     <header className="topbar"><a className="brand" href="/catalog" aria-label="Tojima catalog"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button type="button" className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.language} <span>⌄</span></button></header>
     {!context ? <section className="entry-card catalog-entry"><div className="eyebrow">M01 / M02</div><h1>{t.title}</h1><p>{t.signInHint}</p>
       <form onSubmit={(event) => { event.preventDefault(); void connect({ tenantID, storeID, token }); }}>
@@ -336,7 +346,7 @@ export function CatalogApp() {
         <div className="catalog-summary"><span>{t.revision}: <strong>{published?.revision}</strong></span><span>{t.draftVersion}: <strong>{companyDraft.version}</strong></span>{preview && <span>{t.linkedCount}: <strong>{preview.linked_store_count}</strong></span>}</div>
         {published && <details className="catalog-published-snapshot"><summary>{t.currentPublished}</summary>{published.categories.length === 0 ? <p className="muted">{t.empty}</p> : published.categories.map((category) => <section key={category.key}><h3>{category.name}</h3><ul>{category.products.map((product) => <li key={product.key}><span>{product.name}</span><strong>{amountJPY(product.base_price_minor)}</strong>{product.option_groups.length > 0 && <ul>{product.option_groups.map((group) => <li key={group.key}>{group.name}: {group.options.map((option) => `${option.name} (+${amountJPY(option.price_delta_minor)})`).join('、')}</li>)}</ul>}</li>)}</ul></section>)}</details>}
         <p className="muted">{t.newProductPending}</p>
-        <CatalogEditor data={companyDraft} disabled={busy} onChange={editCompany} t={t} />
+        <CatalogEditor key={`company-${companyDraft.version}`} data={companyDraft} disabled={busy} onChange={editCompany} t={t} />
         {companyDirty && !companyCanSave && <p className="error" role="alert">{t.amountUnsupported}</p>}
         <div className="catalog-actions">
           <button type="button" className="button quiet" disabled={!companyCanSave || busy} onClick={() => void saveCompany()}>{t.saveDraft}</button>
@@ -352,7 +362,7 @@ export function CatalogApp() {
         <StoreCatalogView menu={storeMenu} priceInputs={priceInputs} setPriceInputs={setPriceInputs} reasons={reasons} setReasons={setReasons} pauseTarget={pauseTarget} setPauseTarget={setPauseTarget} busy={busy} onPrice={changePrice} onAvailability={availability} t={t} />
         {storeMenu.mode === 'DETACHED' && storeDraft && storeMenu.can_confirm_availability && <>
           <h2>{t.detachedDraft}</h2>
-          <CatalogEditor data={storeDraft} disabled={busy} onChange={editStoreDraft} t={t} />
+          <CatalogEditor key={`store-${storeDraft.version}`} data={storeDraft} disabled={busy} onChange={editStoreDraft} t={t} />
           <div className="catalog-actions"><button type="button" className="button quiet" disabled={!storeCanSave || busy} onClick={() => void saveDetachedDraft()}>{t.saveStoreDraft}</button><button type="button" className="button primary" disabled={!storeSaved || storeDirty || busy} onClick={() => void publishDetachedDraft()}>{t.publishStoreDraft}</button></div>
         </>}
         {storeMenu.mode === 'LINKED' && storeMenu.can_detach && <section className="catalog-detach"><h2>{t.detach}</h2><p>{t.detachExplain}</p>{!confirmDetach ? <button type="button" className="button quiet" disabled={busy} onClick={() => setConfirmDetach(true)}>{t.detach}</button> : <div className="confirm-dialog" role="group" aria-label={t.detach}><p>{t.detachExplain}</p><button type="button" className="button quiet" disabled={busy} onClick={() => setConfirmDetach(false)}>{t.cancel}</button><button type="button" className="button primary" disabled={busy} onClick={() => void detach()}>{t.detachConfirm}</button></div>}</section>}
@@ -364,28 +374,56 @@ export function CatalogApp() {
 }
 
 function CatalogEditor({ data, onChange, disabled, t }: { data: CatalogData; onChange: (data: CatalogData) => void; disabled: boolean; t: typeof copy[Locale] }) {
-  const updateCategory = (ci: number, fn: (category: CatalogCategory) => CatalogCategory) => onChange({ categories: data.categories.map((category, index) => index === ci ? fn(category) : category) });
-  const updateProduct = (ci: number, pi: number, fn: (product: CatalogProduct) => CatalogProduct) => updateCategory(ci, (category) => ({ ...category, products: category.products.map((product, index) => index === pi ? fn(product) : product) }));
-  const updateGroup = (ci: number, pi: number, gi: number, fn: (group: CatalogOptionGroup) => CatalogOptionGroup) => updateProduct(ci, pi, (product) => ({ ...product, option_groups: product.option_groups.map((group, index) => index === gi ? fn(group) : group) }));
+  const { control, register, watch } = useForm<CatalogData>({ defaultValues: data });
+  const categories = useFieldArray({ control, name: 'categories' });
+  useEffect(() => {
+    const subscription = watch((value) => {
+      if (value.categories) onChange({ categories: value.categories as CatalogCategory[] });
+    });
+    return () => subscription.unsubscribe();
+  }, [onChange, watch]);
+
   return <div className="catalog-editor">
-    {data.categories.map((category, ci) => <fieldset className="catalog-category" key={category.key}>
-      <div className="catalog-edit-heading"><label>{t.categoryName}<input value={category.name} disabled={disabled} onChange={(event) => updateCategory(ci, (item) => ({ ...item, name: event.target.value }))} required /></label><button type="button" className="text-button danger" disabled={disabled} onClick={() => onChange({ categories: data.categories.filter((_, index) => index !== ci) })}>{t.remove}</button></div>
-      {category.products.map((product, pi) => <fieldset className="catalog-product" key={product.key}>
-        <div className="catalog-edit-heading"><label>{t.productName}<input value={product.name} disabled={disabled} onChange={(event) => updateProduct(ci, pi, (item) => ({ ...item, name: event.target.value }))} required /></label><button type="button" className="text-button danger" disabled={disabled} onClick={() => updateCategory(ci, (item) => ({ ...item, products: item.products.filter((_, index) => index !== pi) }))}>{t.remove}</button></div>
-        <label className="catalog-field">{t.description}<textarea value={product.description ?? ''} disabled={disabled} onChange={(event) => updateProduct(ci, pi, (item) => ({ ...item, description: event.target.value }))} rows={2} /></label>
-        <div className="catalog-fields"><label>{t.basePrice}<input inputMode="numeric" pattern="[0-9]*" value={String(product.base_price_minor)} disabled={disabled} onChange={(event) => updateProduct(ci, pi, (item) => ({ ...item, base_price_minor: event.target.value }))} required /></label><label className="catalog-checkbox"><input type="checkbox" checked={product.active} disabled={disabled} onChange={(event) => updateProduct(ci, pi, (item) => ({ ...item, active: event.target.checked }))} />{t.active}</label></div>
-        {product.option_groups.map((group, gi) => <fieldset className="catalog-group" key={group.key}>
-          <div className="catalog-edit-heading"><legend>{t.optionGroup}</legend><button type="button" className="text-button danger" disabled={disabled} onClick={() => updateProduct(ci, pi, (item) => ({ ...item, option_groups: item.option_groups.filter((_, index) => index !== gi) }))}>{t.remove}</button></div>
-          <div className="catalog-fields"><label>{t.groupName}<input value={group.name} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, name: event.target.value }))} required /></label><label>{t.min}<input type="number" min={0} max={group.options.length} value={group.min_select} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, min_select: numberValue(event.target.value) }))} /></label><label>{t.max}<input type="number" min={1} max={group.options.length} value={group.max_select} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, max_select: numberValue(event.target.value) }))} /></label></div>
-          {group.options.map((option, oi) => <div className="catalog-option-edit" key={option.key}><label>{t.optionName}<input value={option.name} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, options: item.options.map((choice, index) => index === oi ? { ...choice, name: event.target.value } : choice) }))} required /></label><label>{t.extraPrice}<input inputMode="numeric" pattern="[0-9]*" value={String(option.price_delta_minor)} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, options: item.options.map((choice, index) => index === oi ? { ...choice, price_delta_minor: event.target.value } : choice) }))} required /></label><label className="catalog-checkbox"><input type="checkbox" checked={option.active} disabled={disabled} onChange={(event) => updateGroup(ci, pi, gi, (item) => ({ ...item, options: item.options.map((choice, index) => index === oi ? { ...choice, active: event.target.checked } : choice) }))} />{t.active}</label><button type="button" className="text-button danger" disabled={disabled} onClick={() => updateGroup(ci, pi, gi, (item) => ({ ...item, options: item.options.filter((_, index) => index !== oi) }))}>{t.remove}</button></div>)}
-          <button type="button" className="button small quiet" disabled={disabled} onClick={() => updateGroup(ci, pi, gi, (item) => ({ ...item, options: [...item.options, { key: newKey('option'), name: '', price_delta_minor: '0', position: item.options.length, active: true }] }))}>{t.addOption}</button>
-        </fieldset>)}
-        <button type="button" className="button small quiet" disabled={disabled} onClick={() => updateProduct(ci, pi, (item) => ({ ...item, option_groups: [...item.option_groups, { key: newKey('group'), name: '', min_select: 0, max_select: 1, position: item.option_groups.length, options: [{ key: newKey('option'), name: '', price_delta_minor: '0', position: 0, active: true }] }] }))}>{t.addGroup}</button>
-      </fieldset>)}
-      <button type="button" className="button small quiet" disabled={disabled} onClick={() => updateCategory(ci, (item) => ({ ...item, products: [...item.products, { key: newKey('product'), name: '', description: '', base_price_minor: '0', position: item.products.length, active: true, option_groups: [] }] }))}>{t.addProduct}</button>
+    {categories.fields.map((category, categoryIndex) => <fieldset className="catalog-category" key={category.id}>
+      <div className="catalog-edit-heading"><label>{t.categoryName}<input {...register(`categories.${categoryIndex}.name` as const)} disabled={disabled} required /></label><button type="button" className="text-button danger" disabled={disabled} onClick={() => categories.remove(categoryIndex)}>{t.remove}</button></div>
+      <ProductFields control={control} register={register} categoryIndex={categoryIndex} disabled={disabled} t={t} />
     </fieldset>)}
-    <button type="button" className="button quiet" disabled={disabled} onClick={() => onChange({ categories: [...data.categories, { key: newKey('category'), name: '', position: data.categories.length, products: [] }] })}>{t.addCategory}</button>
+    <button type="button" className="button quiet" disabled={disabled} onClick={() => categories.append({ key: newKey('category'), name: '', position: categories.fields.length, products: [] })}>{t.addCategory}</button>
   </div>;
+}
+
+function ProductFields({ control, register, categoryIndex, disabled, t }: { control: Control<CatalogData>; register: UseFormRegister<CatalogData>; categoryIndex: number; disabled: boolean; t: typeof copy[Locale] }) {
+  const name = `categories.${categoryIndex}.products` as const;
+  const products = useFieldArray({ control, name });
+  return <>
+    {products.fields.map((product, productIndex) => <fieldset className="catalog-product" key={product.id}>
+      <div className="catalog-edit-heading"><label>{t.productName}<input {...register(`categories.${categoryIndex}.products.${productIndex}.name` as const)} disabled={disabled} required /></label><button type="button" className="text-button danger" disabled={disabled} onClick={() => products.remove(productIndex)}>{t.remove}</button></div>
+      <label className="catalog-field">{t.description}<textarea {...register(`categories.${categoryIndex}.products.${productIndex}.description` as const)} disabled={disabled} rows={2} /></label>
+      <div className="catalog-fields"><label>{t.basePrice}<input inputMode="numeric" pattern="[0-9]*" {...register(`categories.${categoryIndex}.products.${productIndex}.base_price_minor` as const, { setValueAs: (value) => String(value) })} disabled={disabled} required /></label><label className="catalog-checkbox"><input type="checkbox" {...register(`categories.${categoryIndex}.products.${productIndex}.active` as const)} disabled={disabled} />{t.active}</label></div>
+      <OptionGroupFields control={control} register={register} categoryIndex={categoryIndex} productIndex={productIndex} disabled={disabled} t={t} />
+      <button type="button" className="button small quiet" disabled={disabled} onClick={() => products.append({ key: newKey('product'), name: '', description: '', base_price_minor: '0', position: products.fields.length, active: true, option_groups: [] })}>{t.addProduct}</button>
+    </fieldset>)}
+  </>;
+}
+
+function OptionGroupFields({ control, register, categoryIndex, productIndex, disabled, t }: { control: Control<CatalogData>; register: UseFormRegister<CatalogData>; categoryIndex: number; productIndex: number; disabled: boolean; t: typeof copy[Locale] }) {
+  const name = `categories.${categoryIndex}.products.${productIndex}.option_groups` as const;
+  const groups = useFieldArray({ control, name });
+  return <>
+    {groups.fields.map((group, groupIndex) => <OptionFields key={group.id} control={control} register={register} categoryIndex={categoryIndex} productIndex={productIndex} groupIndex={groupIndex} disabled={disabled} t={t} onRemove={() => groups.remove(groupIndex)} />)}
+    <button type="button" className="button small quiet" disabled={disabled} onClick={() => groups.append({ key: newKey('group'), name: '', min_select: 0, max_select: 1, position: groups.fields.length, options: [{ key: newKey('option'), name: '', price_delta_minor: '0', position: 0, active: true }] })}>{t.addGroup}</button>
+  </>;
+}
+
+function OptionFields({ control, register, categoryIndex, productIndex, groupIndex, disabled, t, onRemove }: { control: Control<CatalogData>; register: UseFormRegister<CatalogData>; categoryIndex: number; productIndex: number; groupIndex: number; disabled: boolean; t: typeof copy[Locale]; onRemove: () => void }) {
+  const name = `categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.options` as const;
+  const options = useFieldArray({ control, name });
+  return <fieldset className="catalog-group">
+    <div className="catalog-edit-heading"><legend>{t.optionGroup}</legend><button type="button" className="text-button danger" disabled={disabled} onClick={onRemove}>{t.remove}</button></div>
+    <div className="catalog-fields"><label>{t.groupName}<input {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.name` as const)} disabled={disabled} required /></label><label>{t.min}<input type="number" min={0} max={options.fields.length} {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.min_select` as const, { valueAsNumber: true })} disabled={disabled} /></label><label>{t.max}<input type="number" min={1} max={options.fields.length} {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.max_select` as const, { valueAsNumber: true })} disabled={disabled} /></label></div>
+    {options.fields.map((option, optionIndex) => <div className="catalog-option-edit" key={option.id}><label>{t.optionName}<input {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.options.${optionIndex}.name` as const)} disabled={disabled} required /></label><label>{t.extraPrice}<input inputMode="numeric" pattern="[0-9]*" {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.options.${optionIndex}.price_delta_minor` as const, { setValueAs: (value) => String(value) })} disabled={disabled} required /></label><label className="catalog-checkbox"><input type="checkbox" {...register(`categories.${categoryIndex}.products.${productIndex}.option_groups.${groupIndex}.options.${optionIndex}.active` as const)} disabled={disabled} />{t.active}</label><button type="button" className="text-button danger" disabled={disabled} onClick={() => options.remove(optionIndex)}>{t.remove}</button></div>)}
+    <button type="button" className="button small quiet" disabled={disabled} onClick={() => options.append({ key: newKey('option'), name: '', price_delta_minor: '0', position: options.fields.length, active: true })}>{t.addOption}</button>
+  </fieldset>;
 }
 
 function PreviewPanel({ preview, draft, published, t }: { preview: CompanyPreview; draft: CatalogData; published: CompanyPublished | null; t: typeof copy[Locale] }) {
@@ -438,7 +476,6 @@ function AvailabilityBadge({ value, t }: { value: Availability; t: typeof copy[L
 
 function sameCatalog(a: CatalogData, b: CatalogData) { return JSON.stringify(a.categories) === JSON.stringify(b.categories); }
 function canWriteDraft(draft: CompanyDraft) { try { toNumericDraft(draft); return true; } catch { return false; } }
-function numberValue(value: string) { const parsed = Number(value); return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : 0; }
 function positiveAmount(value: string | number) { try { return BigInt(String(value)) > 0n; } catch { return false; } }
 function newKey(prefix: string) { return `${prefix}-${globalThis.crypto?.randomUUID?.().replaceAll('-', '') ?? `${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`}`; }
 function isConflict(error: unknown) { return error instanceof ApiError && error.status === 409; }

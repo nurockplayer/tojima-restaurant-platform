@@ -24,6 +24,12 @@ describe('surface selection', () => {
     expect(surfaceFor('/staff/extra')).toBe('guest');
     expect(surfaceFor('/staffing')).toBe('guest');
   });
+
+  it('routes /catalog and /catalog/ to the catalog surface', () => {
+    expect(surfaceFor('/catalog')).toBe('catalog');
+    expect(surfaceFor('/catalog/')).toBe('catalog');
+    expect(surfaceFor('/catalog/items')).toBe('guest');
+  });
 });
 
 describe('surface boundary', () => {
