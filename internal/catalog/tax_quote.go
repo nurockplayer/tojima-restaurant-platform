@@ -70,7 +70,27 @@ func (s *Service) QuoteDineIn(ctx context.Context, scope StoreScope, at time.Tim
 	if err != nil {
 		return MenuQuote{}, err
 	}
-	date := at.In(time.FixedZone("JST", 9*60*60))
+	result, err := s.QuoteDineInTx(ctx, tx, menu, at, selections)
+	if err != nil {
+		return MenuQuote{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return MenuQuote{}, err
+	}
+	return result, nil
+}
+
+// QuoteDineInTx calculates a dine-in quote from the menu and schedule visible
+// in the caller's transaction. The menu must come from
+// LockStoreMenuForAdmissionTx in this transaction. This method never owns the
+// transaction and never allocates line-level tax; the invoice-rate group totals
+// in Tax are authoritative. Callers must obtain trustedAt after all admission
+// locks (including any later cart lock) have been acquired.
+func (s *Service) QuoteDineInTx(ctx context.Context, tx pgx.Tx, menu PublishedMenu, trustedAt time.Time, selections []MenuLine) (MenuQuote, error) {
+	if tx == nil || trustedAt.IsZero() || len(selections) == 0 || menu.TenantID == "" || menu.StoreID == "" || menu.CatalogID < 1 || menu.Revision < 1 || (menu.Mode != "LINKED" && menu.Mode != "DETACHED") {
+		return MenuQuote{}, ErrInvalid
+	}
+	date := trustedAt.In(time.FixedZone("JST", 9*60*60))
 	reader, err := tax.NewReader(tx)
 	if err != nil {
 		return MenuQuote{}, err
@@ -82,7 +102,7 @@ func (s *Service) QuoteDineIn(ctx context.Context, scope StoreScope, at time.Tim
 	products := flattenProducts(menu.CatalogData)
 	result := MenuQuote{CatalogMode: menu.Mode, Revision: menu.Revision, Lines: make([]QuotedLine, 0, len(selections))}
 	inputs := make([]tax.LineInput, 0, len(selections))
-	taxScope := tax.Scope{TenantID: scope.TenantID, StoreID: scope.StoreID}
+	taxScope := tax.Scope{TenantID: menu.TenantID, StoreID: menu.StoreID}
 	for _, selection := range selections {
 		priced, err := Quote(menu, selection.ProductKey, selection.Options)
 		if err != nil {
@@ -109,9 +129,6 @@ func (s *Service) QuoteDineIn(ctx context.Context, scope StoreScope, at time.Tim
 	}
 	result.Tax, err = tax.Calculate(tax.Schedule{rule}, date, taxScope, inputs)
 	if err != nil {
-		return MenuQuote{}, err
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return MenuQuote{}, err
 	}
 	return result, nil

@@ -1127,7 +1127,7 @@ func readStoreMenu(ctx context.Context, tx pgx.Tx, scope StoreScope) (PublishedM
 			}
 		}
 	}
-	return PublishedMenu{TenantID: scope.TenantID, StoreID: scope.StoreID, Mode: mode, Revision: *revision, CatalogData: data}, nil
+	return PublishedMenu{TenantID: scope.TenantID, StoreID: scope.StoreID, CatalogID: catalogID, Mode: mode, Revision: *revision, CatalogData: data}, nil
 }
 
 func readProductAvailability(ctx context.Context, tx pgx.Tx, scope StoreScope, productKey string) (Availability, int64, error) {
