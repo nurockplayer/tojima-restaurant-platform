@@ -59,8 +59,7 @@ projection omits Checkout URLs. Event account, object, amount, currency,
 metadata, and payment state are data for the caller to compare to its durable
 attempt; they do not establish tenant/store authority by themselves.
 
-Provider errors are static typed sentinels and never wrap SDK responses. A
-Checkout creation transport errors and unsafe/mismatched create responses
+Provider errors are static typed sentinels and never wrap SDK responses. Checkout creation transport errors and unsafe/mismatched create responses
 return `ErrOutcomeUnknown`; expiration transport or response errors use the
 same classification. The adapter does not retry either mutation. The caller
 must reconcile the already-persisted attempt rather than creating another
@@ -88,3 +87,28 @@ Automatic Tax, no retry after an ambiguous response, retrieve/expire behavior,
 and signature rotation, exact-body verification, timestamp bounds, API
 version, live-mode, size, and redaction boundaries. It does not use Stripe
 keys, contact Stripe, or claim a real Stripe Test Mode E2E.
+
+## Approved secret placement (2026-10-18)
+
+The owner authorized local test credentials only in Git-ignored `.env.local` or
+secure process environment variables. The current executable does not load
+Stripe secrets or call Stripe. Do not commit populated files or print secrets.
+Future credentialed GitHub Actions tests must consume **Environment Secrets**
+from the repository environment `stripe-test`, not source files. That empty
+environment has been created; no credentials are currently configured. Ordinary
+CI runs the keyless test doubles and needs no Stripe secret.
+
+Before real Test Mode can be enabled, the owner must supply the approved
+tenant/store-to-test-account mapping, Connect charge mode, authorized test API
+key configuration reference and endpoint signing secret configuration reference.
+The backend merchant configuration stores the explicit per-store account and
+references, while each attempt snapshots them so later configuration cannot
+reroute an existing order. Credentials themselves stay out of the database.
+Production Secret Manager selection remains dependent on the deployment
+platform and is not decided by this test adapter.
+
+The original submitter context is a separate signed random token from
+`internal/checkoutproof`, established before commit by the later HTTP adapter.
+Each winning order binds only its hash and fixed expiry. This primitive does
+not itself authorize a payment, issue an HTTP cookie, or replace TABLE_JOIN,
+ORDER_READ, or MOD-08 staff identity.

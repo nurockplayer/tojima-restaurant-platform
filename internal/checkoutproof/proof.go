@@ -1,5 +1,5 @@
-// Package checkoutproof issues short-lived browser-context proofs for a single
-// checkout attempt. The raw token is returned only to the caller that issues
+// Package checkoutproof issues short-lived browser-context proofs that each
+// winning checkout attempt can bind independently. The raw token is returned only to the caller that issues
 // it; persistent state should store Proof.Hash instead.
 package checkoutproof
 
