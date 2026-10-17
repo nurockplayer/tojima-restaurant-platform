@@ -265,20 +265,20 @@ export function StaffApp() {
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;
     let timer: number | undefined;
-    let cancelled = false;
     const schedule = () => {
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') timer = window.setInterval(() => {
         if (kdsPoll.current) return;
-        // Abort rather than race, so the guard is only released once the request itself has settled.
+        // Abort rather than race, so the guard is only released once the request itself has settled. loadKds only
+        // rethrows for the current connection, so a failure inherited across a KDS remount still marks the board stale.
         const controller = new AbortController();
         const watchdog = window.setTimeout(() => controller.abort(), KDS_POLL_TIMEOUT_MS);
-        const poll = loadKds(context, token, controller.signal).catch(() => { if (!cancelled) setKdsStale(true); }).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
+        const poll = loadKds(context, token, controller.signal).catch(() => setKdsStale(true)).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
         kdsPoll.current = poll;
       }, 2500);
     };
     schedule(); document.addEventListener('visibilitychange', schedule);
-    return () => { cancelled = true; document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
+    return () => { document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
   }, [capabilities?.can_kitchen, connected, context, loadKds, token, view]);
 
   const refreshDetail = useCallback(async () => {

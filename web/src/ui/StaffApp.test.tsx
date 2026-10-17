@@ -137,6 +137,27 @@ describe('staff operations', () => {
     expect(kdsCalls).toBe(3);
   });
 
+  it('reports a pending KDS poll failure that settles after the operator returns to the board', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const pendingPoll = deferred<Response>();
+    let kdsCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/operations/kds`) { kdsCalls += 1; return kdsCalls === 2 ? pendingPoll.promise : json({ orders: [] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '厨房看板');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+    await click(host!, 'テーブル');
+    await click(host!, '厨房看板');
+    pendingPoll.resolve(json({ error: 'unavailable' }, 502));
+    await act(async () => { await pendingPoll.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('p.kds-stale[role="status"]')?.textContent).toContain('厨房看板の接続が切れています');
+  });
+
   it('dismisses the close dialog on cancel and restores focus to its opener', async () => {
     const routes: Route = async (url) => {
       if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
