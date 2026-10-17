@@ -94,7 +94,7 @@ func New(ctx context.Context, dsn string) (f *Fixture, err error) {
 	}
 	data := catalog.CatalogData{Categories: []catalog.Category{{Key: "meals", Name: "お食事", Products: []catalog.Product{
 		{Key: "teishoku", Name: "東島の定食", Description: "焼き魚・小鉢・ごはん・お味噌汁", BasePriceMinor: 1100, Active: true, Groups: []catalog.OptionGroup{{Key: "rice", Name: "ごはんの量", MinSelect: 1, MaxSelect: 1, Options: []catalog.Option{{Key: "regular", Name: "普通", Active: true}, {Key: "large", Name: "大盛り", PriceDeltaMinor: 110, Active: true}}}}},
-		{Key: "tea", Name: "ほうじ茶", Description: "香ばしい温かなお茶", BasePriceMinor: 330, Active: true},
+		{Key: "tea", Name: "ほうじ茶", Description: "香ばしい温かなお茶", BasePriceMinor: 330, Active: true, Groups: []catalog.OptionGroup{{Key: "aroma", Name: "香り（任意）", MinSelect: 0, MaxSelect: 1, Options: []catalog.Option{{Key: "yuzu", Name: "ゆず", Active: true}, {Key: "ginger", Name: "生姜", Active: true}}}}},
 	}}}}
 	draft, e := f.Menus.SaveCompanyDraft(ctx, "test-tenant", "fixture-bootstrap", 0, data)
 	if e != nil {

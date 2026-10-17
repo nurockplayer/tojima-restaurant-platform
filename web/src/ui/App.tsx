@@ -10,7 +10,7 @@ const copy = {
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
     menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中',
-    choose: '選択してください', required: '必須', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
+    choose: '選択してください', required: '必須', noOption: '選択しない', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
     remove: '削除', quantity: '数量', options: '追加オプション', latest: '最新の共有内容', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
     refresh: '共有内容を更新', preview: '金額を確認する', previewHint: '注文を確定する前に最新の金額と内容をご確認ください。',
     total: '税込合計', tax: '内消費税', method: '今回のお支払い方法', stripe: 'クレジットカード', cash: '店頭で現金',
@@ -28,7 +28,7 @@ const copy = {
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
     menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中',
-    choose: '請選擇', required: '必選', add: '加入購物車', cartEmpty: '購物車目前是空的。',
+    choose: '請選擇', required: '必選', noOption: '不選擇', add: '加入購物車', cartEmpty: '購物車目前是空的。',
     remove: '移除', quantity: '數量', options: '加料選項', latest: '最新共用內容', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
     refresh: '更新共用內容', preview: '確認金額', previewHint: '送出前請確認最新品項和金額。',
     total: '含稅總額', tax: '其中消費稅', method: '本次付款方式', stripe: '信用卡', cash: '店內現金',
@@ -283,6 +283,8 @@ export function App() {
         if (entry) await recoverConflict(entry, cause.body.cart);
         setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
         replay.current = null;
+      } else if (cause instanceof ApiError && cause.status >= 500) {
+        setUncertain(true); setError(t.network);
       } else if (cause instanceof ApiError) {
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
         else setError(t.error);
@@ -379,6 +381,9 @@ export function App() {
       if (cause instanceof ApiError && cause.status === 409) {
         await recoverConflict(entry, cause.body.cart);
         clearPreview(); setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
+      } else if (cause instanceof ApiError && cause.status >= 500) {
+        setError(t.network); setUncertain(true);
+        replay.current = createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key));
       } else if (cause instanceof ApiError) {
         clearPreview();
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
@@ -440,10 +445,11 @@ export function App() {
                     <div className="option-list">{group.options.map((option) => {
                       const checked = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
                       return <label className={`option ${!option.availability || option.availability !== 'AVAILABLE' ? 'option-muted' : ''}`} key={option.key}>
-                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || option.availability !== 'AVAILABLE' || (!checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
+                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || option.availability !== 'AVAILABLE' || (group.max_select !== 1 && !checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
                         <span>{option.name}</span><small>{safeAmount(option.price_delta_minor)}</small>
                       </label>;
                     })}</div>
+                    {group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" onClick={() => setSelections((current) => ({ ...current, [product.key]: (current[product.key] ?? []).filter((item) => item.group_key !== group.key) }))}>{t.noOption}</button>}
                   </fieldset>)}
                   <div className="product-actions"><label className="quantity-select">{t.quantity}<select aria-label={`${product.name} ${t.quantity}`} value={quantities[product.key] ?? 1} onChange={(event) => setQuantities((values) => ({ ...values, [product.key]: Number(event.target.value) }))}>{Array.from({ length: 10 }, (_, i) => i + 1).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
                     <button className="button small primary" disabled={busy || !allowed || uncertain} onClick={() => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, quantities[product.key] ?? 1, selected, key))}>{t.add}</button>
@@ -488,7 +494,10 @@ export function App() {
                     const next = exists ? selected.filter((item) => !(item.group_key === group.key && item.option_key === option.key)) : [...groupSelections, ...sameGroup.slice(0, Math.max(0, group.max_select - 1)), { group_key: group.key, option_key: option.key }];
                     const count = next.filter((item) => item.group_key === group.key).length;
                     if (count >= group.min_select && count <= group.max_select) void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
-                  }} />{option.name}</label>)}</fieldset>)}
+                  }} />{option.name}</label>)}{group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" disabled={busy || uncertain} onClick={() => {
+                    const next = selected.filter((item) => item.group_key !== group.key);
+                    void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
+                  }}>{t.noOption}</button>}</fieldset>)}
                   <div className="cart-line-foot"><span>{amountJPY(product.effective_price_minor)}</span><div className="stepper"><button aria-label={`${product.name} −`} disabled={busy || uncertain || line.quantity <= 1} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity - 1, line.options, key))}>−</button><span>{line.quantity}</span><button aria-label={`${product.name} +`} disabled={busy || uncertain || line.quantity >= 99} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity + 1, line.options, key))}>＋</button></div></div>
                 </article>;
               })}

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/testguest"
 )
 
@@ -235,6 +236,45 @@ func TestCartEditWireBudget(t *testing.T) {
 		response := httptest.NewRecorder()
 		if decodeCartLimit(response, oversized, &cartLineRequest{}, cartEditMaxBodyBytes) || response.Code != http.StatusRequestEntityTooLarge {
 			t.Fatalf("oversize unknownLength=%v code=%d", unknownLength, response.Code)
+		}
+	}
+}
+
+func TestCartEditRejectsExcessSelectionsBeforeService(t *testing.T) {
+	// A compact array fits comfortably in the Unicode wire budget. Neither
+	// endpoint may dispatch it to the nil service or allocate the full array.
+	options := strings.TrimSuffix(strings.Repeat(`{},`, ordering.MaxOptionsPerLine+1), ",")
+	body := `{"expected_generation":1,"expected_version":1,"quantity":1,"options":[` + options + `]}`
+	h := NewOrderingHandler(nil, nil, nil)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		path := "/v1/guest/sessions/session/cart/lines"
+		if method == http.MethodPut {
+			path += "/line"
+		}
+		r := httptest.NewRequest(method, path, strings.NewReader(body))
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("%s returned %d: %s", method, w.Code, w.Body.String())
+		}
+	}
+}
+
+func TestBoundedCartOptionsKeepsStrictShape(t *testing.T) {
+	for _, value := range []string{`{}`, `1`, `[1]`, `[{"group_key":"g","option_key":"o","unexpected":true}]`} {
+		var input cartLineRequest
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/", strings.NewReader(`{"options":`+value+`}`))
+		if decodeCartLimit(w, r, &input, cartEditMaxBodyBytes) || w.Code != http.StatusBadRequest {
+			t.Fatalf("invalid options accepted: %s", value)
+		}
+	}
+	for _, value := range []string{`[]`, `null`, `[{"group_key":"g","option_key":"o"}]`} {
+		var input cartLineRequest
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest("POST", "/", strings.NewReader(`{"options":`+value+`}`))
+		if !decodeCartLimit(w, r, &input, cartEditMaxBodyBytes) {
+			t.Fatalf("valid options rejected: %s", value)
 		}
 	}
 }

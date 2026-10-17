@@ -30,10 +30,44 @@ type cartVersionRequest struct {
 }
 type cartLineRequest struct {
 	cartVersionRequest
-	ProductKey string                    `json:"product_key,omitempty"`
-	Quantity   int64                     `json:"quantity"`
-	Options    []catalog.OptionSelection `json:"options"`
+	ProductKey string             `json:"product_key,omitempty"`
+	Quantity   int64              `json:"quantity"`
+	Options    boundedCartOptions `json:"options"`
 }
+
+// The wire budget allows long Unicode keys, but must not expand millions of
+// compact selections into a Go slice before the service checks its count.
+type boundedCartOptions []catalog.OptionSelection
+
+func (o *boundedCartOptions) UnmarshalJSON(data []byte) error {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		*o = nil
+		return nil
+	}
+	d := json.NewDecoder(bytes.NewReader(data))
+	d.DisallowUnknownFields()
+	start, err := d.Token()
+	if err != nil || start != json.Delim('[') {
+		return ordering.ErrInvalid
+	}
+	options := make(boundedCartOptions, 0)
+	for d.More() {
+		if len(options) == ordering.MaxOptionsPerLine {
+			return ordering.ErrInvalid
+		}
+		var option catalog.OptionSelection
+		if err := d.Decode(&option); err != nil {
+			return err
+		}
+		options = append(options, option)
+	}
+	if end, err := d.Token(); err != nil || end != json.Delim(']') {
+		return ordering.ErrInvalid
+	}
+	*o = options
+	return nil
+}
+
 type commitCartRequest struct {
 	cartVersionRequest
 	Fingerprint   string                 `json:"preview_fingerprint"`

@@ -1,6 +1,7 @@
 package ordering
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -33,5 +34,24 @@ func TestCatalogSelectionOptionBounds(t *testing.T) {
 	cart := Cart{Lines: []CartLine{{Options: make([]CartOption, MaxCartOptions)}}}
 	if got := cartOptionCount(cart); got != MaxCartOptions {
 		t.Fatalf("aggregate option count=%d, want cap %d", got, MaxCartOptions)
+	}
+}
+
+func TestMutateRejectsOversizedOptionsBeforeDatabase(t *testing.T) {
+	options := make([]catalog.OptionSelection, MaxOptionsPerLine+1)
+	service := &Service{}
+	_, err := service.Mutate(context.Background(), Mutation{
+		SessionID:          "session",
+		GrantToken:         "grant",
+		ExpectedGeneration: 1,
+		ExpectedVersion:    1,
+		IdempotencyKey:     "oversized-options",
+		Kind:               AddLine,
+		ProductKey:         "product",
+		Quantity:           1,
+		Options:            options,
+	})
+	if !errors.Is(err, ErrInvalid) {
+		t.Fatalf("oversized mutation returned %v, want ErrInvalid before database access", err)
 	}
 }

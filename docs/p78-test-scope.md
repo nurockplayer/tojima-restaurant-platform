@@ -18,6 +18,7 @@ Unavailable or deleted menu selections remain in the cart with captured display 
 
 - PostgreSQL tests cover CAS conflicts, idempotency, commit convergence, snapshot persistence/immutability, menu and tax changes, scope/expiry/revocation and migration up/down/reapply. HTTP tests exercise real P-76 grants, exact money beyond 2^53, safe public projections and the DIRECT_SCAN acceptance flag.
 - Frontend tests cover authoritative state adoption, slow responses, preview invalidation, retry identity and loading/join rendering. A real built-app run in Ego-lite covers three guest clients; final receipts record actual measured behavior and any browser not exercised.
+- Single-select controls allow replacing a choice; optional groups expose an explicit none choice in both the product and cart editors. Over-limit option arrays are rejected while decoding, and the service checks their count before sorting, hashing or taking database locks.
 - Cart synchronization runs only on visible cart pages every 2.5 seconds. Existing-order polling uses 20 seconds; this does not promise subsecond synchronization. Hidden/unmounted pages stop their timers.
 - `cmd/guesttest` requires an explicit loopback test database, creates a random schema and seeds only isolated menu/table fixtures. Browser guests obtain real session grants through the normal join API. `cmd/server` keeps its health-only production boundary; no fixture staff authentication is installed.
 

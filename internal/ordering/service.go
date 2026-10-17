@@ -73,6 +73,11 @@ func (s *Service) Mutate(ctx context.Context, input Mutation) (Cart, error) {
 	if !validIdempotencyKey(input.IdempotencyKey) || input.ExpectedGeneration <= 0 || input.ExpectedVersion <= 0 {
 		return Cart{}, ErrInvalid
 	}
+	// Reject oversized selections before copying/sorting them, hashing the
+	// request, or acquiring catalog/session/cart locks.
+	if len(input.Options) > MaxOptionsPerLine {
+		return Cart{}, ErrInvalid
+	}
 	input.Options = canonicalOptions(input.Options)
 	digest, err := digestJSON(struct {
 		Generation int64                     `json:"generation"`
