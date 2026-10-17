@@ -25,6 +25,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
   sessionStorage.clear();
+  setVisibilityState('visible');
 });
 
 describe('guest app mount', () => {
@@ -330,7 +331,7 @@ describe('guest app mount', () => {
     expect(host?.textContent).not.toContain('stale-session');
   });
 
-  it('skips selected-order polling while that same status request is still pending', async () => {
+  it('skips the 20-second poll while the selected-order status request is still pending', async () => {
     const pendingStatus = deferred<Response>();
     let reads = 0;
     await mountCheckoutOrders([stripeOrder('order-slow')], async (url) => {
@@ -339,9 +340,113 @@ describe('guest app mount', () => {
     });
     vi.useFakeTimers();
     await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
-    await act(async () => { await vi.advanceTimersByTimeAsync(8000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(1);
     await act(async () => { pendingStatus.resolve(json(checkoutStatus('order-slow', 'UNKNOWN', false))); await Promise.resolve(); });
+  });
+
+  it('uses a 20-second visible cadence and refreshes immediately when the page becomes visible again', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-cadence')], async (url) => {
+      if (url.endsWith('/orders/order-cadence/checkout')) { reads++; return json(checkoutStatus('order-cadence', 'OPEN', true)); }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(reads).toBe(2);
+
+    setVisibilityState('hidden');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(40_000); });
+    expect(reads).toBe(2);
+    setVisibilityState('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await Promise.resolve(); });
+    expect(reads).toBe(3);
+  });
+
+  it.each(['PAID', 'FAILED', 'EXPIRED', 'REVIEW_REQUIRED'] as const)('stops guest polling after terminal checkout state %s', async (terminalState) => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-terminal')], async (url) => {
+      if (url.endsWith('/orders/order-terminal/checkout')) {
+        reads++;
+        return json(checkoutStatus('order-terminal', reads === 1 ? 'OPEN' : terminalState, false));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(reads).toBe(2);
+  });
+
+  it('refreshes once when returning visible after a terminal result, without restarting periodic polling', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-terminal-resume')], async (url) => {
+      if (url.endsWith('/orders/order-terminal-resume/checkout')) {
+        reads++;
+        return json(checkoutStatus('order-terminal-resume', 'PAID', false));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+
+    setVisibilityState('hidden');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(reads).toBe(1);
+
+    setVisibilityState('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(reads).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(60_000); });
+    expect(reads).toBe(2);
+  });
+
+  it('restarts polling when a fresh visibility read moves a cached FAILED state back to a nonterminal state', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-reconciled')], async (url) => {
+      if (url.endsWith('/orders/order-reconciled/checkout')) {
+        reads++;
+        return json(checkoutStatus('order-reconciled', reads === 1 ? 'FAILED' : 'OPEN', false));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    setVisibilityState('hidden');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    setVisibilityState('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
+    expect(reads).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(3);
+  });
+
+  it('schedules a safe retry after a transient immediate status read failure', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-retry')], async (url) => {
+      if (url.endsWith('/orders/order-retry/checkout')) {
+        reads++;
+        if (reads === 1) throw new Error('temporary network failure');
+        return json(checkoutStatus('order-retry', 'UNKNOWN', false));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(2);
   });
 
   it('switches single-select options, clears optional choices, protects required groups, and replays a 503 with the same request', async () => {
@@ -548,4 +653,8 @@ function deferred<T>() {
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
+}
+
+function setVisibilityState(state: DocumentVisibilityState): void {
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
 }

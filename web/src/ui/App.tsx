@@ -239,9 +239,9 @@ export function App() {
     await refresh(next);
   }, [invalidateGrant, refresh]);
 
-  const refreshCheckoutStatus = useCallback(async (current: Entry, orderID: string) => {
+  const refreshCheckoutStatus = useCallback(async (current: Entry, orderID: string): Promise<CheckoutStatus | null> => {
     const readKey = `${current.grant.session.id}:${current.grant.table_join_token}:${orderID}`;
-    if (checkoutReadsInFlight.current.has(readKey)) return;
+    if (checkoutReadsInFlight.current.has(readKey)) return null;
     checkoutReadsInFlight.current.add(readKey);
     const sequence = ++checkoutRequestSequence.current;
     try {
@@ -250,12 +250,15 @@ export function App() {
       if (sequence === checkoutRequestSequence.current && checkoutOrderRef.current === orderID && activeEntry?.grant.session.id === current.grant.session.id && activeEntry.grant.table_join_token === current.grant.table_join_token) {
         setCheckoutStatus(latest);
         setCheckoutError('');
+        return latest;
       }
+      return null;
     } catch (cause) {
       const activeEntry = entryRef.current;
-      if (sequence !== checkoutRequestSequence.current || checkoutOrderRef.current !== orderID || activeEntry?.grant.session.id !== current.grant.session.id || activeEntry.grant.table_join_token !== current.grant.table_join_token) return;
+      if (sequence !== checkoutRequestSequence.current || checkoutOrderRef.current !== orderID || activeEntry?.grant.session.id !== current.grant.session.id || activeEntry.grant.table_join_token !== current.grant.table_join_token) return null;
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
       else { setCheckoutStatus(null); setCheckoutError(t.checkoutError); }
+      return null;
     } finally {
       checkoutReadsInFlight.current.delete(readKey);
     }
@@ -264,14 +267,34 @@ export function App() {
   useEffect(() => {
     if (!entry || !checkoutOrderID || tab !== 'orders') return;
     let timer: number | undefined;
-    const poll = () => { void refreshCheckoutStatus(entry, checkoutOrderID); };
-    const schedule = () => {
-      if (timer !== undefined) window.clearInterval(timer);
-      if (document.visibilityState === 'visible') timer = window.setInterval(poll, 2500);
+    let disposed = false;
+    // REVIEW_REQUIRED is a held state: P80 deliberately stops automated state
+    // transitions there until a later staff-resolution workflow is available.
+    const isTerminal = (state?: CheckoutState) => state === 'PAID' || state === 'FAILED' || state === 'EXPIRED' || state === 'REVIEW_REQUIRED';
+    const schedulePeriodic = () => {
+      if (!disposed && timer === undefined && document.visibilityState === 'visible') {
+        timer = window.setInterval(poll, 20_000);
+      }
     };
-    poll(); schedule(); document.addEventListener('visibilitychange', schedule);
+    const poll = () => {
+      void refreshCheckoutStatus(entry, checkoutOrderID).then((latest) => {
+        if (disposed) return;
+        if (latest && isTerminal(latest.state)) {
+          window.clearInterval(timer);
+          timer = undefined;
+        } else schedulePeriodic();
+      });
+    };
+    const onVisibilityChange = () => {
+      if (timer !== undefined) window.clearInterval(timer);
+      timer = undefined;
+      if (document.visibilityState === 'visible') poll();
+    };
+    onVisibilityChange();
+    document.addEventListener('visibilitychange', onVisibilityChange);
     return () => {
-      document.removeEventListener('visibilitychange', schedule);
+      disposed = true;
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       if (timer !== undefined) window.clearInterval(timer);
       checkoutRequestSequence.current++;
     };

@@ -232,6 +232,67 @@ func TestPostgresStripeCommitResumeWebhookAndReviewGate(t *testing.T) {
 		t.Fatalf("paid Checkout racing expiry under hold must require review: status=%+v err=%v", heldRaceStatus, err)
 	}
 
+	// A hold with an open Checkout may retry expiry while the immutable attempt
+	// deadline remains open, but must stop all provider calls and finish the
+	// work item once that deadline has elapsed.
+	boundedService, err := New(f.Pool, f.Operations, resolver, Config{CreateRetryWindow: 10 * time.Second, ContinuationTTL: 20 * time.Minute, WorkLeaseTTL: time.Minute})
+	if err != nil {
+		t.Fatal(err)
+	}
+	boundedOrders, err := ordering.NewWithOrderPolicy(f.Pool, f.Sessions, f.Menus, boundedService)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var boundedHoldErr error
+	provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) {
+		_, boundedHoldErr = f.Pool.Exec(ctx, `UPDATE operation_order_state SET operational_hold=true,version=version+1,updated_at=clock_timestamp() WHERE order_id=$1`, result.Metadata["order_id"])
+	})
+	boundedOrder, _, err := commitStripeFixtureOrder(ctx, boundedOrders, grant.Session.ID, grant.Token, "stripe-line-expire-cutoff", "stripe-order-expire-cutoff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("bounded hold create worker worked=%v err=%v", worked, err)
+	}
+	if boundedHoldErr != nil {
+		t.Fatalf("bounded hold race fixture: %v", boundedHoldErr)
+	}
+	provider.SetNextExpireOutcome(stripeprovider.CheckoutOpen, stripeprovider.PaymentUnpaid, false)
+	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("pre-deadline expiry retry worker worked=%v err=%v", worked, err)
+	}
+	var retryDeadline, workAvailable time.Time
+	if err = f.Pool.QueryRow(ctx, `SELECT a.retry_not_after,w.available_at FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, boundedOrder.Order.ID).Scan(&retryDeadline, &workAvailable); err != nil {
+		t.Fatal(err)
+	}
+	// Wait for the immutable deadline and delayed retry to both become due. The
+	// attempt snapshot itself is deliberately not modified by this test.
+	waitUntil := retryDeadline
+	if workAvailable.After(waitUntil) {
+		waitUntil = workAvailable
+	}
+	if delay := time.Until(waitUntil) + 100*time.Millisecond; delay > 0 {
+		time.Sleep(delay)
+	}
+	if _, err = f.Pool.Exec(ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, boundedOrder.Order.ID); err != nil {
+		t.Fatal(err)
+	}
+	retrievesBeforeCutoff, expiresBeforeCutoff := provider.CheckoutOperationCounts()
+	if worked, err := boundedService.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("expired retry cutoff worker worked=%v err=%v", worked, err)
+	}
+	retrievesAfterCutoff, expiresAfterCutoff := provider.CheckoutOperationCounts()
+	if retrievesAfterCutoff != retrievesBeforeCutoff || expiresAfterCutoff != expiresBeforeCutoff {
+		t.Fatalf("cutoff worker contacted provider: retrieve %d→%d expire %d→%d", retrievesBeforeCutoff, retrievesAfterCutoff, expiresBeforeCutoff, expiresAfterCutoff)
+	}
+	var cutoffState, cutoffWorkState, cutoffWorkCode string
+	if err = f.Pool.QueryRow(ctx, `SELECT a.state,w.status,coalesce(w.safe_error_code,'') FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, boundedOrder.Order.ID).Scan(&cutoffState, &cutoffWorkState, &cutoffWorkCode); err != nil {
+		t.Fatal(err)
+	}
+	if cutoffState != string(StateUnknown) || cutoffWorkState != "DONE" || cutoffWorkCode != "EXPIRE_RETRY_WINDOW_ELAPSED" {
+		t.Fatalf("expired expiry budget must remain unknown and stop automation: attempt=%s work=%s code=%s", cutoffState, cutoffWorkState, cutoffWorkCode)
+	}
+
 	checkoutID, err := testCheckoutID(ctx, f.Pool, committed.Order.ID)
 	if err != nil {
 		t.Fatal(err)

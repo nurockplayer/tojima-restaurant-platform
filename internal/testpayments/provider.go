@@ -26,6 +26,8 @@ type Provider struct {
 	digests              map[string][32]byte
 	loseNext             bool
 	creates              int
+	retrieves            int
+	expires              int
 	nextStatus           stripeprovider.CheckoutStatus
 	nextPayment          stripeprovider.PaymentStatus
 	hasNextOutcome       bool
@@ -93,6 +95,9 @@ func (p *Provider) CreateCheckout(ctx context.Context, req stripeprovider.Create
 }
 
 func (p *Provider) RetrieveCheckout(ctx context.Context, account stripeprovider.AccountContext, id string) (stripeprovider.CheckoutResult, error) {
+	p.mu.Lock()
+	p.retrieves++
+	p.mu.Unlock()
 	if ctx.Err() != nil {
 		return stripeprovider.CheckoutResult{}, stripeprovider.ErrUnavailable
 	}
@@ -106,6 +111,9 @@ func (p *Provider) RetrieveCheckout(ctx context.Context, account stripeprovider.
 }
 
 func (p *Provider) ExpireCheckout(ctx context.Context, account stripeprovider.AccountContext, id, key string) (stripeprovider.CheckoutResult, error) {
+	p.mu.Lock()
+	p.expires++
+	p.mu.Unlock()
 	if ctx.Err() != nil || key == "" {
 		return stripeprovider.CheckoutResult{}, stripeprovider.ErrOutcomeUnknown
 	}
@@ -191,6 +199,14 @@ func (p *Provider) Counts() (requests, sessions int) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.creates, len(p.sessions)
+}
+
+// CheckoutOperationCounts is test-only observability for proving bounded
+// retries stop before making another provider request after an attempt cutoff.
+func (p *Provider) CheckoutOperationCounts() (retrieves, expires int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.retrieves, p.expires
 }
 
 // SetOutcome is a Go-test driver, never an HTTP route or customer action.

@@ -17,7 +17,10 @@ Provider network calls take place after a work lease is committed. Repeated
 create work uses the same snapshotted request and idempotency key within a
 configured window shorter than 24 hours. An ambiguous outcome after that window
 requires reconciliation and cannot issue another Checkout. A changed provider
-request profile cannot silently change an existing attempt.
+request profile cannot silently change an existing attempt. EXPIRE work shares
+the immutable retry deadline and checks database time before each provider call.
+After exhaustion it stops automated retries and leaves unresolved state UNKNOWN
+for staff reconciliation, preserving existing PAID or REVIEW_REQUIRED states.
 
 The browser context is signed and random, established before STRIPE commit in
 an HttpOnly, Secure, SameSite cookie. The winning order stores only the token
@@ -39,6 +42,10 @@ Staff S02 reconciliation retrieves provider state under current membership and
 role checks. It cannot create a new Checkout, transfer a payment URL, switch an
 order to CASH, or mark a payment successful by assertion. Broad hold management,
 review resolution and refunds remain P-82 work.
+
+The guest Checkout view refreshes on selection and when the page becomes visible,
+then polls every 20 seconds while visible and unresolved. Periodic polling stops
+for PAID, FAILED, EXPIRED and REVIEW_REQUIRED; those states remain visible.
 
 ## Isolated browser fixture
 

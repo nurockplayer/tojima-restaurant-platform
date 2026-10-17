@@ -562,34 +562,72 @@ func (s *Service) processExpire(ctx context.Context, w workItem) error {
 	if a.checkout == "" {
 		return s.finishWork(ctx, w, false, 0, "NO_CHECKOUT_TO_EXPIRE")
 	}
+	if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
+		return err
+	}
 	resolved, err := s.resolve(ctx, a.credential, a.account, a.mode)
 	if err != nil || a.api != stripeprovider.APIVersion || !bytesEqual(a.profile, resolved.ProfileFingerprint[:]) {
-		return s.finishWork(ctx, w, true, 10*time.Second, "PROVIDER_UNCONFIGURED")
+		return s.retryExpireWithinWindow(ctx, w, a, 10*time.Second, "PROVIDER_UNCONFIGURED")
 	}
 	// Expire is only valid for an existing open/unpaid Checkout. Stripe rejects
 	// complete sessions, so retrieve first and re-read after an ambiguous expire
 	// result before deciding whether to retry or record a terminal observation.
+	if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
+		return err
+	}
 	current, err := resolved.Provider.RetrieveCheckout(ctx, resolved.Account, a.checkout)
 	if err != nil {
-		return s.finishWork(ctx, w, true, 5*time.Second, "CHECKOUT_RETRIEVE_UNKNOWN")
+		return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "CHECKOUT_RETRIEVE_UNKNOWN")
 	}
 	if !validExpiryObservation(current, a) {
-		return s.finishWork(ctx, w, true, 10*time.Second, "UNSAFE_CHECKOUT_RETRIEVE")
+		return s.retryExpireWithinWindow(ctx, w, a, 10*time.Second, "UNSAFE_CHECKOUT_RETRIEVE")
 	}
 	if current.Status != stripeprovider.CheckoutOpen || current.PaymentStatus != stripeprovider.PaymentUnpaid {
 		return s.persistExpireObservation(ctx, w, a, current)
 	}
+	if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
+		return err
+	}
 	expired, expireErr := resolved.Provider.ExpireCheckout(ctx, resolved.Account, a.checkout, "p80-expire:"+a.attempt)
 	if expireErr != nil {
+		if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
+			return err
+		}
 		expired, err = resolved.Provider.RetrieveCheckout(ctx, resolved.Account, a.checkout)
 		if err != nil {
-			return s.finishWork(ctx, w, true, 5*time.Second, "EXPIRE_OUTCOME_UNKNOWN")
+			return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "EXPIRE_OUTCOME_UNKNOWN")
 		}
 	}
 	if !validExpiryObservation(expired, a) {
-		return s.finishWork(ctx, w, true, 10*time.Second, "UNSAFE_EXPIRE_RESPONSE")
+		return s.retryExpireWithinWindow(ctx, w, a, 10*time.Second, "UNSAFE_EXPIRE_RESPONSE")
 	}
 	return s.persistExpireObservation(ctx, w, a, expired)
+}
+
+// stopExpiredRetryWindow is checked before each provider call so an EXPIRE
+// work item cannot keep making remote requests after the attempt's immutable
+// create/reconciliation deadline. Once exhausted, UNKNOWN is the safe local
+// state and staff reconciliation remains available; no new Checkout is made.
+func (s *Service) stopExpiredRetryWindow(ctx context.Context, w workItem, a createRow) (bool, error) {
+	var open bool
+	if err := s.db.QueryRow(ctx, `SELECT clock_timestamp() < $1`, a.retry).Scan(&open); err != nil {
+		return false, err
+	}
+	if open {
+		return false, nil
+	}
+	if err := s.setAttemptUnknown(ctx, w, a.order, "EXPIRE_RETRY_WINDOW_ELAPSED"); err != nil {
+		return true, err
+	}
+	return true, s.finishWork(ctx, w, false, 0, "EXPIRE_RETRY_WINDOW_ELAPSED")
+}
+
+func (s *Service) retryExpireWithinWindow(ctx context.Context, w workItem, a createRow, after time.Duration, code string) error {
+	stopped, err := s.stopExpiredRetryWindow(ctx, w, a)
+	if stopped || err != nil {
+		return err
+	}
+	return s.finishWork(ctx, w, true, after, code)
 }
 
 func validExpiryObservation(x stripeprovider.CheckoutResult, a createRow) bool {
@@ -612,7 +650,7 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 		return s.finishWork(ctx, w, false, 0, "PAID_RECONCILIATION_QUEUED")
 	}
 	if x.Status == stripeprovider.CheckoutOpen {
-		return s.finishWork(ctx, w, true, 5*time.Second, "EXPIRE_NOT_CONFIRMED")
+		return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "EXPIRE_NOT_CONFIRMED")
 	}
 	next := StateExpired
 	if x.Status == stripeprovider.CheckoutComplete {
