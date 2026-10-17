@@ -12,7 +12,7 @@ type View = 'tables' | 'kds';
 type Dialog = 'cash' | 'close' | null;
 const CONTEXT_KEY = 'tojima.staff.context';
 const TOKEN_KEY = 'tojima.staff.access-token';
-// The HTTP client has no timeout, so a hung KDS poll is released (and the board marked stale) after this.
+// The HTTP client has no timeout, so a hung KDS poll is aborted (and the board marked stale) after this.
 const KDS_POLL_TIMEOUT_MS = 10000;
 
 const copy = {
@@ -139,12 +139,12 @@ export function StaffApp() {
     setTables(result.tables);
     return result.tables;
   }, [currentEpoch, isCurrent]);
-  const loadKds = useCallback(async (ctx: StaffContext, bearer: string) => {
+  const loadKds = useCallback(async (ctx: StaffContext, bearer: string, signal?: AbortSignal) => {
     const requestEpoch = currentEpoch(ctx, bearer);
     if (requestEpoch === null) return null;
     const requestID = ++kdsRequest.current;
     let result;
-    try { result = await operationsClient.kds(ctx, bearer); }
+    try { result = await operationsClient.kds(ctx, bearer, signal); }
     catch (cause) { if (!isCurrent(requestEpoch, ctx, bearer) || requestID !== kdsRequest.current) return null; throw cause; }
     if (!isCurrent(requestEpoch, ctx, bearer) || requestID !== kdsRequest.current) return null;
     setKdsOrders(result.orders);
@@ -270,9 +270,10 @@ export function StaffApp() {
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') timer = window.setInterval(() => {
         if (kdsPoll.current) return;
-        let watchdog: number | undefined;
-        const timeout = new Promise<never>((_resolve, reject) => { watchdog = window.setTimeout(() => reject(new Error('kds_poll_timeout')), KDS_POLL_TIMEOUT_MS); });
-        const poll = Promise.race([loadKds(context, token), timeout]).catch(() => { if (!cancelled) setKdsStale(true); }).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
+        // Abort rather than race, so the guard is only released once the request itself has settled.
+        const controller = new AbortController();
+        const watchdog = window.setTimeout(() => controller.abort(), KDS_POLL_TIMEOUT_MS);
+        const poll = loadKds(context, token, controller.signal).catch(() => { if (!cancelled) setKdsStale(true); }).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
         kdsPoll.current = poll;
       }, 2500);
     };

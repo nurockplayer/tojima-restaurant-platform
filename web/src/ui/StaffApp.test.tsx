@@ -89,9 +89,13 @@ describe('staff operations', () => {
   it('marks the board stale and resumes polling when a KDS request hangs', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     let kdsCalls = 0;
-    const routes: Route = async (url) => {
+    let hungSignal: AbortSignal | undefined;
+    const routes: Route = async (url, init) => {
       if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
-      if (url === `${base}/operations/kds`) { kdsCalls += 1; if (kdsCalls === 2) return new Promise<Response>(() => undefined); return kdsCalls === 3 ? json({ error: 'unavailable' }, 502) : json({ orders: [] }); }
+      if (url === `${base}/operations/kds`) {
+        kdsCalls += 1;
+        if (kdsCalls === 2) { hungSignal = init.signal ?? undefined; return new Promise<Response>((_resolve, reject) => init.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))); }
+        return kdsCalls === 3 ? json({ error: 'unavailable' }, 502) : json({ orders: [] }); }
       throw new Error(`Unexpected request ${url}`);
     };
     await mountStaff(routes);
@@ -99,8 +103,10 @@ describe('staff operations', () => {
     expect(kdsCalls).toBe(2);
     await act(async () => { await vi.advanceTimersByTimeAsync(7500); });
     expect(kdsCalls).toBe(2);
+    expect(hungSignal?.aborted).toBe(false);
     expect(host?.querySelector('p.kds-stale[role="status"]')).toBeNull();
     await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(hungSignal?.aborted).toBe(true);
     expect(host?.querySelector('p.kds-stale[role="status"]')?.textContent).toContain('厨房看板の接続が切れています');
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(kdsCalls).toBeGreaterThanOrEqual(4);
