@@ -780,6 +780,9 @@ func publishCatalog(ctx context.Context, tx pgx.Tx, catalogID int64, actor strin
 		if err = lockLinkedStores(ctx, tx, tenantID); err != nil {
 			return PublishResult{}, err
 		}
+		if err = validateCompanyPublicationDiff(ctx, tx, tenantID, previous, data.CatalogData); err != nil {
+			return PublishResult{}, err
+		}
 	}
 	result, err := writeRevision(ctx, tx, catalogID, actor, draftVersion, data.CatalogData)
 	if err != nil {

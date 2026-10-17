@@ -102,6 +102,31 @@ type PublishResult struct {
 	DraftVersion int64 `json:"draft_version"`
 }
 
+// PublicationIssue is a safe, machine-readable reason why a company draft
+// would invalidate the required-option choices of an existing linked menu.
+type PublicationIssue struct {
+	Code           string `json:"code"`
+	ProductKey     string `json:"product_key"`
+	GroupKey       string `json:"group_key,omitempty"`
+	StoreID        string `json:"store_id,omitempty"`
+	StoreName      string `json:"store_name,omitempty"`
+	RequiredCount  int    `json:"required_count,omitempty"`
+	AvailableCount int    `json:"available_count,omitempty"`
+}
+
+// PublicationValidationError is returned when a company publication would
+// introduce a new required choice or make a currently sellable linked item
+// impossible to order. It unwraps to ErrInvalid for existing error mapping.
+type PublicationValidationError struct {
+	Issues []PublicationIssue `json:"issues"`
+}
+
+func (e *PublicationValidationError) Error() string {
+	return "company publication failed required-option safety validation"
+}
+
+func (e *PublicationValidationError) Unwrap() error { return ErrInvalid }
+
 type PriceOverride struct {
 	ProductKey string `json:"product_key"`
 	PriceMinor int64  `json:"price_minor"`

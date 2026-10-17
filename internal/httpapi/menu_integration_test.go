@@ -77,7 +77,10 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	ownerMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", Role: authz.TenantAdmin}}}
 	owner := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "owner", MFA: true}}, authz.PolicyAuthorizer{Directory: ownerMemberships})
 	products := []catalog.Product{
-		{Key: "listed", Name: "Listed meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 500, Active: true},
+		{Key: "listed", Name: "Listed meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 500, Active: true, Groups: []catalog.OptionGroup{{
+			Key: "size", Name: "Size", MinSelect: 0, MaxSelect: 1,
+			Options: []catalog.Option{{Key: "large", Name: "Large", Active: true}},
+		}}},
 		{Key: "hidden", Name: "Unpublished meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 700, Active: false},
 	}
 	for i := 0; i < 3; i++ {
@@ -147,6 +150,164 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	}
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/other/stores/s1/menu", "", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("cross-tenant manager read allowed: %d %s", response.Code, response.Body.String())
+	}
+
+	storeMenu, err := service.ReadStoreMenu(ctx, catalog.StoreScope{TenantID: "t", StoreID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	productVersion := int64(0)
+	optionVersion := int64(0)
+	for _, category := range storeMenu.Categories {
+		for _, product := range category.Products {
+			if product.Key == "listed" {
+				productVersion = product.AvailabilityVersion
+				optionVersion = product.Groups[0].Options[0].AvailabilityVersion
+			}
+		}
+	}
+	if productVersion == 0 || optionVersion == 0 {
+		t.Fatalf("published product or option has no availability version: product=%d option=%d", productVersion, optionVersion)
+	}
+	availabilityPath := "/v1/admin/tenants/t/stores/s1/menu/availability"
+	productTarget := catalog.AvailabilityTarget{Kind: catalog.ProductAvailability, ProductKey: "listed"}
+	optionTarget := catalog.AvailabilityTarget{Kind: catalog.OptionAvailability, ProductKey: "listed", GroupKey: "size", OptionKey: "large"}
+	changeAvailability := func(target catalog.AvailabilityTarget, status catalog.Availability, version int64, reason string) string {
+		body, marshalErr := json.Marshal(catalog.AvailabilityChange{
+			Target: target,
+			Status: status, Reason: reason, ExpectedVersion: version,
+		})
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		return string(body)
+	}
+	staffMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s1", Role: authz.Staff}}}
+	staff := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "staff"}}, authz.PolicyAuthorizer{Directory: staffMemberships})
+	kitchenMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s1", Role: authz.Kitchen}}}
+	kitchen := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "kitchen"}}, authz.PolicyAuthorizer{Directory: kitchenMemberships})
+	noMFAManager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "manager", MFA: false}}, authz.PolicyAuthorizer{Directory: managerMemberships})
+	otherStoreManagerMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s2", Role: authz.StoreManager}}}
+	otherStoreManager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "other-store-manager", MFA: true}}, authz.PolicyAuthorizer{Directory: otherStoreManagerMemberships})
+	otherTenantAdminMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "other", Role: authz.TenantAdmin}}}
+	otherTenantAdmin := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "other-owner", MFA: true}}, authz.PolicyAuthorizer{Directory: otherTenantAdminMemberships})
+	defaultDeny := NewMenuHandler(service, nil, nil)
+	availableBody := changeAvailability(productTarget, catalog.Available, productVersion, "")
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("staff could confirm product sale: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, noMFAManager, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("manager without MFA could confirm product sale: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, otherStoreManager, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("other-store manager changed availability: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, otherTenantAdmin, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("other-tenant manager changed availability: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, kitchen, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.Paused, productVersion, "out of stock"), ""); response.Code != http.StatusForbidden {
+		t.Fatalf("kitchen role changed availability: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.Paused, productVersion, ""), ""); response.Code != http.StatusBadRequest {
+		t.Fatalf("pause without a reason was accepted: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, defaultDeny, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("default-deny runtime accepted availability change: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, strings.TrimSuffix(availableBody, "}")+`,"unexpected":true}`, ""); response.Code != http.StatusBadRequest {
+		t.Fatalf("unknown availability field was not rejected by strict decode before role selection: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"AVAILABLE"`) {
+		t.Fatalf("MFA manager did not confirm sale: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(optionTarget, catalog.Available, optionVersion, ""), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager did not confirm new option: %d %s", response.Code, response.Body.String())
+	}
+	staffPauseBody := changeAvailability(productTarget, catalog.Paused, productVersion+1, "ingredient unavailable")
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, staffPauseBody, ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"status":"PAUSED"`) {
+		t.Fatalf("staff could not pause own-store product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, changeAvailability(optionTarget, catalog.Paused, optionVersion+1, "equipment unavailable"), ""); response.Code != http.StatusOK {
+		t.Fatalf("staff could not pause own-store option: %d %s", response.Code, response.Body.String())
+	}
+	staffReopenBody := changeAvailability(productTarget, catalog.Available, productVersion+2, "")
+	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, staffReopenBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("staff reactivated paused product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, noMFAManager, http.MethodPut, availabilityPath, staffReopenBody, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("manager without MFA reactivated paused product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, staffReopenBody, ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager did not reopen own-store product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.Paused, productVersion+3, "manager pause"), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager could not pause own-store product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.Available, productVersion+4, ""), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager could not reopen paused product: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(optionTarget, catalog.Available, optionVersion+2, ""), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager did not reopen own-store option: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(optionTarget, catalog.Paused, optionVersion+3, "manager pause"), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager could not pause own-store option: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(optionTarget, catalog.Available, optionVersion+4, ""), ""); response.Code != http.StatusOK {
+		t.Fatalf("MFA manager could not reopen paused option: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.Paused, productVersion+3, "stale pause"), ""); response.Code != http.StatusConflict {
+		t.Fatalf("stale availability CAS was not rejected: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, manager, http.MethodPut, availabilityPath, changeAvailability(productTarget, catalog.PendingConfirmation, productVersion+5, ""), ""); response.Code != http.StatusBadRequest {
+		t.Fatalf("client could set pending confirmation: %d %s", response.Code, response.Body.String())
+	}
+	var availabilityAuditCount int
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM menu_admin_audit WHERE tenant_id='t' AND store_id='s1' AND operation='AVAILABILITY_PRODUCT' AND entity_key='listed'`).Scan(&availabilityAuditCount); err != nil {
+		t.Fatal(err)
+	}
+	if availabilityAuditCount != 5 {
+		t.Fatalf("availability updates did not use the audited service path: got %d audit rows, want confirm/staff-pause/reopen/manager-pause/reopen", availabilityAuditCount)
+	}
+	if err = pool.QueryRow(ctx, `SELECT count(*) FROM menu_admin_audit WHERE tenant_id='t' AND store_id='s1' AND operation='AVAILABILITY_OPTION' AND entity_key='listed/size/large'`).Scan(&availabilityAuditCount); err != nil {
+		t.Fatal(err)
+	}
+	if availabilityAuditCount != 5 {
+		t.Fatalf("option availability updates did not use the audited service path: got %d audit rows, want confirm/staff-pause/reopen/manager-pause/reopen", availabilityAuditCount)
+	}
+
+	invalidPublication := input.CatalogData
+	invalidPublication.Categories = append([]catalog.Category(nil), input.Categories...)
+	invalidPublication.Categories[0].Products = append([]catalog.Product(nil), input.Categories[0].Products...)
+	invalidPublication.Categories[0].Products[0].Groups = append(invalidPublication.Categories[0].Products[0].Groups, catalog.OptionGroup{
+		Key: "new-required", Name: "Required", MinSelect: 1, MaxSelect: 1,
+		Options: []catalog.Option{{Key: "choice", Name: "Choice", Active: true}},
+	})
+	if _, err = service.SaveCompanyDraft(ctx, "t", "owner", 1, invalidPublication); err != nil {
+		t.Fatalf("save draft with disallowed newly required group: %v", err)
+	}
+	if response := requestJSON(t, manager, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), `"issues"`) {
+		t.Fatalf("unauthorized store manager saw company publication validation: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, otherTenantAdmin, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), `"issues"`) {
+		t.Fatalf("other tenant saw company publication validation: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"error":"publication_blocked"`) || !strings.Contains(response.Body.String(), `"code":"NEW_REQUIRED_GROUP"`) || !strings.Contains(response.Body.String(), `"product_key":"listed"`) || !strings.Contains(response.Body.String(), `"group_key":"new-required"`) {
+		t.Fatalf("authorized publication failure omitted structured issues: %d %s", response.Code, response.Body.String())
+	}
+	publicAfterBlocked, err := service.ReadPublishedByTableLocator(ctx, "public-menu")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listedAfterBlocked := false
+	for _, category := range publicAfterBlocked.Categories {
+		for _, product := range category.Products {
+			if product.Key == "listed" && len(product.Groups) == 1 && product.Groups[0].Key == "size" {
+				listedAfterBlocked = true
+			}
+		}
+	}
+	if publicAfterBlocked.Revision != 1 || !listedAfterBlocked {
+		t.Fatalf("blocked company publish changed current revision: revision=%d listedWithOriginalGroup=%v err=%v", publicAfterBlocked.Revision, listedAfterBlocked, err)
 	}
 	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusOK {
 		t.Fatalf("detach store for draft-body limit test: %d %s", response.Code, response.Body.String())
