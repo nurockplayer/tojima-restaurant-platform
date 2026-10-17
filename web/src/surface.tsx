@@ -1,17 +1,19 @@
 import { Component, lazy, Suspense } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 
-export type SurfaceName = 'guest' | 'staff';
+export type SurfaceName = 'guest' | 'staff' | 'catalog';
 
-/** `/staff` and `/staff/` open the staff console; every other path keeps the guest flow and its query string. */
+/** Staff and catalog consoles use explicit routes; every other path keeps the guest flow and its query string. */
 export function surfaceFor(pathname: string): SurfaceName {
-  return pathname.replace(/\/$/, '') === '/staff' ? 'staff' : 'guest';
+  const path = pathname.replace(/\/$/, '');
+  return path === '/staff' ? 'staff' : path === '/catalog' ? 'catalog' : 'guest';
 }
 
-// Each surface is its own chunk, so guest phones never download the staff/KDS console.
+// Each surface is its own chunk, so guest phones never download the staff/KDS or catalog consoles.
 const surfaces: Record<SurfaceName, ComponentType> = {
   guest: lazy(() => import('./ui/App').then((module) => ({ default: module.App }))),
   staff: lazy(() => import('./ui/StaffApp').then((module) => ({ default: module.StaffApp }))),
+  catalog: lazy(() => import('./ui/CatalogApp').then((module) => ({ default: module.CatalogApp }))),
 };
 
 const copy = {

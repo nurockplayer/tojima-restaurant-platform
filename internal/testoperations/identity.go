@@ -43,9 +43,10 @@ type Credential struct {
 }
 
 type CredentialSet struct {
-	Cashier Credential `json:"cashier"`
-	Manager Credential `json:"manager"`
-	Kitchen Credential `json:"kitchen"`
+	Cashier      Credential  `json:"cashier"`
+	Manager      Credential  `json:"manager"`
+	Kitchen      Credential  `json:"kitchen"`
+	CatalogAdmin *Credential `json:"catalog_admin,omitempty"`
 }
 
 // NewCredentialSet creates opaque, random bearer credentials and current

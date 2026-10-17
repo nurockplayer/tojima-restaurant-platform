@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,6 +77,7 @@ func TestMenuHTTPIntegration(t *testing.T) {
 
 	ownerMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", Role: authz.TenantAdmin}}}
 	owner := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "owner", MFA: true}}, authz.PolicyAuthorizer{Directory: ownerMemberships})
+	ownerNoMFA := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "owner", MFA: false}}, authz.PolicyAuthorizer{Directory: ownerMemberships})
 	products := []catalog.Product{
 		{Key: "listed", Name: "Listed meal", Description: strings.Repeat("x", 4000), BasePriceMinor: 500, Active: true, Groups: []catalog.OptionGroup{{
 			Key: "size", Name: "Size", MinSelect: 0, MaxSelect: 1,
@@ -116,8 +118,87 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	if response := requestJSON(t, owner, http.MethodPut, path, string(body), ""); response.Code != http.StatusOK {
 		t.Fatalf("save company draft: %d %s", response.Code, response.Body.String())
 	}
-	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":1}`, ""); response.Code != http.StatusOK {
+	exactDraft := requestJSON(t, owner, http.MethodGet, "/v1/admin/tenants/t/menu/draft?amounts=string", "", "")
+	if exactDraft.Code != http.StatusOK || !strings.Contains(exactDraft.Body.String(), `"base_price_minor":"500"`) {
+		t.Fatalf("exact company draft amount response %d %s", exactDraft.Code, exactDraft.Body.String())
+	}
+	initialPublishPreviewResponse := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/preview", `{"expected_version":1}`, "")
+	if initialPublishPreviewResponse.Code != http.StatusOK {
+		t.Fatalf("preview initial company menu: %d %s", initialPublishPreviewResponse.Code, initialPublishPreviewResponse.Body.String())
+	}
+	var initialPublishPreview struct {
+		DraftVersion       int64  `json:"draft_version"`
+		PublishedRevision  int64  `json:"published_revision"`
+		CanPublish         bool   `json:"can_publish"`
+		PreviewFingerprint string `json:"preview_fingerprint"`
+	}
+	if err := json.Unmarshal(initialPublishPreviewResponse.Body.Bytes(), &initialPublishPreview); err != nil {
+		t.Fatal(err)
+	}
+	if !initialPublishPreview.CanPublish || initialPublishPreview.DraftVersion != 1 || initialPublishPreview.PublishedRevision != 0 || initialPublishPreview.PreviewFingerprint == "" {
+		t.Fatalf("initial preview omitted base/draft/fingerprint: %+v", initialPublishPreview)
+	}
+	initialDraftAfterPreview, err := service.GetCompanyDraft(ctx, "t")
+	if err != nil || initialDraftAfterPreview.Version != 1 {
+		t.Fatalf("advisory preview changed draft state: version=%d err=%v", initialDraftAfterPreview.Version, err)
+	}
+	if _, err = service.ReadPublishedByTableLocator(ctx, "public-menu"); !errors.Is(err, catalog.ErrNotPublished) {
+		t.Fatalf("advisory preview created published state: err=%v", err)
+	}
+	initialPublishBody, err := json.Marshal(publishCompanyCheckedRequest{ExpectedVersion: 1, PreviewFingerprint: initialPublishPreview.PreviewFingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", string(initialPublishBody), ""); response.Code != http.StatusOK {
 		t.Fatalf("publish company menu: %d %s", response.Code, response.Body.String())
+	}
+	companyPublished := requestJSON(t, owner, http.MethodGet, "/v1/admin/tenants/t/menu/published", "", "")
+	if companyPublished.Code != http.StatusOK || !strings.Contains(companyPublished.Body.String(), `"revision":1`) || !strings.Contains(companyPublished.Body.String(), `"key":"listed"`) {
+		t.Fatalf("company published snapshot response %d %s", companyPublished.Code, companyPublished.Body.String())
+	}
+	exactPublished := requestJSON(t, owner, http.MethodGet, "/v1/admin/tenants/t/menu/published?amounts=string", "", "")
+	if exactPublished.Code != http.StatusOK || !strings.Contains(exactPublished.Body.String(), `"base_price_minor":"500"`) {
+		t.Fatalf("exact company published amount response %d %s", exactPublished.Code, exactPublished.Body.String())
+	}
+	if response := requestJSON(t, ownerNoMFA, http.MethodGet, "/v1/admin/tenants/t/menu/published", "", ""); response.Code != http.StatusForbidden {
+		t.Fatalf("company published snapshot allowed tenant admin without MFA: %d %s", response.Code, response.Body.String())
+	}
+	versionTwoBody, err := json.Marshal(catalog.Draft{Version: 1, CatalogData: input.CatalogData})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPut, "/v1/admin/tenants/t/menu/draft", string(versionTwoBody), ""); response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"version":2`) {
+		t.Fatalf("save second company draft for linked-store fingerprint: %d %s", response.Code, response.Body.String())
+	}
+	linkedPreviewResponse := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/preview", `{"expected_version":2}`, "")
+	if linkedPreviewResponse.Code != http.StatusOK {
+		t.Fatalf("preview second company draft: %d %s", linkedPreviewResponse.Code, linkedPreviewResponse.Body.String())
+	}
+	var linkedPreview struct {
+		CanPublish         bool   `json:"can_publish"`
+		PreviewFingerprint string `json:"preview_fingerprint"`
+	}
+	if err = json.Unmarshal(linkedPreviewResponse.Body.Bytes(), &linkedPreview); err != nil {
+		t.Fatal(err)
+	}
+	if !linkedPreview.CanPublish || linkedPreview.PreviewFingerprint == "" {
+		t.Fatalf("valid linked-store preview omitted fingerprint: %+v", linkedPreview)
+	}
+	if _, err = pool.Exec(ctx, `UPDATE stores SET operating=false WHERE tenant_id='t' AND store_id='s1'`); err != nil {
+		t.Fatal(err)
+	}
+	staleLinkedPublish, err := json.Marshal(publishCompanyCheckedRequest{ExpectedVersion: 2, PreviewFingerprint: linkedPreview.PreviewFingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", string(staleLinkedPublish), ""); response.Code != http.StatusConflict {
+		t.Fatalf("linked-store status change did not stale the preview: %d %s", response.Code, response.Body.String())
+	}
+	if _, err = pool.Exec(ctx, `UPDATE stores SET operating=true WHERE tenant_id='t' AND store_id='s1'`); err != nil {
+		t.Fatal(err)
+	}
+	if denied := requestJSON(t, NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "manager", MFA: true}}, authz.PolicyAuthorizer{Directory: &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s1", Role: authz.StoreManager}}}}), http.MethodPost, "/v1/admin/tenants/t/menu/preview", `{"expected_version":1}`, ""); denied.Code != http.StatusForbidden || strings.Contains(denied.Body.String(), "preview_fingerprint") {
+		t.Fatalf("store manager could inspect company preview: %d %s", denied.Code, denied.Body.String())
 	}
 	public := requestJSON(t, NewMenuHandler(service, nil, nil), http.MethodGet, "/v1/guest/tables/public-menu/menu", "", "")
 	if public.Code != http.StatusOK || !strings.Contains(public.Body.String(), "Listed meal") || strings.Contains(public.Body.String(), "Unpublished meal") {
@@ -140,10 +221,20 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	manager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "manager", MFA: true}}, authz.PolicyAuthorizer{Directory: managerMemberships})
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/t/stores/s1/menu", "", ""); response.Code != http.StatusOK {
 		t.Fatalf("store manager read: %d %s", response.Code, response.Body.String())
-	} else if !strings.Contains(response.Body.String(), `"mode":"LINKED"`) || !strings.Contains(response.Body.String(), `"revision":1`) {
+	} else if !strings.Contains(response.Body.String(), `"mode":"LINKED"`) || !strings.Contains(response.Body.String(), `"revision":1`) || !strings.Contains(response.Body.String(), `"can_edit_prices":true`) || !strings.Contains(response.Body.String(), `"can_detach":false`) {
 		t.Fatalf("store manager response omitted menu version identity: %s", response.Body.String())
 	} else if !strings.Contains(response.Body.String(), `"currency":"JPY"`) || !strings.Contains(response.Body.String(), `"price_mode":"TAX_INCLUSIVE"`) {
 		t.Fatalf("store manager response omitted price metadata: %s", response.Body.String())
+	} else if !strings.Contains(response.Body.String(), `"base_price_minor":500`) || !strings.Contains(response.Body.String(), `"override_active":false`) || !strings.Contains(response.Body.String(), `"override_price_minor":null`) {
+		t.Fatalf("store manager response omitted source and override price projection: %s", response.Body.String())
+	}
+	ownerStoreMenu := requestJSON(t, owner, http.MethodGet, "/v1/admin/tenants/t/stores/s1/menu", "", "")
+	if ownerStoreMenu.Code != http.StatusOK || !strings.Contains(ownerStoreMenu.Body.String(), `"can_detach":true`) {
+		t.Fatalf("MFA tenant admin could not read scoped store menu/detach capability: %d %s", ownerStoreMenu.Code, ownerStoreMenu.Body.String())
+	}
+	managerExactAmounts := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/t/stores/s1/menu?amounts=string", "", "")
+	if managerExactAmounts.Code != http.StatusOK || !strings.Contains(managerExactAmounts.Body.String(), `"base_price_minor":"500"`) {
+		t.Fatalf("exact amount projection response %d %s", managerExactAmounts.Code, managerExactAmounts.Body.String())
 	}
 	if response := requestJSON(t, manager, http.MethodGet, "/v1/admin/tenants/t/stores/s2/menu", "", ""); response.Code != http.StatusForbidden {
 		t.Fatalf("cross-store manager read allowed: %d %s", response.Code, response.Body.String())
@@ -184,13 +275,32 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	}
 	staffMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s1", Role: authz.Staff}}}
 	staff := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "staff"}}, authz.PolicyAuthorizer{Directory: staffMemberships})
+	staffMenu := requestJSON(t, staff, http.MethodGet, "/v1/admin/tenants/t/stores/s1/menu", "", "")
+	if staffMenu.Code != http.StatusOK || !strings.Contains(staffMenu.Body.String(), `"can_pause_availability":true`) || !strings.Contains(staffMenu.Body.String(), `"can_confirm_availability":false`) || !strings.Contains(staffMenu.Body.String(), `"can_edit_prices":false`) || !strings.Contains(staffMenu.Body.String(), `"can_detach":false`) {
+		t.Fatalf("staff own-store read or capability projection failed: %d %s", staffMenu.Code, staffMenu.Body.String())
+	}
 	kitchenMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s1", Role: authz.Kitchen}}}
 	kitchen := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "kitchen"}}, authz.PolicyAuthorizer{Directory: kitchenMemberships})
 	noMFAManager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "manager", MFA: false}}, authz.PolicyAuthorizer{Directory: managerMemberships})
+	if response := requestJSON(t, manager, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("store manager detached company-owned menu: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, ownerNoMFA, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("tenant admin without MFA detached store: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, staff, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("staff detached own store: %d %s", response.Code, response.Body.String())
+	}
+	if response := requestJSON(t, noMFAManager, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("manager without MFA detached own store: %d %s", response.Code, response.Body.String())
+	}
 	otherStoreManagerMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "t", StoreID: "s2", Role: authz.StoreManager}}}
 	otherStoreManager := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "other-store-manager", MFA: true}}, authz.PolicyAuthorizer{Directory: otherStoreManagerMemberships})
 	otherTenantAdminMemberships := &httpMemberships{values: []authz.Membership{{TenantID: "other", Role: authz.TenantAdmin}}}
 	otherTenantAdmin := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: "other-owner", MFA: true}}, authz.PolicyAuthorizer{Directory: otherTenantAdminMemberships})
+	if response := requestJSON(t, otherTenantAdmin, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusForbidden {
+		t.Fatalf("other-tenant admin detached store: %d %s", response.Code, response.Body.String())
+	}
 	defaultDeny := NewMenuHandler(service, nil, nil)
 	availableBody := changeAvailability(productTarget, catalog.Available, productVersion, "")
 	if response := requestJSON(t, staff, http.MethodPut, availabilityPath, availableBody, ""); response.Code != http.StatusForbidden {
@@ -282,7 +392,7 @@ func TestMenuHTTPIntegration(t *testing.T) {
 		Key: "new-required", Name: "Required", MinSelect: 1, MaxSelect: 1,
 		Options: []catalog.Option{{Key: "choice", Name: "Choice", Active: true}},
 	})
-	if _, err = service.SaveCompanyDraft(ctx, "t", "owner", 1, invalidPublication); err != nil {
+	if _, err = service.SaveCompanyDraft(ctx, "t", "owner", 2, invalidPublication); err != nil {
 		t.Fatalf("save draft with disallowed newly required group: %v", err)
 	}
 	if response := requestJSON(t, manager, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), `"issues"`) {
@@ -291,7 +401,33 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	if response := requestJSON(t, otherTenantAdmin, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusForbidden || strings.Contains(response.Body.String(), `"issues"`) {
 		t.Fatalf("other tenant saw company publication validation: %d %s", response.Code, response.Body.String())
 	}
-	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", `{"expected_version":2}`, ""); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"error":"publication_blocked"`) || !strings.Contains(response.Body.String(), `"code":"NEW_REQUIRED_GROUP"`) || !strings.Contains(response.Body.String(), `"product_key":"listed"`) || !strings.Contains(response.Body.String(), `"group_key":"new-required"`) {
+	stalePublishBody, err := json.Marshal(publishCompanyCheckedRequest{ExpectedVersion: 3, PreviewFingerprint: linkedPreview.PreviewFingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", string(stalePublishBody), ""); response.Code != http.StatusConflict || strings.Contains(response.Body.String(), `"issues"`) {
+		t.Fatalf("stale preview fingerprint authorized publish or exposed issues: %d %s", response.Code, response.Body.String())
+	}
+	blockedPreviewResponse := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/preview", `{"expected_version":3}`, "")
+	if blockedPreviewResponse.Code != http.StatusOK {
+		t.Fatalf("advisory blocked preview: %d %s", blockedPreviewResponse.Code, blockedPreviewResponse.Body.String())
+	}
+	var blockedPreview struct {
+		CanPublish         bool                       `json:"can_publish"`
+		Issues             []catalog.PublicationIssue `json:"issues"`
+		PreviewFingerprint string                     `json:"preview_fingerprint"`
+	}
+	if err = json.Unmarshal(blockedPreviewResponse.Body.Bytes(), &blockedPreview); err != nil {
+		t.Fatal(err)
+	}
+	if blockedPreview.CanPublish || len(blockedPreview.Issues) == 0 || blockedPreview.PreviewFingerprint == "" {
+		t.Fatalf("blocked preview omitted findings or fingerprint: %+v", blockedPreview)
+	}
+	blockedPublishBody, err := json.Marshal(publishCompanyCheckedRequest{ExpectedVersion: 3, PreviewFingerprint: blockedPreview.PreviewFingerprint})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/menu/publish", string(blockedPublishBody), ""); response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"error":"publication_blocked"`) || !strings.Contains(response.Body.String(), `"code":"NEW_REQUIRED_GROUP"`) || !strings.Contains(response.Body.String(), `"product_key":"listed"`) || !strings.Contains(response.Body.String(), `"group_key":"new-required"`) {
 		t.Fatalf("authorized publication failure omitted structured issues: %d %s", response.Code, response.Body.String())
 	}
 	publicAfterBlocked, err := service.ReadPublishedByTableLocator(ctx, "public-menu")
@@ -308,6 +444,9 @@ func TestMenuHTTPIntegration(t *testing.T) {
 	}
 	if publicAfterBlocked.Revision != 1 || !listedAfterBlocked {
 		t.Fatalf("blocked company publish changed current revision: revision=%d listedWithOriginalGroup=%v err=%v", publicAfterBlocked.Revision, listedAfterBlocked, err)
+	}
+	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/stores/s2/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusOK {
+		t.Fatalf("tenant admin detach store: %d %s", response.Code, response.Body.String())
 	}
 	if response := requestJSON(t, owner, http.MethodPost, "/v1/admin/tenants/t/stores/s1/menu/detach", `{"expected_revision":1}`, ""); response.Code != http.StatusOK {
 		t.Fatalf("detach store for draft-body limit test: %d %s", response.Code, response.Body.String())

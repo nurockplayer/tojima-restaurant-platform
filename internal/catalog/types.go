@@ -54,6 +54,8 @@ type Product struct {
 	BasePriceMinor       int64         `json:"base_price_minor"`
 	EffectivePriceMinor  int64         `json:"-"`
 	PriceOverrideVersion int64         `json:"-"`
+	PriceOverrideActive  bool          `json:"-"`
+	PriceOverrideMinor   *int64        `json:"-"`
 	Position             int           `json:"position"`
 	Active               bool          `json:"active"`
 	Availability         Availability  `json:"-"`
@@ -100,6 +102,42 @@ type PublishedMenu struct {
 type PublishResult struct {
 	Revision     int64 `json:"revision"`
 	DraftVersion int64 `json:"draft_version"`
+}
+
+// CompanyPublishedSnapshot is one immutable company revision. It never
+// contains draft data and is read from a single database snapshot.
+type CompanyPublishedSnapshot struct {
+	Revision int64 `json:"published_revision"`
+	CatalogData
+}
+
+// CompanyPublicationPreview is an advisory result bound to the exact draft,
+// published revision, linked-store identities and relevant availability state
+// that were reviewed. Publishing with the fingerprint rechecks all inputs.
+type CompanyPublicationPreview struct {
+	DraftVersion       int64              `json:"draft_version"`
+	PublishedRevision  int64              `json:"published_revision"`
+	LinkedStoreCount   int                `json:"linked_store_count"`
+	CanPublish         bool               `json:"can_publish"`
+	Issues             []PublicationIssue `json:"issues"`
+	PreviewFingerprint string             `json:"preview_fingerprint"`
+}
+
+// StoreAdminProjection contains current store-specific price resolution. The
+// catalog menu remains the same coherent published menu used for reads; the
+// projection separates company base, absolute override, and effective value.
+type StoreAdminProjection struct {
+	Menu          PublishedMenu       `json:"menu"`
+	ProductPrices []StoreProductPrice `json:"product_prices"`
+}
+
+type StoreProductPrice struct {
+	ProductKey           string `json:"product_key"`
+	SourceBasePriceMinor int64  `json:"source_base_price_minor"`
+	OverrideActive       bool   `json:"override_active"`
+	OverridePriceMinor   *int64 `json:"override_price_minor"`
+	EffectivePriceMinor  int64  `json:"effective_price_minor"`
+	OverrideVersion      int64  `json:"override_version"`
 }
 
 // PublicationIssue is a safe, machine-readable reason why a company draft
