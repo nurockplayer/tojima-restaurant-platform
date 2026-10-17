@@ -1,17 +1,28 @@
 import { Component, lazy, Suspense } from 'react';
 import type { ComponentType, ReactNode } from 'react';
+import type { DemoSurfaceProps } from './ui/DemoBanner';
 
-export type SurfaceName = 'guest' | 'staff';
+export type SurfaceName = 'guest' | 'staff' | 'catalog';
 
-/** `/staff` and `/staff/` open the staff console; every other path keeps the guest flow and its query string. */
-export function surfaceFor(pathname: string): SurfaceName {
-  return pathname.replace(/\/$/, '') === '/staff' ? 'staff' : 'guest';
+export function demoEnabled(root: HTMLElement | null): boolean {
+  return root?.dataset.demo === 'shironagasukujira';
 }
 
-// Each surface is its own chunk, so guest phones never download the staff/KDS console.
-const surfaces: Record<SurfaceName, ComponentType> = {
+/** Staff and catalog consoles use explicit routes; every other path keeps the guest flow and its query string. */
+export function surfaceFor(pathname: string): SurfaceName {
+  const path = pathname.replace(/\/$/, '');
+  return path === '/staff' || path === '/kitchen' ? 'staff' : path === '/catalog' ? 'catalog' : 'guest';
+}
+
+export function initialStaffViewFor(pathname: string): 'tables' | 'kds' {
+  return pathname.replace(/\/$/, '') === '/kitchen' ? 'kds' : 'tables';
+}
+
+// Each surface is its own chunk, so guest phones never download the staff/KDS or catalog consoles.
+const surfaces: Record<SurfaceName, ComponentType<DemoSurfaceProps>> = {
   guest: lazy(() => import('./ui/App').then((module) => ({ default: module.App }))),
   staff: lazy(() => import('./ui/StaffApp').then((module) => ({ default: module.StaffApp }))),
+  catalog: lazy(() => import('./ui/CatalogApp').then((module) => ({ default: module.CatalogApp }))),
 };
 
 const copy = {
@@ -41,12 +52,12 @@ export class SurfaceBoundary extends Component<BoundaryProps, { failed: boolean 
   }
 }
 
-export function Surface({ name, onReload = () => window.location.reload() }: { name: SurfaceName; onReload?: () => void }) {
+export function Surface({ name, demo = false, initialView = 'tables', onReload = () => window.location.reload() }: DemoSurfaceProps & { name: SurfaceName; onReload?: () => void }) {
   const Selected = surfaces[name];
   return (
     <SurfaceBoundary onReload={onReload}>
       <Suspense fallback={<div className="loading-card" role="status">{copy.loading}</div>}>
-        <Selected />
+        <Selected demo={demo} initialView={initialView} />
       </Suspense>
     </SurfaceBoundary>
   );

@@ -733,6 +733,10 @@ func replaceDraftRows(ctx context.Context, tx pgx.Tx, catalogID int64, data Cata
 }
 
 func publishCatalog(ctx context.Context, tx pgx.Tx, catalogID int64, actor string, expectedVersion int64) (PublishResult, error) {
+	return publishCatalogWithFingerprint(ctx, tx, catalogID, actor, expectedVersion, "")
+}
+
+func publishCatalogWithFingerprint(ctx context.Context, tx pgx.Tx, catalogID int64, actor string, expectedVersion int64, expectedFingerprint string) (PublishResult, error) {
 	if !cleanKey(actor) || expectedVersion < 1 {
 		return PublishResult{}, ErrInvalid
 	}
@@ -777,8 +781,23 @@ func publishCatalog(ctx context.Context, tx pgx.Tx, catalogID int64, actor strin
 	if ownerKind == "COMPANY" {
 		// New stable keys start unavailable in LINKED stores. Existing stable-key
 		// availability is retained; detached stores are outside this publication.
-		if err = lockLinkedStores(ctx, tx, tenantID); err != nil {
+		stores, lockErr := lockLinkedStoreRows(ctx, tx, tenantID, "UPDATE")
+		if lockErr != nil {
+			err = lockErr
 			return PublishResult{}, err
+		}
+		if expectedFingerprint != "" {
+			publishedRevision := int64(0)
+			if current != nil {
+				publishedRevision = *current
+			}
+			currentFingerprint, fingerprintErr := companyPublicationFingerprint(ctx, tx, tenantID, catalogID, publishedRevision, draftVersion, previous, data.CatalogData, stores)
+			if fingerprintErr != nil {
+				return PublishResult{}, fingerprintErr
+			}
+			if currentFingerprint != expectedFingerprint {
+				return PublishResult{}, ErrStale
+			}
 		}
 		if err = validateCompanyPublicationDiff(ctx, tx, tenantID, previous, data.CatalogData); err != nil {
 			return PublishResult{}, err
@@ -1105,8 +1124,10 @@ func readStoreMenu(ctx context.Context, tx pgx.Tx, scope StoreScope) (PublishedM
 				}
 				if e == nil {
 					product.PriceOverrideVersion = version
+					product.PriceOverrideActive = active
 					if active {
 						product.EffectivePriceMinor = amount
+						product.PriceOverrideMinor = &amount
 					}
 				}
 			}
@@ -1187,20 +1208,36 @@ func validateAvailabilityTarget(ctx context.Context, tx pgx.Tx, scope StoreScope
 }
 
 func lockLinkedStores(ctx context.Context, tx pgx.Tx, tenantID string) error {
-	rows, err := tx.Query(ctx, `SELECT s.store_id FROM stores s WHERE s.tenant_id=$1
+	_, err := lockLinkedStoreRows(ctx, tx, tenantID, "UPDATE")
+	return err
+}
+
+func lockLinkedStoreRows(ctx context.Context, tx pgx.Tx, tenantID, strength string) ([]linkedStoreFingerprint, error) {
+	lockClause := ""
+	switch strength {
+	case "UPDATE":
+		lockClause = "FOR UPDATE OF s"
+	case "SHARE":
+		lockClause = "FOR SHARE OF s"
+	default:
+		return nil, ErrInvalid
+	}
+	rows, err := tx.Query(ctx, `SELECT s.store_id,s.enabled,s.operating FROM stores s WHERE s.tenant_id=$1
 		AND NOT EXISTS(SELECT 1 FROM store_menu_bindings b WHERE b.tenant_id=s.tenant_id AND b.store_id=s.store_id)
-		ORDER BY s.store_id FOR UPDATE`, tenantID)
+		ORDER BY s.store_id `+lockClause, tenantID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer rows.Close()
+	stores := make([]linkedStoreFingerprint, 0)
 	for rows.Next() {
-		var storeID string
-		if err = rows.Scan(&storeID); err != nil {
-			return err
+		var store linkedStoreFingerprint
+		if err = rows.Scan(&store.StoreID, &store.Enabled, &store.Operating); err != nil {
+			return nil, err
 		}
+		stores = append(stores, store)
 	}
-	return rows.Err()
+	return stores, rows.Err()
 }
 
 func initializeNewStoreStates(ctx context.Context, tx pgx.Tx, tenantID, actor string, previous, next CatalogData) error {

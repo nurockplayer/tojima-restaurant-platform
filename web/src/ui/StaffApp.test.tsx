@@ -267,6 +267,20 @@ describe('staff operations', () => {
     expect(document.activeElement).toBe(opener);
   });
 
+  it('shows demo identity and opens the KDS view when launched from the kitchen route', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [] });
+      if (url === `${base}/operations/kds`) return json({ orders: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes, { demo: true, initialView: 'kds' });
+
+    expect(host?.textContent).toContain('博多餃子酒場 シロナガスクジラ');
+    expect(host?.textContent).toContain('参考価格 · 現行店内価格未確認');
+    expect(host?.textContent).toContain('厨房看板');
+  });
+
   it('allows a corrected token after a rejected login instead of leaving the form busy', async () => {
     let accessCalls = 0;
     const accessTokens: string[] = [];
@@ -577,13 +591,13 @@ describe('staff operations', () => {
 
 type Route = (url: string, init: RequestInit) => Promise<Response>;
 
-async function mountStaff(route: Route) {
+async function mountStaff(route: Route, props: { demo?: boolean; initialView?: 'tables' | 'kds' } = {}) {
   sessionStorage.setItem('tojima.staff.context', JSON.stringify(staffContext));
   sessionStorage.setItem('tojima.staff.access-token', staffToken);
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
   vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init: RequestInit = {}) => route(String(input), init)));
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
-  await act(async () => { root?.render(<StaffApp />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+  await act(async () => { root?.render(<StaffApp {...props} />); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
 async function click(container: Element, label: string) {
