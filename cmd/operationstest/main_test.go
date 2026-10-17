@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -186,29 +187,74 @@ func TestDemoSPAGatesRootForAllHTMLEntriesAndFailsClosed(t *testing.T) {
 
 func TestDemoStripeCommitGuardBlocksStripeAndPreservesCashBody(t *testing.T) {
 	var calls int
+	var receivedBody string
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
+		body, _ := io.ReadAll(r.Body)
+		receivedBody = string(body)
 		w.WriteHeader(http.StatusNoContent)
 	})
 	guard := rejectDemoStripeCommit(next)
 	path := "/v1/guest/sessions/session-1/cart/commit"
 
-	stripe := httptest.NewRecorder()
-	guard.ServeHTTP(stripe, httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"payment_method":"STRIPE"}`)))
-	if stripe.Code != http.StatusServiceUnavailable || calls != 0 || !strings.Contains(stripe.Body.String(), "payment_unavailable") {
-		t.Fatalf("STRIPE commit was not blocked before runtime: status=%d calls=%d body=%s", stripe.Code, calls, stripe.Body.String())
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int
+	}{
+		{name: "single Stripe", body: `{"payment_method":"STRIPE"}`, wantStatus: http.StatusServiceUnavailable},
+		{name: "duplicate cash then Stripe", body: `{"payment_method":"CASH","payment_method":"STRIPE"}`, wantStatus: http.StatusBadRequest},
+		{name: "duplicate Stripe then cash", body: `{"payment_method":"STRIPE","payment_method":"CASH"}`, wantStatus: http.StatusBadRequest},
+		{name: "case alias", body: `{"PAYMENT_METHOD":"CASH"}`, wantStatus: http.StatusBadRequest},
+		{name: "escaped key", body: `{"\u0070ayment_method":"CASH"}`, wantStatus: http.StatusBadRequest},
+		{name: "malformed", body: `{"payment_method":"CASH"`, wantStatus: http.StatusBadRequest},
+		{name: "trailing JSON", body: `{"payment_method":"CASH"} {}`, wantStatus: http.StatusBadRequest},
+		{name: "oversize", body: `{"payment_method":"CASH","padding":"` + strings.Repeat("x", 16<<10) + `"}`, wantStatus: http.StatusBadRequest},
+		{name: "invalid type", body: `{"payment_method":0}`, wantStatus: http.StatusBadRequest},
+		{name: "missing method", body: `{"expected_version":1}`, wantStatus: http.StatusBadRequest},
+		{name: "lowercase method", body: `{"payment_method":"cash"}`, wantStatus: http.StatusBadRequest},
+		{name: "noncanonical escaped value", body: `{"payment_method":"CA\u0053H"}`, wantStatus: http.StatusBadRequest},
+		{name: "nested method only", body: `{"nested":{"payment_method":"CASH"}}`, wantStatus: http.StatusBadRequest},
+		{name: "nonobject", body: `[]`, wantStatus: http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			guard.ServeHTTP(response, httptest.NewRequest(http.MethodPost, path, strings.NewReader(tc.body)))
+			if response.Code != tc.wantStatus || calls != 0 {
+				t.Fatalf("invalid commit reached runtime or got wrong status: status=%d want=%d calls=%d body=%s", response.Code, tc.wantStatus, calls, response.Body.String())
+			}
+			if strings.Contains(response.Body.String(), strings.Repeat("x", 20)) {
+				t.Fatal("guard error reflected sensitive request content")
+			}
+		})
 	}
 
-	cashBody := `{"payment_method":"CASH","generation":2}`
-	cash := httptest.NewRecorder()
-	guard.ServeHTTP(cash, httptest.NewRequest(http.MethodPost, path, strings.NewReader(cashBody)))
-	if cash.Code != http.StatusNoContent || calls != 1 {
-		t.Fatalf("CASH commit did not reach the synthetic runtime: status=%d calls=%d", cash.Code, calls)
+	for i, cashBody := range []string{
+		`{"payment_method":"CASH","expected_generation":2}`,
+		"{\n  \"expected_generation\":2, \"payment_method\" : \"CASH\", \"expected_version\":3\n}",
+		`{"expected_generation":2,"expected_version":3,"preview_fingerprint":"fixture","payment_method":"CASH"}`,
+	} {
+		cash := httptest.NewRecorder()
+		guard.ServeHTTP(cash, httptest.NewRequest(http.MethodPost, path, strings.NewReader(cashBody)))
+		if cash.Code != http.StatusNoContent || calls != i+1 || receivedBody != cashBody {
+			t.Fatalf("canonical CASH body was changed or denied: status=%d calls=%d body=%q want=%q", cash.Code, calls, receivedBody, cashBody)
+		}
 	}
 
-	passThrough := httptest.NewRecorder()
-	guard.ServeHTTP(passThrough, httptest.NewRequest(http.MethodGet, "/v1/guest/sessions/session-1/orders", nil))
-	if passThrough.Code != http.StatusNoContent || calls != 2 {
-		t.Fatalf("non-commit request was changed: status=%d calls=%d", passThrough.Code, calls)
+	passBody := `{"payment_method":"CASH"}`
+	for _, tc := range []struct{ method, path string }{
+		{method: http.MethodGet, path: path},
+		{method: http.MethodPost, path: "/v1/guest/sessions/session-1/cart/lines"},
+		{method: http.MethodPost, path: "/v1/other/sessions/session-1/cart/commit"},
+	} {
+		passThrough := httptest.NewRecorder()
+		guard.ServeHTTP(passThrough, httptest.NewRequest(tc.method, tc.path, strings.NewReader(passBody)))
+		if passThrough.Code != http.StatusNoContent {
+			t.Fatalf("ordinary request %s %s was changed: status=%d", tc.method, tc.path, passThrough.Code)
+		}
+	}
+	if calls != 6 {
+		t.Fatalf("pass-through call count=%d, want three valid CASH plus three ordinary requests", calls)
 	}
 }

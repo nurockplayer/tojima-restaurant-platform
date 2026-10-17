@@ -200,9 +200,6 @@ func buildCredentialDocument(fixture *testguest.Fixture, credentials testoperati
 }
 
 func rejectDemoStripeCommit(next http.Handler) http.Handler {
-	type commitProbe struct {
-		PaymentMethod string `json:"payment_method"`
-	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || !strings.HasPrefix(r.URL.Path, "/v1/guest/sessions/") || !strings.HasSuffix(r.URL.Path, "/cart/commit") {
 			next.ServeHTTP(w, r)
@@ -210,21 +207,87 @@ func rejectDemoStripeCommit(next http.Handler) http.Handler {
 		}
 		const maxProbeBytes = 16 << 10
 		body, err := io.ReadAll(io.LimitReader(r.Body, maxProbeBytes+1))
-		r.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), r.Body))
-		if err == nil && len(body) <= maxProbeBytes {
-			var probe commitProbe
-			if json.Unmarshal(body, &probe) == nil && probe.PaymentMethod == "STRIPE" {
-				w.Header().Set("Cache-Control", "no-store")
-				w.Header().Set("Referrer-Policy", "no-referrer")
-				w.Header().Set("X-Content-Type-Options", "nosniff")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusServiceUnavailable)
-				_ = json.NewEncoder(w).Encode(map[string]string{"error": "payment_unavailable"})
-				return
-			}
+		if err != nil || len(body) > maxProbeBytes {
+			writeDemoCommitError(w, http.StatusBadRequest, "invalid_request")
+			return
 		}
+		method, valid := demoCommitPaymentMethod(body)
+		if !valid || method != "CASH" {
+			status, code := http.StatusBadRequest, "invalid_request"
+			if valid && method == "STRIPE" {
+				status, code = http.StatusServiceUnavailable, "payment_unavailable"
+			}
+			writeDemoCommitError(w, status, code)
+			return
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body))
 		next.ServeHTTP(w, r)
 	})
+}
+
+func demoCommitPaymentMethod(body []byte) (string, bool) {
+	d := json.NewDecoder(bytes.NewReader(body))
+	opening, err := d.Token()
+	if err != nil || opening != json.Delim('{') {
+		return "", false
+	}
+	found := false
+	method := ""
+	for d.More() {
+		keyStart := d.InputOffset()
+		token, err := d.Token()
+		if err != nil {
+			return "", false
+		}
+		key, ok := token.(string)
+		if !ok {
+			return "", false
+		}
+		keyEnd := d.InputOffset()
+		if strings.EqualFold(key, "payment_method") {
+			rawKey := bytes.TrimSpace(body[keyStart:keyEnd])
+			rawKey = bytes.TrimSpace(bytes.TrimPrefix(rawKey, []byte(",")))
+			if key != "payment_method" || !bytes.Equal(rawKey, []byte(`"payment_method"`)) || found {
+				return "", false
+			}
+			found = true
+			var rawValue json.RawMessage
+			if err = d.Decode(&rawValue); err != nil {
+				return "", false
+			}
+			rawValue = bytes.TrimSpace(rawValue)
+			switch string(rawValue) {
+			case `"CASH"`:
+				method = "CASH"
+			case `"STRIPE"`:
+				method = "STRIPE"
+			default:
+				return "", false
+			}
+		} else {
+			var value json.RawMessage
+			if err = d.Decode(&value); err != nil {
+				return "", false
+			}
+		}
+	}
+	closing, err := d.Token()
+	if err != nil || closing != json.Delim('}') || !found {
+		return "", false
+	}
+	if _, err = d.Token(); err != io.EOF {
+		return "", false
+	}
+	return method, true
+}
+
+func writeDemoCommitError(w http.ResponseWriter, status int, code string) {
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Referrer-Policy", "no-referrer")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
 type ownedCredentialsFile struct {
