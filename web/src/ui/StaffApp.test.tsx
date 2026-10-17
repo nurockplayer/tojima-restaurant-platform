@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StaffOrder } from '../api/operations';
 import { StaffApp } from './StaffApp';
 
@@ -12,13 +12,189 @@ const staffContext = { tenantID: 'tenant-1', storeID: 'store-1' };
 const staffToken = 'mock-token-unit-test-only';
 const table = { table_id: 'table-1', name: 'T1', session_id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN', unpaid_cash_jpy: '1100', order_count: 1 };
 
+beforeEach(() => {
+  if (typeof HTMLDialogElement.prototype.showModal !== 'function') Object.defineProperty(HTMLDialogElement.prototype, 'showModal', { configurable: true, value(this: HTMLDialogElement) { this.setAttribute('open', ''); } });
+  if (typeof HTMLDialogElement.prototype.close !== 'function') Object.defineProperty(HTMLDialogElement.prototype, 'close', { configurable: true, value(this: HTMLDialogElement) { this.removeAttribute('open'); this.dispatchEvent(new Event('close')); } });
+});
+
 afterEach(async () => {
   if (root) await act(async () => root?.unmount());
   root = undefined; host?.remove(); host = undefined;
-  sessionStorage.clear(); vi.unstubAllGlobals();
+  sessionStorage.clear(); vi.unstubAllGlobals(); vi.useRealTimers();
 });
 
 describe('staff operations', () => {
+  it('keeps the document language in sync with the selected staff locale', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    expect(document.documentElement.lang).toBe('ja');
+    await click(host!, '繁體中文');
+    expect(document.documentElement.lang).toBe('zh-Hant');
+    await click(host!, '日本語');
+    expect(document.documentElement.lang).toBe('ja');
+    await click(host!, '切断');
+    await click(host!, '繁體中文');
+    expect(document.documentElement.lang).toBe('zh-Hant');
+  });
+
+  it('shows KDS poll failures as stale and clears the banner after recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let kdsCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/kds`) { kdsCalls += 1; return kdsCalls === 2 ? json({ error: 'unavailable' }, 502) : json({ orders: [] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    expect(kdsCalls).toBe(1);
+    expect(document.visibilityState).toBe('visible');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    const stale = host?.querySelector('p.kds-stale[role="status"]');
+    expect(stale?.textContent).toContain('厨房看板の接続が切れています');
+    expect(stale?.textContent).toContain('最終同期:');
+    await click(host!, '繁體中文');
+    expect(host?.querySelector('p.kds-stale[role="status"]')?.textContent).toContain('廚房看板連線中斷');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(host?.querySelector('p.kds-stale[role="status"]')).toBeNull();
+    expect(kdsCalls).toBe(3);
+  });
+
+  it('does not overlap a pending KDS poll and reports its failure before recovery', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const pendingPoll = deferred<Response>();
+    let kdsCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/kds`) { kdsCalls += 1; return kdsCalls === 2 ? pendingPoll.promise : json({ orders: [] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    expect(kdsCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+    pendingPoll.resolve(json({ error: 'unavailable' }, 502));
+    await act(async () => { await pendingPoll.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('p.kds-stale[role="status"]')?.textContent).toContain('厨房看板の接続が切れています');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(3);
+    expect(host?.querySelector('p.kds-stale[role="status"]')).toBeNull();
+  });
+
+  it('dismisses the close dialog on cancel and restores focus to its opener', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [], receipts: [], close_blockers: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    const opener = [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('テーブルを閉じる'));
+    expect(opener).toBeTruthy();
+    await click(host!, 'テーブルを閉じる');
+    const dialog = host!.querySelector<HTMLDialogElement>('dialog[open]');
+    expect(dialog).toBeTruthy();
+    expect(dialog?.getAttribute('aria-labelledby')).toBe('close-title');
+    await act(async () => { dialog?.dispatchEvent(new Event('cancel', { cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('dialog[open]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it('keeps the cash dialog open when cancel is pressed after an uncertain settlement', async () => {
+    const order = staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID', fulfillment_status: 'ACCEPTED' });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/preview`) return json({ session_id: 'session-1', fingerprint: 'cash-snapshot-1', order_ids: ['order-1'], due_jpy: '1100', tax: { gross_jpy: '1100', net_jpy: '1000', tax_jpy: '100', groups: [] } });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/settle`) return json({ error: 'unknown_result' }, 502);
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, '現金を精算');
+    await setField(host!, 'お預かり金額', '1100');
+    await setField(host!, 'レジ精算番号', 'reg-42');
+    await click(host!, '現金を確認して精算');
+    const dialog = host!.querySelector<HTMLDialogElement>('dialog[open]');
+    expect(dialog).toBeTruthy();
+    const cancel = new Event('cancel', { cancelable: true });
+    await act(async () => { dialog?.dispatchEvent(cancel); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+    await act(async () => { dialog?.close(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+    const repeatedCancel = new Event('cancel', { cancelable: true });
+    await act(async () => { dialog?.dispatchEvent(repeatedCancel); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(repeatedCancel.defaultPrevented).toBe(true);
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+  });
+
+  it('keeps the cash dialog open when cancel is pressed while settlement is pending', async () => {
+    const settlement = deferred<Response>();
+    const order = staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID', fulfillment_status: 'ACCEPTED' });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/preview`) return json({ session_id: 'session-1', fingerprint: 'cash-snapshot-1', order_ids: ['order-1'], due_jpy: '1100', tax: { gross_jpy: '1100', net_jpy: '1000', tax_jpy: '100', groups: [] } });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/settle`) return settlement.promise;
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, '現金を精算');
+    await setField(host!, 'お預かり金額', '1100');
+    await setField(host!, 'レジ精算番号', 'reg-42');
+    await click(host!, '現金を確認して精算');
+    const dialog = host!.querySelector<HTMLDialogElement>('dialog[open]');
+    expect(dialog).toBeTruthy();
+    const cancel = new Event('cancel', { cancelable: true });
+    await act(async () => { dialog?.dispatchEvent(cancel); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(cancel.defaultPrevented).toBe(true);
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+    await act(async () => { dialog?.close(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+    const repeatedCancel = new Event('cancel', { cancelable: true });
+    await act(async () => { dialog?.dispatchEvent(repeatedCancel); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(repeatedCancel.defaultPrevented).toBe(true);
+    expect(host?.querySelector('dialog[open]')).toBe(dialog);
+    settlement.resolve(json({ error: 'unknown_result' }, 502));
+    await act(async () => { await settlement.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+  });
+
+  it('restores cash focus to its opener after the preview finishes loading', async () => {
+    const preview = deferred<Response>();
+    const order = staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID', fulfillment_status: 'ACCEPTED' });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/preview`) return preview.promise;
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    const opener = [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('現金を精算'));
+    expect(opener).toBeTruthy();
+    await click(host!, '現金を精算');
+    expect(opener?.disabled).toBe(true);
+    preview.resolve(json({ session_id: 'session-1', fingerprint: 'cash-snapshot-1', order_ids: ['order-1'], due_jpy: '1100', tax: { gross_jpy: '1100', net_jpy: '1000', tax_jpy: '100', groups: [] } }));
+    await act(async () => { await preview.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const dialog = host!.querySelector<HTMLDialogElement>('dialog[open]');
+    expect(dialog).toBeTruthy();
+    expect(opener?.disabled).toBe(false);
+    await act(async () => { dialog?.dispatchEvent(new Event('cancel', { cancelable: true })); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.querySelector('dialog[open]')).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
   it('allows a corrected token after a rejected login instead of leaving the form busy', async () => {
     let accessCalls = 0;
     const accessTokens: string[] = [];
