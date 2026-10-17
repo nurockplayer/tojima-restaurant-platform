@@ -113,6 +113,26 @@ describe('staff operations', () => {
     expect(host?.querySelector('p.kds-stale[role="status"]')).toBeNull();
   });
 
+  it('does not start a KDS poll while the initial board load is still pending', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const initialLoad = deferred<Response>();
+    let kdsCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/kds`) { kdsCalls += 1; return kdsCalls === 1 ? initialLoad.promise : json({ orders: [] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    expect(kdsCalls).toBe(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(1);
+    initialLoad.resolve(json({ orders: [staffOrder({ id: 'kds-1', fulfillment_status: 'ACCEPTED' })] }));
+    await act(async () => { await initialLoad.promise; await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.textContent).toContain('kds-1');
+    await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+    expect(kdsCalls).toBe(2);
+  });
+
   it('keeps the KDS poll guard when the operator leaves and returns to the board', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const pendingPoll = deferred<Response>();

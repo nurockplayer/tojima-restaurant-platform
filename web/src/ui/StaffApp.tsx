@@ -91,7 +91,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const openerRef = useRef<HTMLButtonElement | null>(null);
-  const kdsPoll = useRef<Promise<unknown> | null>(null);
+  const kdsPoll = useRef<Promise<StaffOrder[] | null> | null>(null);
   const pendingWrite = useRef<PendingWrite | null>(null);
   const epoch = useRef(0);
   const active = useRef<ActiveStaffContext | null>(null);
@@ -153,6 +153,21 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     setKdsStale(false); setKdsSyncedAt(new Date());
     return result.orders;
   }, [currentEpoch, isCurrent]);
+  // Every KDS load goes through one in-flight request with an abort watchdog, so polls, refreshes and post-write
+  // reloads never overlap or supersede each other. `fresh` waits for an in-flight load and then starts a new one.
+  const guardedKds = useCallback(async (ctx: StaffContext, bearer: string, fresh = false): Promise<StaffOrder[] | null> => {
+    if (kdsPoll.current) {
+      if (!fresh) return kdsPoll.current;
+      await kdsPoll.current.catch(() => null);
+      if (kdsPoll.current) return kdsPoll.current;
+    }
+    // Abort rather than race, so the guard is only released once the request itself has settled.
+    const controller = new AbortController();
+    const watchdog = window.setTimeout(() => controller.abort(), KDS_POLL_TIMEOUT_MS);
+    const load = loadKds(ctx, bearer, controller.signal).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === load) kdsPoll.current = null; });
+    kdsPoll.current = load;
+    return load;
+  }, [loadKds]);
   const loadSettings = useCallback(async (ctx: StaffContext, bearer: string) => {
     const requestEpoch = currentEpoch(ctx, bearer);
     if (requestEpoch === null) return null;
@@ -221,7 +236,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       setCapabilities(current); setConnected(true);
       const tasks: Promise<unknown>[] = [];
       if (current.can_cash || current.can_serve || current.can_manage) tasks.push(loadTables(cleanContext, cleanBearer));
-      if (current.can_kitchen) tasks.push(loadKds(cleanContext, cleanBearer));
+      if (current.can_kitchen) tasks.push(guardedKds(cleanContext, cleanBearer));
       if (current.can_manage) tasks.push(loadSettings(cleanContext, cleanBearer));
       const results = await Promise.allSettled(tasks);
       if (!isCurrent(requestEpoch, cleanContext, cleanBearer)) return;
@@ -230,7 +245,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     } catch (cause) {
       if (active.current?.epoch === requestEpoch) { active.current = null; setConnected(false); setCapabilities(null); sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY); setError(cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? t.accessError : explain(cause, locale)); }
     } finally { if (epoch.current === requestEpoch) setLoading(false); }
-  }, [initialView, isCurrent, loadKds, loadSettings, loadTables, locale, t.accessError, t.error]);
+  }, [guardedKds, initialView, isCurrent, loadSettings, loadTables, locale, t.accessError, t.error]);
 
   useEffect(() => {
     if (restored.current) return;
@@ -251,7 +266,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     try {
       const tasks: Promise<unknown>[] = [];
       if (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage) tasks.push(loadTables(context, token));
-      if (capabilities.can_kitchen) tasks.push(loadKds(context, token));
+      if (capabilities.can_kitchen) tasks.push(guardedKds(context, token, true));
       if (capabilities.can_manage) tasks.push(loadSettings(context, token));
       const results = await Promise.all(tasks);
       if (!isCurrent(requestEpoch, context, token)) return;
@@ -262,7 +277,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       }
     } catch (cause) { if (isCurrent(requestEpoch, context, token)) setError(explain(cause, locale)); }
     finally { if (isCurrent(requestEpoch, context, token)) setLoading(false); }
-  }, [capabilities, connected, context, currentEpoch, isCurrent, loadDetail, loadKds, loadSettings, loadTables, locale, selectedTableID, tables, token]);
+  }, [capabilities, connected, context, currentEpoch, guardedKds, isCurrent, loadDetail, loadSettings, loadTables, locale, selectedTableID, tables, token]);
 
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;
@@ -271,17 +286,13 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') timer = window.setInterval(() => {
         if (kdsPoll.current) return;
-        // Abort rather than race, so the guard is only released once the request itself has settled. loadKds only
-        // rethrows for the current connection, so a failure inherited across a KDS remount still marks the board stale.
-        const controller = new AbortController();
-        const watchdog = window.setTimeout(() => controller.abort(), KDS_POLL_TIMEOUT_MS);
-        const poll = loadKds(context, token, controller.signal).catch(() => setKdsStale(true)).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === poll) kdsPoll.current = null; });
-        kdsPoll.current = poll;
+        // loadKds only rethrows for the current connection, so a failure inherited across a KDS remount still marks the board stale.
+        void guardedKds(context, token).catch(() => setKdsStale(true));
       }, 2500);
     };
     schedule(); document.addEventListener('visibilitychange', schedule);
     return () => { document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
-  }, [capabilities?.can_kitchen, connected, context, loadKds, token, view]);
+  }, [capabilities?.can_kitchen, connected, context, guardedKds, token, view]);
 
   const refreshDetail = useCallback(async () => {
     const requestEpoch = currentEpoch(context, token);
@@ -403,7 +414,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
 
   const advanceOrder = (order: StaffOrder, target: 'PREPARING' | 'READY' | 'SERVED') => {
     const body = { expected_version: order.version, target };
-    const success = async () => { await refreshDetail(); await loadTables(context, token); if (capabilities?.can_kitchen) await loadKds(context, token); };
+    const success = async () => { await refreshDetail(); await loadTables(context, token); if (capabilities?.can_kitchen) await guardedKds(context, token, true); };
     const conflict = async () => { await success(); };
     startWrite(body, (payload, key) => {
       return operationsClient.advanceOrder(context, token, order.table_id, order.session_id, order.id, target, payload.expected_version, key);
