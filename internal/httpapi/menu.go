@@ -98,20 +98,21 @@ type adminCategory struct {
 	Products []adminProduct `json:"products"`
 }
 type adminProduct struct {
-	Key                  string               `json:"key"`
-	Name                 string               `json:"name"`
-	Description          string               `json:"description,omitempty"`
-	BasePriceMinor       int64                `json:"base_price_minor"`
-	OverrideActive       bool                 `json:"override_active"`
-	OverridePriceMinor   *int64               `json:"override_price_minor"`
-	EffectivePriceMinor  int64                `json:"effective_price_minor"`
-	Position             int                  `json:"position"`
-	Active               bool                 `json:"active"`
-	Availability         catalog.Availability `json:"availability"`
-	Selectable           bool                 `json:"selectable"`
-	AvailabilityVersion  int64                `json:"availability_version"`
-	PriceOverrideVersion int64                `json:"price_override_version"`
-	Groups               []adminGroup         `json:"option_groups"`
+	Key                        string               `json:"key"`
+	Name                       string               `json:"name"`
+	Description                string               `json:"description,omitempty"`
+	BasePriceMinor             int64                `json:"base_price_minor"`
+	OverrideActive             bool                 `json:"override_active"`
+	OverridePriceMinor         *int64               `json:"override_price_minor"`
+	EffectivePriceMinor        int64                `json:"effective_price_minor"`
+	Position                   int                  `json:"position"`
+	Active                     bool                 `json:"active"`
+	Availability               catalog.Availability `json:"availability"`
+	Selectable                 bool                 `json:"selectable"`
+	CompanyEmergencyHoldActive bool                 `json:"company_emergency_hold_active"`
+	AvailabilityVersion        int64                `json:"availability_version"`
+	PriceOverrideVersion       int64                `json:"price_override_version"`
+	Groups                     []adminGroup         `json:"option_groups"`
 }
 type adminGroup struct {
 	Key       string        `json:"key"`
@@ -142,6 +143,8 @@ func NewMenuHandler(service *catalog.Service, identity IdentityResolver, authori
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/guest/tables/{locator}/menu", api.publicMenu)
 	mux.HandleFunc("GET /v1/admin/tenants/{tenantID}/menu/published", api.getCompanyPublished)
+	mux.Handle("GET /v1/admin/tenants/{tenantID}/menu/products/{productKey}/emergency-hold", noStore(http.HandlerFunc(api.getCompanyProductEmergencyHold)))
+	mux.Handle("PUT /v1/admin/tenants/{tenantID}/menu/products/{productKey}/emergency-hold", noStore(http.HandlerFunc(api.setCompanyProductEmergencyHold)))
 	mux.HandleFunc("GET /v1/admin/tenants/{tenantID}/menu/draft", api.getCompanyDraft)
 	mux.HandleFunc("PUT /v1/admin/tenants/{tenantID}/menu/draft", api.saveCompanyDraft)
 	mux.HandleFunc("POST /v1/admin/tenants/{tenantID}/menu/preview", api.previewCompanyDraft)
@@ -229,7 +232,8 @@ func safeStoreAdminProjection(a MenuAPI, ctx context.Context, actor authz.Actor,
 				BasePriceMinor: price.SourceBasePriceMinor, OverrideActive: price.OverrideActive, OverridePriceMinor: price.OverridePriceMinor,
 				EffectivePriceMinor: price.EffectivePriceMinor, Position: product.Position, Active: product.Active,
 				Availability: product.Availability, Selectable: product.Selectable,
-				AvailabilityVersion: product.AvailabilityVersion, PriceOverrideVersion: price.OverrideVersion,
+				CompanyEmergencyHoldActive: product.CompanyEmergencyHoldActive,
+				AvailabilityVersion:        product.AvailabilityVersion, PriceOverrideVersion: price.OverrideVersion,
 				Groups: make([]adminGroup, 0, len(product.Groups)),
 			}
 			for _, group := range product.Groups {

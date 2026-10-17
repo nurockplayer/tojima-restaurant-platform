@@ -521,7 +521,7 @@ func (s *Service) quote(ctx context.Context, tx pgx.Tx, session tablesession.Ses
 	}
 	quote, err := s.menus.QuoteDineInTx(ctx, tx, menu, at, selections)
 	if err != nil {
-		if errors.Is(err, catalog.ErrDenied) || errors.Is(err, catalog.ErrNotFound) {
+		if errors.Is(err, catalog.ErrCompanyProductHeld) || errors.Is(err, catalog.ErrDenied) || errors.Is(err, catalog.ErrNotFound) {
 			return catalog.MenuQuote{}, "", ErrUnavailable
 		}
 		return catalog.MenuQuote{}, "", err
@@ -544,13 +544,15 @@ func (s *Service) quote(ctx context.Context, tx pgx.Tx, session tablesession.Ses
 }
 
 type sellabilitySeal struct {
-	ProductKey             string               `json:"product_key"`
-	ProductActive          bool                 `json:"product_active"`
-	ProductAvailability    catalog.Availability `json:"product_availability"`
-	ProductAvailabilityVer int64                `json:"product_availability_version"`
-	EffectivePriceMinor    int64                `json:"effective_price_minor"`
-	PriceOverrideVersion   int64                `json:"price_override_version"`
-	Options                []optionSeal         `json:"options"`
+	ProductKey              string               `json:"product_key"`
+	ProductActive           bool                 `json:"product_active"`
+	CompanyEmergencyHold    bool                 `json:"company_emergency_hold"`
+	CompanyEmergencyHoldVer int64                `json:"company_emergency_hold_version"`
+	ProductAvailability     catalog.Availability `json:"product_availability"`
+	ProductAvailabilityVer  int64                `json:"product_availability_version"`
+	EffectivePriceMinor     int64                `json:"effective_price_minor"`
+	PriceOverrideVersion    int64                `json:"price_override_version"`
+	Options                 []optionSeal         `json:"options"`
 }
 
 type optionSeal struct {
@@ -573,6 +575,8 @@ func sellabilityFor(menu catalog.PublishedMenu, cart Cart) []sellabilitySeal {
 					continue
 				}
 				seal.ProductActive = product.Active
+				seal.CompanyEmergencyHold = product.CompanyEmergencyHoldActive
+				seal.CompanyEmergencyHoldVer = product.CompanyEmergencyHoldVersion
 				seal.ProductAvailability = product.Availability
 				seal.ProductAvailabilityVer = product.AvailabilityVersion
 				seal.EffectivePriceMinor = product.EffectivePriceMinor
@@ -760,9 +764,11 @@ func annotateCart(menu catalog.PublishedMenu, cart *Cart) {
 	for i := range cart.Lines {
 		line := &cart.Lines[i]
 		product, found := products[line.ProductKey]
-		line.ProductAvailable = found && product.Active && product.Availability == catalog.Available && product.Selectable
+		line.ProductAvailable = found && product.Active && product.Availability == catalog.Available && product.Selectable && !product.CompanyEmergencyHoldActive
 		line.UnavailableCode = ""
-		if !found || !product.Active || product.Availability != catalog.Available || !product.Selectable {
+		if found && product.CompanyEmergencyHoldActive {
+			line.UnavailableCode = "COMPANY_EMERGENCY_HOLD"
+		} else if !found || !product.Active || product.Availability != catalog.Available || !product.Selectable {
 			line.UnavailableCode = "PRODUCT_UNAVAILABLE"
 		}
 		currentOptions := make(map[string]catalog.Option)

@@ -86,3 +86,47 @@ B2 leaves P-81 C/D/E, real IdP, production runtime and deployment acceptance
 outstanding. The production `cmd/server` remains health-only. Ingredient
 identity still comes from MOD-01; this slice adds no ingredient master,
 inventory, payment behavior or approval workflow.
+
+## D1 — Company emergency-hold authority
+
+D1 adds one versioned emergency-hold record per company product and an immutable
+audit result for each accepted request. A tenant administrator with current
+membership and MFA can read or transition the hold through
+`/v1/admin/tenants/{tenantID}/menu/products/{productKey}/emergency-hold`.
+Writes require `active`, a reason, the expected version and an idempotency key.
+A repeated identical request returns its original result without changing a
+newer hold; conflicting reuse, stale versions and redundant transitions fail.
+Clients must reload current state after a replay instead of treating the saved
+result as the current generation.
+
+Hold transitions lock the existing company catalog parent before reading or
+writing the product hold. Order admission, publication and detachment share
+that parent lock, including the first hold when no product row exists. An
+active hold blocks new LINKED-store quotes and CASH/STRIPE order commitments,
+preserves the cart, and prevents detaching the held product into an independent
+copy. Already detached stores and other tenants remain independent. Replaying
+an already committed order still returns that historical order.
+
+Turning a hold off does not change any store product/option availability or
+price override. PAUSED, PENDING_CONFIRMATION and unsatisfied required options
+remain unavailable. The hold version participates in quote consent even while
+inactive, so an ON/OFF cycle requires a new preview. Publishing a corrected
+draft does not clear the hold; retiring a product preserves its hold history.
+Database read errors fail closed before order or payment side effects.
+
+Migration 007 adds the indexed hold table and nullable replay fields to the
+existing immutable menu audit. No per-store fanout, new ingredient master,
+inventory service or approval engine is introduced. The own-store admin menu
+projection exposes only a safe active flag; internal hold reasons, actors and
+tenant-wide counts require the company-admin endpoint.
+
+D1 acceptance covers real PostgreSQL scale/isolation, CAS and replay, quote
+generation changes, admission/detachment locking, store-state preservation,
+existing-order immutability and HTTP authorization. The full suite runs with
+the same disposable loopback `TEST_DATABASE_URL` used above. Hosted CI applies
+and exercises the migration in an isolated PostgreSQL service.
+
+D1 does not complete P-81. C remains blocked on the approved MOD-01 identity and
+lookup contract. D2/E adds the company control and explicit guest hold display;
+S7 owns expiry/reconciliation of already-issued unpaid Stripe checkouts. Real
+IdP, production runtime, deployment and pilot-store acceptance remain separate.
