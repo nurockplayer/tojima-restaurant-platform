@@ -432,6 +432,53 @@ describe('guest app mount', () => {
     expect(reads).toBe(3);
   });
 
+  it('refreshes the already-selected order and resumes polling when staff reconciliation reopens a FAILED attempt', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-same-selection')], async (url) => {
+      if (url.endsWith('/orders/order-same-selection/checkout')) {
+        reads++;
+        return json(checkoutStatus('order-same-selection', reads === 1 ? 'FAILED' : 'OPEN', false));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    const refreshButton = host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!;
+    await act(async () => { refreshButton.click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    expect(host?.textContent).toContain('お支払いを完了できませんでした');
+
+    await act(async () => { refreshButton.click(); await Promise.resolve(); });
+    expect(reads).toBe(2);
+    expect(host?.textContent).toContain('お支払い手続きができます');
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(3);
+  });
+
+  it('invalidates a pending resume when the same order is selected for a fresh status read', async () => {
+    const resumeResponse = deferred<Response>();
+    const assign = vi.spyOn(checkoutNavigation, 'assign').mockImplementation(() => undefined);
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-resume-refresh')], async (url) => {
+      if (url.endsWith('/orders/order-resume-refresh/checkout')) {
+        reads++;
+        return json(checkoutStatus('order-resume-refresh', 'OPEN', true));
+      }
+      if (url.endsWith('/orders/order-resume-refresh/checkout/resume')) return resumeResponse.promise;
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    await clickButton(host!, '支払い状況を確認');
+    await clickButton(host!, '支払いを続ける');
+
+    await clickButton(host!, '支払い状況を確認');
+    expect(reads).toBe(2);
+    expect(host?.textContent).toContain('支払いを続ける');
+
+    resumeResponse.resolve(json({ url: 'https://checkout.example.test/stale-session' }));
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(assign).not.toHaveBeenCalled();
+    expect(host?.textContent).not.toContain('stale-session');
+  });
+
   it('schedules a safe retry after a transient immediate status read failure', async () => {
     let reads = 0;
     await mountCheckoutOrders([stripeOrder('order-retry')], async (url) => {

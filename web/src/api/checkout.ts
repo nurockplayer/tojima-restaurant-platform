@@ -1,5 +1,6 @@
 import { ApiError } from './client';
 import type { StaffContext } from './operations';
+import { apiBase } from '../shared/http';
 
 export type CheckoutState = 'CREATE_PENDING' | 'CREATING' | 'UNKNOWN' | 'OPEN' | 'PROCESSING' | 'PAID' | 'EXPIRED' | 'FAILED' | 'REVIEW_REQUIRED';
 
@@ -34,11 +35,11 @@ export const checkoutClient = {
   status(sessionID: string, tableJoinToken: string, orderID: string): Promise<CheckoutStatus> {
     return request<CheckoutStatus>(`${guestOrderPath(sessionID, orderID)}/checkout`, {
       headers: { authorization: `Bearer ${tableJoinToken}` },
-    });
+    }, true);
   },
 
   resume(sessionID: string, orderID: string): Promise<CheckoutResume> {
-    return request<CheckoutResume>(`${guestOrderPath(sessionID, orderID)}/checkout/resume`, { method: 'POST' });
+    return request<CheckoutResume>(`${guestOrderPath(sessionID, orderID)}/checkout/resume`, { method: 'POST' }, true);
   },
 
   staffStatus(context: StaffContext, token: string, tableID: string, sessionID: string, orderID: string): Promise<CheckoutStatus> {
@@ -63,13 +64,20 @@ export const checkoutNavigation = {
 };
 
 async function bootstrap(sessionID: string, tableJoinToken: string): Promise<void> {
-  const response = await fetch(`/v1/guest/sessions/${enc(sessionID)}/checkout-context`, {
-    method: 'POST',
-    credentials: 'same-origin',
-    cache: 'no-store',
-    referrerPolicy: 'no-referrer',
-    headers: { accept: 'application/json', authorization: `Bearer ${tableJoinToken}` },
-  }).catch(() => { throw new Error('network_unavailable'); });
+  const url = apiURL(`/v1/guest/sessions/${enc(sessionID)}/checkout-context`, true);
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: 'POST',
+      credentials: 'same-origin',
+      cache: 'no-store',
+      referrerPolicy: 'no-referrer',
+      headers: { accept: 'application/json', authorization: `Bearer ${tableJoinToken}` },
+    });
+  } catch (cause) {
+    if (cause instanceof Error && cause.message === 'checkout_context_unavailable') throw cause;
+    throw new Error('network_unavailable');
+  }
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));
     throw new ApiError(response.status, body as { error: string });
@@ -77,10 +85,11 @@ async function bootstrap(sessionID: string, tableJoinToken: string): Promise<voi
   if (response.status !== 204) throw new Error('checkout_context_unavailable');
 }
 
-async function request<T>(path: string, init: RequestInit): Promise<T> {
+async function request<T>(path: string, init: RequestInit, requireSameOrigin = false): Promise<T> {
+  const url = apiURL(path, requireSameOrigin);
   let response: Response;
   try {
-    response = await fetch(path, {
+    response = await fetch(url, {
       ...init,
       credentials: 'same-origin',
       cache: 'no-store',
@@ -93,6 +102,31 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new ApiError(response.status, body as { error: string });
   return body as T;
+}
+
+function apiURL(path: string, requireSameOrigin: boolean): string {
+  const configuredBase = apiBase();
+  if (!configuredBase) return path;
+  const currentOrigin = typeof window === 'undefined' ? 'http://localhost' : window.location.origin;
+
+  let base: URL;
+  try {
+    base = new URL(configuredBase, `${currentOrigin}/`);
+  } catch {
+    throw new Error('checkout_context_unavailable');
+  }
+  if (configuredBase.includes('?') || configuredBase.includes('#')
+    || !['http:', 'https:'].includes(base.protocol) || base.username || base.password || base.search || base.hash) {
+    throw new Error('checkout_context_unavailable');
+  }
+  const sameOrigin = base.origin === currentOrigin;
+  if (requireSameOrigin && !sameOrigin) {
+    throw new Error('checkout_context_unavailable');
+  }
+
+  const prefix = base.pathname.replace(/\/+$/, '');
+  const endpoint = `${prefix}${path}`;
+  return `${base.origin}${endpoint}`;
 }
 
 async function withContextLock<T>(run: () => Promise<T>): Promise<T> {
