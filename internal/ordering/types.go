@@ -5,6 +5,7 @@ package ordering
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
@@ -68,6 +69,10 @@ type CommittedOrder struct {
 	RequiresStaffAcceptance bool
 	TotalGrossJPY           int64
 	Tax                     tax.SnapshotRecord
+	// Checkout proof is server-verified, scoped cookie material. It is never
+	// serialized into order results or stored on the immutable table order.
+	CheckoutProofHash      [32]byte
+	CheckoutProofExpiresAt time.Time
 }
 
 // Cart contains only mutable customer selections. It carries no client scope,
@@ -130,6 +135,10 @@ type CommitRequest struct {
 	IdempotencyKey     string
 	PreviewFingerprint string
 	PaymentMethod      PaymentMethod
+	// HTTP must ignore this on JSON decode and set it only after verifying the
+	// pre-existing HttpOnly checkout continuation cookie.
+	CheckoutProofHash      [32]byte  `json:"-"`
+	CheckoutProofExpiresAt time.Time `json:"-"`
 }
 
 type Order struct {

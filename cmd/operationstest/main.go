@@ -18,22 +18,26 @@ import (
 	"time"
 
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/authz"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/checkoutproof"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/httpapi"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/payments"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/testguest"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/testoperations"
 )
 
 type credentialDocument struct {
-	BaseURL      string                       `json:"base_url"`
-	StaffURL     string                       `json:"staff_url"`
-	KitchenURL   string                       `json:"kitchen_url"`
-	GuestURL     string                       `json:"guest_url"`
-	TenantID     string                       `json:"tenant_id"`
-	StoreID      string                       `json:"store_id"`
-	TableID      string                       `json:"table_id"`
-	TableLocator string                       `json:"table_locator"`
-	Schema       string                       `json:"schema"`
-	Credentials  testoperations.CredentialSet `json:"credentials"`
+	BaseURL              string                       `json:"base_url"`
+	StaffURL             string                       `json:"staff_url"`
+	KitchenURL           string                       `json:"kitchen_url"`
+	GuestURL             string                       `json:"guest_url"`
+	TenantID             string                       `json:"tenant_id"`
+	StoreID              string                       `json:"store_id"`
+	TableID              string                       `json:"table_id"`
+	TableLocator         string                       `json:"table_locator"`
+	Schema               string                       `json:"schema"`
+	Credentials          testoperations.CredentialSet `json:"credentials"`
+	PaymentFixture       bool                         `json:"payment_fixture,omitempty"`
+	WebhookFixtureSecret string                       `json:"webhook_fixture_secret,omitempty"`
 }
 
 func main() {
@@ -46,6 +50,7 @@ func main() {
 func run() error {
 	credentialsPath := flag.String("credentials", "", "new owner-only credentials output file (required)")
 	webRoot := flag.String("web-dist", "web/dist", "built staff/guest SPA directory")
+	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
 	flag.Parse()
 	if strings.TrimSpace(*credentialsPath) == "" {
 		return errors.New("-credentials is required")
@@ -63,6 +68,15 @@ func run() error {
 		return fmt.Errorf("create isolated database fixture: %w", err)
 	}
 	defer fixture.Close(context.Background())
+	var paymentService *payments.Service
+	var proofs *checkoutproof.Service
+	var webhookSecret string
+	if *withPayments {
+		paymentService, proofs, webhookSecret, err = configurePaymentFixture(ctx, fixture)
+		if err != nil {
+			return fmt.Errorf("configure isolated payment fixture: %w", err)
+		}
+	}
 
 	identity, directory, credentials, err := testoperations.NewCredentialSet("test-tenant", "test-store")
 	if err != nil {
@@ -73,6 +87,7 @@ func run() error {
 		KitchenURL: "http://127.0.0.1:8082/kitchen", GuestURL: "http://127.0.0.1:8082/",
 		TenantID: "test-tenant", StoreID: "test-store", TableID: "table-01",
 		TableLocator: fixture.Locator, Schema: fixture.Schema, Credentials: credentials,
+		PaymentFixture: *withPayments, WebhookFixtureSecret: webhookSecret,
 	}
 	ownedFile, err := writeCredentials(*credentialsPath, doc)
 	if err != nil {
@@ -82,6 +97,15 @@ func run() error {
 
 	runtime := httpapi.NewOperationsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
 		identity, authz.PolicyAuthorizer{Directory: directory})
+	if *withPayments {
+		runtime, err = httpapi.NewPaymentsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
+			paymentService, identity, authz.PolicyAuthorizer{Directory: directory}, httpapi.PaymentsHTTPConfig{
+				Proofs: proofs, Origin: doc.BaseURL, AllowLoopbackHTTP: true, WebhookSecrets: []string{webhookSecret},
+			})
+		if err != nil {
+			return fmt.Errorf("configure payment HTTP fixture: %w", err)
+		}
+	}
 	api := http.NewServeMux()
 	api.Handle("/v1/", runtime)
 	api.Handle("/healthz", httpapi.NewHandler())
@@ -97,6 +121,10 @@ func run() error {
 	}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
+	if *withPayments {
+		defer runPaymentFixtureWorker(ctx, paymentService)()
+		fmt.Fprintln(os.Stdout, "keyless payment fixture enabled; reserved .invalid Checkout URLs cannot accept payments")
+	}
 	fmt.Fprintln(os.Stdout, "isolated operations test runtime listening on http://127.0.0.1:8082; credentials are in the requested 0600 file")
 	select {
 	case <-ctx.Done():

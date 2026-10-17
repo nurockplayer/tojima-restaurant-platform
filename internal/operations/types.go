@@ -92,6 +92,7 @@ type OrderState struct {
 	StaffAccepted           bool              `json:"staff_accepted"`
 	CashMode                CashMode          `json:"cash_mode,omitempty"`
 	OperationalHold         bool              `json:"operational_hold"`
+	PaymentReviewRequired   bool              `json:"payment_review_required"`
 	Version                 int64             `json:"version"`
 	TotalGrossJPY           int64             `json:"total_gross_jpy"`
 	CreatedAt               time.Time         `json:"created_at"`

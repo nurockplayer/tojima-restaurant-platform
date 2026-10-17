@@ -1,6 +1,6 @@
 # Tojima Restaurant Platform / 東島飲食店管理システム
 
-MOD-05 Go modular monolith with PostgreSQL table sessions, published menus, store prices and versioned Japanese tax. P-75 through P-78 are accepted. P-79 adds transactional cash receipts, staff and kitchen operations, and safe manual close. Stripe integration and production release remain later stages.
+MOD-05 Go modular monolith with PostgreSQL table sessions, published menus, store prices and versioned Japanese tax. P-75 through P-79 are accepted. P-80 adds a keyless Stripe integration boundary with durable attempts, verified webhooks and original-browser Checkout continuation. Actual Stripe Test Mode and production release remain external acceptance gates.
 
 Authority: [P-74 entry](https://linear.app/higashijima-manage-system/issue/P-74), [P-75 scope and acceptance](https://linear.app/higashijima-manage-system/issue/P-75), [Codex engineering handoff v1.0 (JA/ZH)](https://linear.app/higashijima-manage-system/document/mod-05-jazhcodex-工程交接step02-34-實作地圖與驗收-v10-7ce203c6cfb5).
 
@@ -26,7 +26,7 @@ curl --fail http://127.0.0.1:8080/healthz
 
 `make test-postgres` starts its own temporary PostgreSQL 17 container on a random loopback port, runs `make ci`, and removes the container. It ignores any caller-supplied DB URL. `make ci` checks gofmt, race-enabled Go tests, `go vet`, build, and the legacy SQLite migration smoke. Without `TEST_DATABASE_URL`, Go integration tests explicitly skip; that result alone is not P-76 acceptance. GitHub Actions provides a disposable PostgreSQL service and requires this variable, with no deployment permissions.
 
-PostgreSQL integration tests create isolated schemas. S1 covers migration up/down/reapply, scoped constraints, concurrent seating/join, all three QR modes, expiry/revocation, PIN brute-force limits, and staff authorization. S2 adds published-menu isolation, draft versions, linked/detached catalogs, store prices, option validation and real tax calculation using dated central rules. Never use a production or shared business database for `TEST_DATABASE_URL`. S3 adds cart CAS/idempotency, commit races, historical snapshots and browser-safe exact money DTOs. S4 adds historical invoice aggregation, cash settlement races, KDS gates and role-checked manual close. See [P-76](docs/p76-test-scope.md), [P-77](docs/p77-test-scope.md), [P-78](docs/p78-test-scope.md) and [P-79](docs/p79-test-scope.md) test scopes.
+PostgreSQL integration tests create isolated schemas. S1 covers migration up/down/reapply, scoped constraints, concurrent seating/join, all three QR modes, expiry/revocation, PIN brute-force limits, and staff authorization. S2 adds published-menu isolation, draft versions, linked/detached catalogs, store prices, option validation and real tax calculation using dated central rules. Never use a production or shared business database for `TEST_DATABASE_URL`. S3 adds cart CAS/idempotency, commit races, historical snapshots and browser-safe exact money DTOs. S4 adds historical invoice aggregation, cash settlement races, KDS gates and role-checked manual close. S5 adds one scoped payment attempt, bounded same-key retries, raw signed webhook processing, original-browser continuation and payment/KDS review gates. See [P-76](docs/p76-test-scope.md), [P-77](docs/p77-test-scope.md), [P-78](docs/p78-test-scope.md), [P-79](docs/p79-test-scope.md) and [P-80](docs/p80-test-scope.md) test scopes.
 
 The migration smoke executes `migrations/test_only/001_smoke.up.sql` in a temporary empty SQLite database, verifies its probe and version ledger, applies the paired `.down.sql`, verifies removal, then reapplies. Its temporary directory is deleted on exit. It does not read a DB URL or touch any external database. Rollback is the paired down migration; `make migration-smoke` verifies the cycle reproducibly.
 
@@ -40,8 +40,9 @@ SQLite is a **historical S0 test harness only**. Owner approved PostgreSQL test 
 - `internal/httpapi/sessions.go`: injected guest/staff JSON API, tested with real PostgreSQL and test-only identity adapters.
 - `internal/catalog`, `internal/httpapi/menu.go`: company/store drafts and sealed publications, effective tax-inclusive store prices, option validation and server-resolved dine-in quotes.
 - `internal/tax`: exact inclusive JPY calculation, one floor per normalized rate and supplied calculation boundary, effective legal rule reader and persistable historical snapshots.
-- `internal/ordering`, `internal/httpapi/ordering.go`: shared cart generations, idempotency and atomic immutable orders; no payment execution.
+- `internal/ordering`, `internal/httpapi/ordering.go`: shared cart generations, idempotency and atomic immutable orders with an injected transactional payment policy.
 - `internal/operations`, `internal/httpapi/operations.go`: cash settings and settlement, separate payment/fulfillment state, KDS release, staff operations and close gates.
+- `internal/payments`, `internal/stripeprovider`, `internal/checkoutproof`: durable scoped attempts and work, test-only Stripe adapter, raw webhook verification and independent browser continuation proof. See [P-80 test scope](docs/p80-test-scope.md) and [provider configuration](docs/p80-stripe-provider.md).
 - `web/`: React + TypeScript + Vite guest, staff and kitchen UI, using the same Go REST API.
 - `cmd/guesttest`, `internal/testguest`: loopback-only isolated-schema guest acceptance server.
 - `cmd/operationstest`, `internal/testoperations`: explicit local cash/KDS acceptance runtime with isolated test credentials; never a production IdP.
@@ -87,6 +88,6 @@ orders. No real cash or Stripe charge is performed. The test adapter qualifies
 only the local flow, not production MOD-08 identity. See the
 [P-79 boundary](docs/p79-test-scope.md) for receipt and acceptance details.
 
-日本語：P-75〜P-78は統合・受入済み。P-79は現金領収・厨房・配膳・手動閉卓を追加する。IdP・本番hosting・Stripeの受入は別であり、既存Flutter/Firebase原価アプリを変更しない。
+日本語：P-75〜P-79は統合・受入済み。P-80は鍵なしの決済境界を追加する。実Stripe Test Mode・IdP・本番hostingの受入は別であり、既存Flutter/Firebase原価アプリを変更しない。
 
-繁中：P-75至P-78已驗收，P-79承接現金收據、廚房看板、送餐及安全關桌。正式IdP／託管與Stripe仍有獨立gate；測試成功不代表上線。每包回報確切SHA、CI、獨立審查、rollback與剩餘阻礙。
+繁中：P-75至P-79已驗收，P-80加入無金鑰的交易邊界。真實Stripe Test Mode、正式IdP與託管仍有獨立gate；測試成功不代表上線。每包回報確切SHA、CI、獨立審查、rollback與剩餘阻礙。

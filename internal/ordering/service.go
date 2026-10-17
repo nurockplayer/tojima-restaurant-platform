@@ -337,6 +337,7 @@ func (s *Service) Commit(ctx context.Context, input CommitRequest) (CommitResult
 			ID: orderID, SessionID: session.ID, Scope: session.Scope, Generation: cart.Generation,
 			PaymentMethod: string(input.PaymentMethod), RequiresStaffAcceptance: session.RequiresStaffAcceptance,
 			TotalGrossJPY: total.GrossJPY, Tax: taxRecord,
+			CheckoutProofHash: input.CheckoutProofHash, CheckoutProofExpiresAt: input.CheckoutProofExpiresAt,
 		}); err != nil {
 			return CommitResult{}, err
 		}

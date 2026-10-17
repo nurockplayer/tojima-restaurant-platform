@@ -24,6 +24,7 @@ var migrations = []migration{
 	{version: 3, up: "003_tax_rates.up.sql", down: "003_tax_rates.down.sql"},
 	{version: 4, up: "004_shared_cart_orders.up.sql", down: "004_shared_cart_orders.down.sql"},
 	{version: 5, up: "005_operations.up.sql", down: "005_operations.down.sql"},
+	{version: 6, up: "006_payments.up.sql", down: "006_payments.down.sql"},
 }
 
 // Up applies all migrations atomically and serializes concurrent processes.
