@@ -82,6 +82,13 @@ export interface AvailabilityResult { status: Availability; version: number }
 
 export interface CatalogContext { tenantID: string; storeID: string }
 
+type CatalogProductWire = Omit<CatalogProduct, 'option_groups'> & { option_groups?: CatalogOptionGroup[] | null };
+type CatalogCategoryWire = Omit<CatalogCategory, 'products'> & { products: CatalogProductWire[] };
+type CatalogDataWire = Omit<CatalogData, 'categories'> & { categories: CatalogCategoryWire[] };
+type CompanyPublishedWire = Omit<CompanyPublished, 'categories'> & CatalogDataWire;
+type CompanyDraftWire = Omit<CompanyDraft, 'categories'> & CatalogDataWire;
+type StoreCatalogWire = Omit<StoreCatalog, 'categories'> & CatalogDataWire;
+
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
   return httpRequest<T>(path, { ...init, headers: { ...bearerHeaders(token), ...init.headers } });
 }
@@ -97,13 +104,13 @@ const tenantBase = (tenantID: string) => `/v1/admin/tenants/${enc(tenantID)}`;
 const storeBase = (ctx: CatalogContext) => `${tenantBase(ctx.tenantID)}/stores/${enc(ctx.storeID)}`;
 
 export const catalogClient = {
-  companyPublished: (tenantID: string, token: string) => request<CompanyPublished>(`${tenantBase(tenantID)}/menu/published?amounts=string`, token),
-  companyDraft: (tenantID: string, token: string) => request<CompanyDraft>(`${tenantBase(tenantID)}/menu/draft?amounts=string`, token),
+  companyPublished: async (tenantID: string, token: string) => normalizeCompanyPublished(await request<CompanyPublishedWire>(`${tenantBase(tenantID)}/menu/published?amounts=string`, token)),
+  companyDraft: async (tenantID: string, token: string) => normalizeCompanyDraft(await request<CompanyDraftWire>(`${tenantBase(tenantID)}/menu/draft?amounts=string`, token)),
   saveCompanyDraft: (tenantID: string, token: string, draft: CompanyDraft) => request<unknown>(`${tenantBase(tenantID)}/menu/draft`, token, putJSON(toNumericDraft(draft))),
   previewCompany: (tenantID: string, token: string, expectedVersion: number) => request<CompanyPreview>(`${tenantBase(tenantID)}/menu/preview`, token, json({ expected_version: expectedVersion })),
   publishCompany: (tenantID: string, token: string, expectedVersion: number, fingerprint: string) => request<PublishResult>(`${tenantBase(tenantID)}/menu/publish`, token, json({ expected_version: expectedVersion, preview_fingerprint: fingerprint })),
-  storeMenu: (ctx: CatalogContext, token: string) => request<StoreCatalog>(`${storeBase(ctx)}/menu?amounts=string`, token),
-  storeDraft: (ctx: CatalogContext, token: string) => request<CompanyDraft>(`${storeBase(ctx)}/menu/draft?amounts=string`, token),
+  storeMenu: async (ctx: CatalogContext, token: string) => normalizeStoreCatalog(await request<StoreCatalogWire>(`${storeBase(ctx)}/menu?amounts=string`, token)),
+  storeDraft: async (ctx: CatalogContext, token: string) => normalizeCompanyDraft(await request<CompanyDraftWire>(`${storeBase(ctx)}/menu/draft?amounts=string`, token)),
   saveStoreDraft: (ctx: CatalogContext, token: string, draft: CompanyDraft) => request<unknown>(`${storeBase(ctx)}/menu/draft`, token, putJSON(toNumericDraft(draft))),
   publishStoreDraft: (ctx: CatalogContext, token: string, expectedVersion: number) => request<PublishResult>(`${storeBase(ctx)}/menu/publish`, token, json({ expected_version: expectedVersion })),
   detachStore: (ctx: CatalogContext, token: string, expectedRevision: number) => request<PublishResult>(`${storeBase(ctx)}/menu/detach`, token, json({ expected_revision: expectedRevision })),
@@ -129,6 +136,28 @@ export function toNumericDraft(draft: CompanyDraft): CompanyDraft {
       })),
     })),
   };
+}
+
+function normalizeCompanyPublished(wire: CompanyPublishedWire): CompanyPublished {
+  return { ...wire, categories: normalizeCatalogCategories(wire.categories) };
+}
+
+function normalizeCompanyDraft(wire: CompanyDraftWire): CompanyDraft {
+  return { ...wire, categories: normalizeCatalogCategories(wire.categories) };
+}
+
+function normalizeStoreCatalog(wire: StoreCatalogWire): StoreCatalog {
+  return { ...wire, categories: normalizeCatalogCategories(wire.categories) };
+}
+
+function normalizeCatalogCategories(categories: CatalogCategoryWire[]): CatalogCategory[] {
+  return categories.map((category) => ({
+    ...category,
+    products: category.products.map((product) => ({
+      ...product,
+      option_groups: (product.option_groups ?? []).map((group) => ({ ...group, options: group.options ?? [] })),
+    })),
+  }));
 }
 
 function numericAmount(value: Amount): number {

@@ -238,6 +238,46 @@ describe('catalog admin UI', () => {
     expect(screen.getByRole('button', { name: '本部メニュー' })).toBeTruthy();
     expect(screen.getByRole('textbox', { name: '商品名' })).toHaveProperty('value', '定食');
   });
+
+  it('saves, previews, and publishes a product when the server omits option_groups', async () => {
+    installContext();
+    let serverVersion = 7;
+    let serverName = '味噌ラーメン';
+    const calls: Array<{ url: string; init?: RequestInit }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+      calls.push({ url, init });
+      if (url.includes('/stores/store-1/menu?')) return jsonResponse({ error: 'forbidden' }, 403);
+      if (url.endsWith('/menu/published?amounts=string')) return jsonResponse({ revision: 4, categories: [wireCategory(serverName)] });
+      if (url.endsWith('/menu/draft?amounts=string')) return jsonResponse({ version: serverVersion, categories: [wireCategory(serverName)] });
+      if (url.endsWith('/menu/draft') && method === 'PUT') {
+        const body = JSON.parse(String(init?.body)) as { categories: Array<{ products: Array<{ name: string; option_groups?: unknown[] }> }> };
+        expect(body.categories[0]!.products[0]!.option_groups).toEqual([]);
+        serverName = body.categories[0]!.products[0]!.name;
+        serverVersion = 8;
+        return jsonResponse({ saved: true });
+      }
+      if (url.endsWith('/menu/preview')) return jsonResponse({ draft_version: 8, published_revision: 4, linked_store_count: 1, can_publish: true, issues: [], preview_fingerprint: 'no-options-preview' });
+      if (url.endsWith('/menu/publish')) return jsonResponse({ revision: 5, draft_version: 8 });
+      return jsonResponse({ error: 'unexpected_request' }, 404);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    await mount();
+
+    await user.clear(screen.getByLabelText('商品名'));
+    await user.type(screen.getByLabelText('商品名'), '味噌ラーメン改');
+    await user.click(screen.getByRole('button', { name: '草稿を保存' }));
+    await waitFor(() => expect(screen.getByText('草稿を保存しました。公開前チェックを実行してください。')).toBeTruthy());
+    await user.click(screen.getByRole('button', { name: '公開前チェック' }));
+    expect(await screen.findByLabelText('公開内容の変更概要')).toBeTruthy();
+    expect(screen.getByText('味噌ラーメン → 味噌ラーメン改')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '確認した内容を公開' }));
+
+    await waitFor(() => expect(screen.getByText('メニューを公開しました。')).toBeTruthy());
+    expect(calls.some((call) => call.url.endsWith('/menu/preview'))).toBe(true);
+    expect(calls.some((call) => call.url.endsWith('/menu/publish'))).toBe(true);
+  });
 });
 
 async function mount() {
@@ -253,6 +293,14 @@ function installContext() {
 
 function draft(): CompanyDraft {
   return { version: 7, categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '昼食', base_price_minor: '900', position: 1, active: true, option_groups: [] }] }] };
+}
+
+function wireCategory(productName: string) {
+  return { key: 'food', name: '料理', position: 1, products: [{ key: 'miso-ramen', name: productName, description: '', base_price_minor: '900', position: 1, active: true }] };
+}
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
 function storeMenu(capabilities: Pick<StoreCatalog, 'can_pause_availability' | 'can_confirm_availability' | 'can_edit_prices' | 'can_detach'>, availability: 'PENDING_CONFIRMATION' | 'AVAILABLE' = 'AVAILABLE', mode: StoreCatalog['mode'] = 'LINKED'): StoreCatalog {
