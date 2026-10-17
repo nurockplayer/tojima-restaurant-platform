@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act } from 'react';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
@@ -115,6 +115,48 @@ describe('catalog admin UI', () => {
     await user.type(options[1]!, '大盛り');
     expect(screen.getByLabelText('グループ名')).toHaveProperty('value', 'サイズ');
     expect(screen.getAllByLabelText('選択肢名').map((input) => (input as HTMLInputElement).value)).toEqual(['普通', '大盛り']);
+  });
+
+  it('keeps product insertion available after deleting the last product and in a newly added category', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    await mount();
+
+    const firstProduct = screen.getByLabelText('商品名').closest('fieldset');
+    expect(firstProduct).not.toBeNull();
+    await user.click(within(firstProduct!).getByRole('button', { name: '削除' }));
+    expect(screen.queryByLabelText('商品名')).toBeNull();
+
+    let categories = screen.getAllByLabelText('カテゴリ名').map((input) => input.closest('fieldset'));
+    await user.click(within(categories[0]!).getByRole('button', { name: '商品を追加' }));
+    expect(screen.getAllByLabelText('商品名')).toHaveLength(1);
+
+    await user.click(screen.getByRole('button', { name: 'カテゴリを追加' }));
+    categories = screen.getAllByLabelText('カテゴリ名').map((input) => input.closest('fieldset'));
+    await user.click(within(categories[1]!).getByRole('button', { name: '商品を追加' }));
+    expect(screen.getAllByLabelText('商品名')).toHaveLength(2);
+  });
+
+  it('resets the editor after authoritative refresh even when the draft version is unchanged', async () => {
+    installContext();
+    const serverDraft = draft();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: serverDraft.categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(serverDraft);
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    await mount();
+
+    await user.clear(screen.getByLabelText('説明'));
+    await user.type(screen.getByLabelText('説明'), '未儲存的畫面內容');
+    expect(screen.getByLabelText('説明')).toHaveProperty('value', '未儲存的畫面內容');
+    expect((screen.getByRole('button', { name: '公開前チェック' }) as HTMLButtonElement).disabled).toBe(true);
+
+    await user.click(screen.getByRole('button', { name: '最新状態に更新' }));
+
+    await waitFor(() => expect(screen.getByLabelText('説明')).toHaveProperty('value', '昼食'));
+    expect(catalogClient.companyDraft).toHaveBeenCalledTimes(2);
+    expect((screen.getByRole('button', { name: '公開前チェック' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('uses server capabilities to expose staff pause without manager price, confirm, or detach actions', async () => {

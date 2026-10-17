@@ -78,10 +78,12 @@ export function CatalogApp() {
   const [published, setPublished] = useState<CompanyPublished | null>(null);
   const [companySaved, setCompanySaved] = useState<CompanyDraft | null>(null);
   const [companyDraft, setCompanyDraft] = useState<CompanyDraft | null>(null);
+  const [companyFormEpoch, setCompanyFormEpoch] = useState(0);
   const [preview, setPreview] = useState<CompanyPreview | null>(null);
   const [storeMenu, setStoreMenu] = useState<StoreCatalog | null>(null);
   const [storeSaved, setStoreSaved] = useState<CompanyDraft | null>(null);
   const [storeDraft, setStoreDraft] = useState<CompanyDraft | null>(null);
+  const [storeFormEpoch, setStoreFormEpoch] = useState(0);
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [reasons, setReasons] = useState<Record<string, string>>({});
   const [pauseTarget, setPauseTarget] = useState('');
@@ -114,6 +116,7 @@ export function CatalogApp() {
       catalogClient.companyDraft(base.tenantID, base.token),
     ]);
     if (epoch.current !== requestEpoch) return false;
+    setCompanyFormEpoch((value) => value + 1);
     if (publishedResult.status === 'fulfilled') setPublished(publishedResult.value);
     else if (publishedResult.reason instanceof ApiError && publishedResult.reason.status === 404) setPublished({ revision: 0, categories: [] });
     else setPublished(null);
@@ -139,10 +142,11 @@ export function CatalogApp() {
         if (epoch.current !== requestEpoch) return false;
         setStoreSaved(draft); setStoreDraft(draft);
       } else { setStoreSaved(null); setStoreDraft(null); }
+      setStoreFormEpoch((value) => value + 1);
       return true;
     } catch (cause) {
       if (epoch.current !== requestEpoch) return false;
-      setStoreMenu(null); setStoreSaved(null); setStoreDraft(null); setPriceInputs({});
+      setStoreMenu(null); setStoreSaved(null); setStoreDraft(null); setPriceInputs({}); setStoreFormEpoch((value) => value + 1);
       setStoreError(errorCopy(cause, locale));
       return false;
     }
@@ -214,6 +218,7 @@ export function CatalogApp() {
       const result = await catalogClient.companyDraft(context.tenantID, context.token);
       if (epoch.current !== requestEpoch) return;
       setCompanyDraft(result); setCompanySaved(result); setNotice(t.savedCompany);
+      setCompanyFormEpoch((value) => value + 1);
     } catch (cause) {
       if (epoch.current !== requestEpoch) return;
       if (isConflict(cause)) { await loadCompany(context, requestEpoch); setCompanyError(t.stale); }
@@ -260,6 +265,7 @@ export function CatalogApp() {
       const result = await catalogClient.storeDraft(context, context.token);
       if (epoch.current !== requestEpoch) return;
       setStoreDraft(result); setStoreSaved(result); setNotice(t.savedStore);
+      setStoreFormEpoch((value) => value + 1);
     } catch (cause) {
       if (epoch.current !== requestEpoch) return;
       if (isConflict(cause)) { await loadStore(context, requestEpoch); setStoreError(t.stale); }
@@ -353,7 +359,7 @@ export function CatalogApp() {
         <div className="catalog-summary"><span>{t.revision}: <strong>{published?.revision}</strong></span><span>{t.draftVersion}: <strong>{companyDraft.version}</strong></span>{preview && <span>{t.linkedCount}: <strong>{preview.linked_store_count}</strong></span>}</div>
         {published && <details className="catalog-published-snapshot"><summary>{t.currentPublished}</summary>{published.categories.length === 0 ? <p className="muted">{t.empty}</p> : published.categories.map((category) => <section key={category.key}><h3>{category.name}</h3><ul>{category.products.map((product) => <li key={product.key}><span>{product.name}</span><strong>{amountJPY(product.base_price_minor)}</strong>{product.option_groups.length > 0 && <ul>{product.option_groups.map((group) => <li key={group.key}>{group.name}: {group.options.map((option) => `${option.name} (+${amountJPY(option.price_delta_minor)})`).join('、')}</li>)}</ul>}</li>)}</ul></section>)}</details>}
         <p className="muted">{t.newProductPending}</p>
-        <CatalogEditor key={`company-${companyDraft.version}`} data={companyDraft} disabled={busy} onChange={editCompany} t={t} />
+        <CatalogEditor key={`company-${companyDraft.version}-${companyFormEpoch}`} data={companyDraft} disabled={busy} onChange={editCompany} t={t} />
         {companyDirty && !companyCanSave && <p className="error" role="alert">{t.amountUnsupported}</p>}
         <div className="catalog-actions">
           <button type="button" className="button quiet" disabled={!companyCanSave || busy} onClick={() => void saveCompany()}>{t.saveDraft}</button>
@@ -369,7 +375,7 @@ export function CatalogApp() {
         <StoreCatalogView menu={storeMenu} priceInputs={priceInputs} setPriceInputs={setPriceInputs} reasons={reasons} setReasons={setReasons} pauseTarget={pauseTarget} setPauseTarget={setPauseTarget} busy={busy} onPrice={changePrice} onAvailability={availability} t={t} />
         {storeMenu.mode === 'DETACHED' && storeDraft && storeMenu.can_confirm_availability && <>
           <h2>{t.detachedDraft}</h2>
-          <CatalogEditor key={`store-${storeDraft.version}`} data={storeDraft} disabled={busy} onChange={editStoreDraft} t={t} />
+          <CatalogEditor key={`store-${storeDraft.version}-${storeFormEpoch}`} data={storeDraft} disabled={busy} onChange={editStoreDraft} t={t} />
           <div className="catalog-actions"><button type="button" className="button quiet" disabled={!storeCanSave || busy} onClick={() => void saveDetachedDraft()}>{t.saveStoreDraft}</button><button type="button" className="button primary" disabled={!storeSaved || storeDirty || busy} onClick={() => void publishDetachedDraft()}>{t.publishStoreDraft}</button></div>
         </>}
         {storeMenu.mode === 'LINKED' && storeMenu.can_detach && <section className="catalog-detach"><h2>{t.detach}</h2><p>{t.detachExplain}</p>{!confirmDetach ? <button type="button" className="button quiet" disabled={busy} onClick={() => setConfirmDetach(true)}>{t.detach}</button> : <div className="confirm-dialog" role="group" aria-label={t.detach}><p>{t.detachExplain}</p><button type="button" className="button quiet" disabled={busy} onClick={() => setConfirmDetach(false)}>{t.cancel}</button><button type="button" className="button primary" disabled={busy} onClick={() => void detach()}>{t.detachConfirm}</button></div>}</section>}
@@ -408,8 +414,8 @@ function ProductFields({ control, register, categoryIndex, disabled, t }: { cont
       <label className="catalog-field">{t.description}<textarea {...register(`categories.${categoryIndex}.products.${productIndex}.description` as const)} disabled={disabled} rows={2} /></label>
       <div className="catalog-fields"><label>{t.basePrice}<input inputMode="numeric" pattern="[0-9]*" {...register(`categories.${categoryIndex}.products.${productIndex}.base_price_minor` as const, { setValueAs: (value) => String(value) })} disabled={disabled} required /></label><label className="catalog-checkbox"><input type="checkbox" {...register(`categories.${categoryIndex}.products.${productIndex}.active` as const)} disabled={disabled} />{t.active}</label></div>
       <OptionGroupFields control={control} register={register} categoryIndex={categoryIndex} productIndex={productIndex} disabled={disabled} t={t} />
-      <button type="button" className="button small quiet" disabled={disabled} onClick={() => products.append({ key: newKey('product'), name: '', description: '', base_price_minor: '0', position: products.fields.length, active: true, option_groups: [] })}>{t.addProduct}</button>
     </fieldset>)}
+    <button type="button" className="button small quiet" disabled={disabled} onClick={() => products.append({ key: newKey('product'), name: '', description: '', base_price_minor: '0', position: products.fields.length, active: true, option_groups: [] })}>{t.addProduct}</button>
   </>;
 }
 
