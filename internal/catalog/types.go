@@ -10,7 +10,8 @@ import (
 )
 
 // MaxCatalogCanonicalJSONBytes bounds the complete accepted catalog document,
-// including all nested products, option groups, and options.
+// including all nested items and reserving each nonnegative base price's space
+// up to its 19-digit int64 maximum for later store-price overrides.
 const MaxCatalogCanonicalJSONBytes = 1 << 20
 
 type Availability string

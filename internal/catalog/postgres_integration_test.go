@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -59,8 +60,8 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ('t','Tenant'),('other','Other'),('fk-fixture','FK fixture'),('writer-fixture','Writer fixture');
-		INSERT INTO stores(tenant_id,store_id,name) VALUES ('t','s1','One'),('t','s2','Two'),('other','s1','Other one'),('fk-fixture','store','Foreign-key fixture');
+	if _, err = pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ('t','Tenant'),('other','Other'),('fk-fixture','FK fixture'),('writer-fixture','Writer fixture'),('budget','Budget fixture');
+		INSERT INTO stores(tenant_id,store_id,name) VALUES ('t','s1','One'),('t','s2','Two'),('other','s1','Other one'),('fk-fixture','store','Foreign-key fixture'),('budget','store','Budget store');
 		INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES ('t','s1','table','Table one','locator-one'),('t','s2','table','Table two','locator-two'),('other','s1','table','Other table','other-locator')`); err != nil {
 		t.Fatal(err)
 	}
@@ -381,6 +382,48 @@ func TestPostgresCatalogAcceptance(t *testing.T) {
 			case <-deadline.Done():
 				t.Fatal("concurrent publication/detach timed out (possible lock-order deadlock)")
 			}
+		}
+	})
+
+	t.Run("detached maximum overrides remain within accepted catalog budget", func(t *testing.T) {
+		data, sourceSize := priceExpansionBoundaryCatalog(t)
+		const overridePrice int64 = 9223372036854775807
+		if sourceSize > MaxCatalogCanonicalJSONBytes || sourceSize+18*len(flattenProducts(data)) > MaxCatalogCanonicalJSONBytes {
+			t.Fatalf("boundary source sizes are inconsistent: source=%d", sourceSize)
+		}
+		draft, saveErr := service.SaveCompanyDraft(ctx, "budget", "owner", 0, data)
+		if saveErr != nil || draft.Version != 1 {
+			t.Fatalf("save boundary company draft: version=%d err=%v", draft.Version, saveErr)
+		}
+		if _, saveErr = service.PublishCompanyDraft(ctx, "budget", "owner", draft.Version); saveErr != nil {
+			t.Fatalf("publish boundary company draft: %v", saveErr)
+		}
+		companyID := catalogID(t, ctx, pool, "budget", "COMPANY", "")
+		command, insertErr := pool.Exec(ctx, `INSERT INTO store_product_price_overrides(tenant_id,store_id,product_key,price_minor,active,version,updated_by)
+			SELECT 'budget','store',product_key,$1,true,1,'manager' FROM menu_revision_products WHERE catalog_id=$2 AND revision=1`, overridePrice, companyID)
+		if insertErr != nil || command.RowsAffected() != int64(len(flattenProducts(data))) {
+			t.Fatalf("seed maximum store overrides: rows=%d err=%v", command.RowsAffected(), insertErr)
+		}
+		if _, saveErr = service.DetachStore(ctx, StoreScope{"budget", "store"}, "owner", 1); saveErr != nil {
+			t.Fatalf("detach boundary catalog with maximum overrides: %v", saveErr)
+		}
+		detached, getErr := service.GetStoreDraft(ctx, StoreScope{"budget", "store"})
+		if getErr != nil {
+			t.Fatalf("read detached boundary draft: %v", getErr)
+		}
+		if err := validateData(detached.CatalogData); err != nil {
+			t.Fatalf("detached maximum-price snapshot is not resavable: %v", err)
+		}
+		encoded, marshalErr := json.Marshal(detached.CatalogData)
+		if marshalErr != nil || len(encoded) > MaxCatalogCanonicalJSONBytes {
+			t.Fatalf("detached snapshot actual size=%d err=%v", len(encoded), marshalErr)
+		}
+		if detached.Categories[0].Products[0].BasePriceMinor != overridePrice {
+			t.Fatalf("detach did not copy maximum override: %d", detached.Categories[0].Products[0].BasePriceMinor)
+		}
+		resaved, saveErr := service.SaveStoreDraft(ctx, StoreScope{"budget", "store"}, "manager", detached.Version, detached.CatalogData)
+		if saveErr != nil || resaved.Version != detached.Version+1 {
+			t.Fatalf("resave detached boundary snapshot: version=%d err=%v", resaved.Version, saveErr)
 		}
 	})
 }

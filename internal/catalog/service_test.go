@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -87,4 +88,100 @@ func TestValidateDataBoundsWholeCatalogBudget(t *testing.T) {
 	if err := validateData(tooLarge); !errors.Is(err, ErrInvalid) {
 		t.Fatalf("catalog exceeding canonical byte budget returned %v", err)
 	}
+}
+
+func TestCatalogBudgetReservesStorePriceExpansion(t *testing.T) {
+	data, actualSize := priceExpansionBoundaryCatalog(t)
+	reservedSize, err := catalogBudgetSize(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	priceExpansion := 18 * len(flattenProducts(data))
+	if reservedSize != actualSize+priceExpansion || reservedSize > MaxCatalogCanonicalJSONBytes || reservedSize < MaxCatalogCanonicalJSONBytes-2000 {
+		t.Fatalf("price reserve size=%d actual=%d expansion=%d", reservedSize, actualSize, priceExpansion)
+	}
+	for ci := range data.Categories {
+		for pi := range data.Categories[ci].Products {
+			data.Categories[ci].Products[pi].BasePriceMinor = math.MaxInt64
+		}
+	}
+	transformedSize, err := catalogBudgetSize(data)
+	if err != nil || transformedSize != reservedSize {
+		t.Fatalf("detached prices changed reserved size: got=%d want=%d err=%v", transformedSize, reservedSize, err)
+	}
+	if err = validateData(data); err != nil {
+		t.Fatalf("detached catalog at reserved boundary became invalid: %v", err)
+	}
+}
+
+func priceExpansionBoundaryCatalog(t *testing.T) (CatalogData, int) {
+	t.Helper()
+	makeData := func(descriptionBytes, optionNameRunes int) CatalogData {
+		products := make([]Product, 500)
+		for pi := range products {
+			groups := make([]OptionGroup, 2)
+			for gi := range groups {
+				groups[gi] = OptionGroup{
+					Key: fmt.Sprintf("g%02d", gi) + strings.Repeat("g", 97), Name: strings.Repeat("G", 160), MaxSelect: 1,
+					Options: []Option{{Key: "o" + strings.Repeat("o", 99), Name: strings.Repeat("O", optionNameRunes), Active: true}},
+				}
+			}
+			products[pi] = Product{
+				Key: fmt.Sprintf("p%03d", pi) + strings.Repeat("p", 96), Name: strings.Repeat("P", 200),
+				Description: strings.Repeat("d", descriptionBytes), Active: true, Groups: groups,
+			}
+		}
+		return CatalogData{Categories: []Category{{Key: strings.Repeat("c", 100), Name: strings.Repeat("C", 160), Products: products}}}
+	}
+
+	baseSize := len(mustCatalogJSON(t, makeData(0, 1)))
+	const priceReserve = 18 * 500
+	target := MaxCatalogCanonicalJSONBytes - priceReserve
+	remaining := target - baseSize
+	if remaining < 0 {
+		t.Fatalf("boundary fixture baseline already exceeds target: %d", baseSize)
+	}
+	descriptionCost := len(mustCatalogJSON(t, makeData(1, 1))) - baseSize
+	descriptionOverhead := descriptionCost - 500
+	descriptionBytes := 0
+	if remaining > descriptionOverhead {
+		descriptionBytes = (remaining - descriptionOverhead) / 500
+	}
+	if descriptionBytes > 512 {
+		descriptionBytes = 512
+	}
+	withDescriptionsSize := len(mustCatalogJSON(t, makeData(descriptionBytes, 1)))
+	remaining = target - withDescriptionsSize
+	if remaining < 0 {
+		t.Fatalf("description fill exceeded target: %d > %d", withDescriptionsSize, target)
+	}
+	optionNameRunes := 1 + remaining/1000
+	if optionNameRunes > 160 {
+		optionNameRunes = 160
+	}
+	data := makeData(descriptionBytes, optionNameRunes)
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	budget, err := catalogBudgetSize(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > MaxCatalogCanonicalJSONBytes || budget > MaxCatalogCanonicalJSONBytes || budget < MaxCatalogCanonicalJSONBytes-2000 {
+		t.Fatalf("could not construct price-expansion boundary: actual=%d budget=%d target=%d description=%d option-name=%d", len(encoded), budget, target, descriptionBytes, optionNameRunes)
+	}
+	if err = validateData(data); err != nil {
+		t.Fatalf("boundary source catalog is not accepted: %v", err)
+	}
+	return data, len(encoded)
+}
+
+func mustCatalogJSON(t *testing.T, data CatalogData) []byte {
+	t.Helper()
+	encoded, err := json.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return encoded
 }

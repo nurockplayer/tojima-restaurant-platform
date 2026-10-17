@@ -877,11 +877,30 @@ func validateData(data CatalogData) error {
 			}
 		}
 	}
-	canonical, err := json.Marshal(data)
-	if err != nil || len(canonical) > MaxCatalogCanonicalJSONBytes {
+	budgetSize, err := catalogBudgetSize(data)
+	if err != nil || budgetSize > MaxCatalogCanonicalJSONBytes {
 		return ErrInvalid
 	}
 	return nil
+}
+
+func catalogBudgetSize(data CatalogData) (int, error) {
+	// DETACH can replace a short company price with any nonnegative bigint
+	// override. Measure a shallow product copy at the maximum int64 width so
+	// every accepted catalog remains within budget after that transformation.
+	sized := data
+	sized.Categories = append([]Category(nil), data.Categories...)
+	for ci := range sized.Categories {
+		sized.Categories[ci].Products = append([]Product(nil), data.Categories[ci].Products...)
+		for pi := range sized.Categories[ci].Products {
+			sized.Categories[ci].Products[pi].BasePriceMinor = math.MaxInt64
+		}
+	}
+	canonical, err := json.Marshal(sized)
+	if err != nil {
+		return 0, err
+	}
+	return len(canonical), nil
 }
 
 func readDraft(ctx context.Context, q queryer, catalogID int64) (Draft, error) {
