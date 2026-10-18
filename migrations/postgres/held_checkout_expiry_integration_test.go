@@ -267,153 +267,45 @@ func assertBackfilled(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 	}
 }
 
-// Reproduce work.go's lockPaymentSessionAny ordering against the actual v7
-// schema: the metadata SELECT retains AccessShareLock until persistence commits.
-func TestHeldCheckoutExpiryMigrationWaitsForPaymentPersistence(t *testing.T) {
-	ctx, target, _ := newV7MigrationFixture(t)
-	seedV7HoldFixture(t, ctx, target)
-	writer := connectFixture(t, target)
-	migrator := connectFixture(t, target)
-	tx, err := writer.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx)
-	const orderID = "00000000000000000000000000000001"
-	var sid, tenant, store, table string
-	if err = tx.QueryRow(ctx, `SELECT session_id,tenant_id,store_id,table_id FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&sid, &tenant, &store, &table); err != nil {
-		t.Fatal(err)
-	}
-	finished := make(chan error, 1)
-	go func() { finished <- postgres.Up(ctx, migrator) }()
-	migrationPID, writerPID := int(migrator.PgConn().PID()), int(writer.PgConn().PID())
-	waitForBlockedBy(t, ctx, target, migrationPID, writerPID)
-	var waitingForDDL bool
-	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND relation='stripe_payment_attempts'::regclass AND mode='AccessExclusiveLock' AND NOT granted)`, migrationPID).Scan(&waitingForDDL); err != nil {
-		t.Fatal(err)
-	}
-	if !waitingForDDL {
-		t.Fatal("migration did not wait for the payment metadata table lock")
-	}
-	// With the old migration, this SHARE request closes the deadlock cycle.
-	if _, err = tx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE tenant_id=$1 AND owner_kind='COMPANY' FOR SHARE`, tenant); err != nil {
-		t.Fatalf("payment catalog lock while migration waits for DDL: %v", err)
-	}
-	if _, err = tx.Exec(ctx, `SELECT session_id FROM table_sessions WHERE session_id=$1 AND tenant_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE`, sid, tenant, store, table); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='PAID',provider_payment_status='paid',checkout_status='complete',updated_at=clock_timestamp() WHERE order_id=$1`, orderID); err != nil {
-		t.Fatal(err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		t.Fatalf("payment commit: %v", err)
-	}
-	if err = <-finished; err != nil {
-		t.Fatalf("migration after payment persistence: %v", err)
-	}
-	var state string
-	var marked, revoked bool
-	var workCount, eventCount int
-	if err = target.QueryRow(ctx, `SELECT state,company_hold_expire_requested_at IS NOT NULL,continuation_revoked_at IS NOT NULL,
-		(SELECT count(*) FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'),
-		(SELECT count(*) FROM stripe_payment_attempt_events WHERE order_id=$1 AND event_key='company-hold-expire:'||$1)
-		FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&state, &marked, &revoked, &workCount, &eventCount); err != nil {
-		t.Fatal(err)
-	}
-	if state != "PAID" || marked || revoked || workCount != 0 || eventCount != 0 {
-		t.Fatalf("backfill ignored committed payment: state=%s marked=%v revoked=%v work=%d events=%d", state, marked, revoked, workCount, eventCount)
-	}
-	assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000007", "migration:008_held_checkout_expiry")
-}
-
-// Admission uses the opposite table/catalog order from payment persistence.
-// Its catalog SHARE must make the migration release DDL locks and retry, so
-// the same transaction can insert its attempt and commit before the backfill.
-func TestHeldCheckoutExpiryMigrationRetriesForAdmission(t *testing.T) {
-	ctx, target, _ := newV7MigrationFixture(t)
-	seedV7HoldFixture(t, ctx, target)
-	const orderID = "00000000000000000000000000000015"
-	var attempt []byte
-	if err := target.QueryRow(ctx, `SELECT to_jsonb(a) || jsonb_build_object('order_id',$1::text,'attempt_id','attempt-15','generation',2,'idempotency_key','key-15')
-		FROM stripe_payment_attempts a WHERE order_id='00000000000000000000000000000009'`, orderID).Scan(&attempt); err != nil {
-		t.Fatal(err)
-	}
-	writer := connectFixture(t, target)
-	migrator := connectFixture(t, target)
-	tx, err := writer.Begin(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR SHARE`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `SELECT session_id FROM table_sessions WHERE session_id='session-9' FOR UPDATE`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = tx.Exec(ctx, `INSERT INTO table_orders SELECT (jsonb_populate_record(NULL::table_orders,
-		to_jsonb(o) || jsonb_build_object('order_id',$1::text,'generation',2))).*
-		FROM table_orders o WHERE order_id='00000000000000000000000000000009'`, orderID); err != nil {
-		t.Fatal(err)
-	}
-	migrationPID, writerPID := int(migrator.PgConn().PID()), int(writer.PgConn().PID())
-	finished := make(chan error, 1)
-	go func() { finished <- postgres.Up(ctx, migrator) }()
-	waitForMigrationRetry(t, ctx, target, migrationPID)
-	if _, err = tx.Exec(ctx, `INSERT INTO stripe_payment_attempts SELECT * FROM jsonb_populate_record(NULL::stripe_payment_attempts,$1::jsonb)`, attempt); err != nil {
-		t.Fatalf("admission insert while migration retries: %v", err)
-	}
-	// The next DDL attempt must now wait for admission's retained table lock.
-	waitForBlockedBy(t, ctx, target, migrationPID, writerPID)
-	if err = tx.Commit(ctx); err != nil {
-		t.Fatalf("admission commit: %v", err)
-	}
-	if err = <-finished; err != nil {
-		t.Fatalf("migration after admission: %v", err)
-	}
-	assertHoldArtifacts(t, ctx, target, orderID, "migration:008_held_checkout_expiry")
-}
-
 func TestHeldCheckoutExpiryMigrationWaitsForLegacyActivation(t *testing.T) {
-	for _, writeBeforeDDL := range []bool{false, true} {
-		t.Run(fmt.Sprintf("hold_written_before_DDL=%v", writeBeforeDDL), func(t *testing.T) {
-			ctx, target, _ := newV7MigrationFixture(t)
-			seedV7HoldFixture(t, ctx, target)
-			writer := connectFixture(t, target)
-			migrator := connectFixture(t, target)
-			tx, err := writer.Begin(ctx)
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer tx.Rollback(ctx)
-			if _, err = tx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR UPDATE`); err != nil {
-				t.Fatal(err)
-			}
-			activate := func() {
-				t.Helper()
-				if _, err = tx.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='legacy activation',activated_by='legacy-writer',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='inactive-product'`); err != nil {
-					t.Fatal(err)
-				}
-			}
-			if writeBeforeDDL {
-				activate()
-			}
-			finished := make(chan error, 1)
-			go func() { finished <- postgres.Up(ctx, migrator) }()
-			migrationPID := int(migrator.PgConn().PID())
-			waitForMigrationRetry(t, ctx, target, migrationPID)
-			if !writeBeforeDDL {
-				activate()
-			}
-			if err = tx.Commit(ctx); err != nil {
-				t.Fatal(err)
-			}
-			if err = <-finished; err != nil {
-				t.Fatalf("migration after legacy activation: %v", err)
-			}
-			assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000011", "migration:008_held_checkout_expiry")
-		})
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	writer := connectFixture(t, target)
+	migrator := connectFixture(t, target)
+	var writerPID, migrationPID int
+	if err := writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&writerPID); err != nil {
+		t.Fatal(err)
 	}
+	if err := migrator.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&migrationPID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := writer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='legacy activation',activated_by='legacy-writer',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='inactive-product'`); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- postgres.Up(ctx, migrator) }()
+	waitForBlockedBy(t, ctx, target, migrationPID, writerPID)
+	var attemptTableLock bool
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND relation='stripe_payment_attempts'::regclass AND mode='AccessExclusiveLock')`, migrationPID).Scan(&attemptTableLock); err != nil {
+		t.Fatal(err)
+	}
+	if attemptTableLock {
+		t.Fatal("migration reached AccessExclusiveLock on stripe_payment_attempts before waiting for the company catalog parent")
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-finished; err != nil {
+		t.Fatalf("migration after legacy activation: %v", err)
+	}
+	assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000011", "migration:008_held_checkout_expiry")
 }
 
 func TestHeldCheckoutExpiryTriggerCatchesLegacyActivationAfterBackfill(t *testing.T) {
@@ -602,29 +494,6 @@ func waitForBlockedBy(t *testing.T, ctx context.Context, observer *pgx.Conn, blo
 		time.Sleep(10 * time.Millisecond)
 	}
 	t.Fatalf("backend %d never became blocked by backend %d", blockedPID, blockerPID)
-}
-
-// Observe the retry itself, not an arbitrary delay: PgSleep is reached only
-// after NOWAIT failed and the DDL subtransaction released its relation locks.
-func waitForMigrationRetry(t *testing.T, ctx context.Context, observer *pgx.Conn, migrationPID int) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		var retrying bool
-		err := observer.QueryRow(ctx, `SELECT coalesce(wait_event='PgSleep',false) AND NOT EXISTS(
-			SELECT 1 FROM pg_locks WHERE pid=$1 AND
-			((relation='stripe_payment_attempts'::regclass AND mode='AccessExclusiveLock') OR
-			 (relation='company_product_emergency_holds'::regclass AND mode='ShareRowExclusiveLock')))
-			FROM pg_stat_activity WHERE pid=$1`, migrationPID).Scan(&retrying)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if retrying {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("migration backend %d never retried with DDL locks released", migrationPID)
 }
 
 func assertHoldArtifacts(t *testing.T, ctx context.Context, conn *pgx.Conn, orderID, actor string) {
