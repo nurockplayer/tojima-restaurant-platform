@@ -4,21 +4,21 @@ Source: `46b2391d36a33b8a7298a81f9792bf15fdf7001c` (`main`, abbreviated `46b2391
 
 Read against README, `docs/contracts.md`, all P-76–P-81 test scopes, P-80 provider boundaries, existing PostgreSQL helpers, and migrations 001–007 (up/down). The eight quoted requirements below are the authoritative P-84 text supplied for this lane. Pending PR numbers are supplied handoff dependencies; their branch contents and live disposition are not evaluated by this source snapshot.
 
-**Status rules:** PASS means the named executable assertions passed locally in their stated boundary. Payment PASS uses keyless synthetic provider fixtures unless explicitly stated otherwise. GAP means absent or incomplete acceptance evidence, including manual gates; it is not an observed defect. FAIL would mean a reproducible assertion contradicting merged behavior. None was observed. A source PASS is not evidence that a later PR passes. Each numbered sub-claim counts once; combined claims receive PASS only within the qualification in their description. Further external acceptance is explicitly separate.
+**Status rules:** PASS means the named executable assertions passed locally in their stated boundary. Payment PASS uses keyless synthetic provider fixtures unless explicitly stated otherwise. GAP means absent or incomplete acceptance evidence, including manual gates; it is not an observed defect. FAIL means a reproducible assertion contradicting merged behavior or the required acceptance contract. One HTTP denial-status defect was observed (5f); its two affected subtests use the required defect skip, which never counts as PASS. A source PASS is not evidence that a later PR passes. Each numbered sub-claim counts once; combined claims receive PASS only within the qualification in their description. Further external acceptance is explicitly separate.
 
-`Source` is the coverage disposition at `46b2391`; `Lane A` includes the new files in the commit containing this document. `P84::TestName` always expands to `internal/httpapi/p84_acceptance_integration_test.go::TestName`. Every other evidence reference below is also `file::TestName` (Vitest uses `file::describe > it`). Candidate counts do not promote pending implementations or manual pilot decisions.
+`Source` is the corrected coverage disposition using tests already present at `46b2391`, plus any defect reproduced against its unchanged production code; `Lane A` includes the new files in the commit containing this document. The earlier `fe6058e` matrix overstated several source claims; this revision corrects those dispositions as well as the candidate evidence. `P84::TestName` always expands to `internal/httpapi/p84_acceptance_integration_test.go::TestName`. Every other evidence reference below is also `file::TestName` (Vitest uses `file::describe > it`). Candidate counts do not promote pending implementations or manual pilot decisions.
 
 | Mandatory row | Source PASS / FAIL / GAP | Lane A PASS / FAIL / GAP | Disposition |
 | --- | --- | --- | --- |
 | 1. Tenant/store, catalog, RBAC, IDOR, HQ scale | 3 / 0 / 2 | **5 / 0 / 0** | Covered in local integration boundary |
-| 2. Shared cart and atomic commit | 5 / 0 / 1 | **6 / 0 / 0** | Full keyless policy race added |
+| 2. Shared cart and atomic commit | 4 / 0 / 2 | **6 / 0 / 0** | Full keyless policy race added |
 | 3. QR and next-party privacy | 3 / 0 / 2 | **4 / 0 / 1** | Fixed-QR remote risk requires pilot acknowledgement |
 | 4. Cash, KDS and closing | 6 / 0 / 0 | **6 / 0 / 0** | Existing coverage reused |
-| 5. Stripe isolation, webhook and resume | 5 / 0 / 4 | **5 / 0 / 4** | Sandbox / protected capability dependencies |
-| 6. Hold, review, cancellation and refunds | 5 / 0 / 4 | **5 / 0 / 4** | HQ-to-Checkout and review/refund dependencies |
+| 5. Stripe isolation, webhook and resume | 3 / 1 / 5 | **4 / 1 / 4** | HTTP denial-status defect; Sandbox / capability dependencies |
+| 6. Hold, review, cancellation and refunds | 1 / 0 / 8 | **3 / 0 / 6** | Quote race / confirmed expiry evidence and HQ/review/refund dependencies |
 | 7. Guest refresh, receipt, accessibility/mobile | 2 / 0 / 5 | **2 / 0 / 5** | P-83 and browser/pilot acceptance |
-| 8. Recovery, idempotency and security basics | 5 / 0 / 9 | **10 / 0 / 4** | Recovery/XSS added; perimeter/log/migration-failure gaps |
-| **Total (61 sub-claims)** | **34 / 0 / 27** | **43 / 0 / 18** | **9 concrete coverage gaps filled** |
+| 8. Recovery, idempotency and security basics | 4 / 0 / 10 | **10 / 0 / 4** | Recovery/XSS added; perimeter/log/migration-failure gaps |
+| **Total (61 sub-claims)** | **26 / 1 / 34** | **40 / 1 / 20** | **14 coverage gaps filled; 1 defect remains FAIL** |
 
 ## 1. Tenant/store isolation and company catalog
 
@@ -39,7 +39,7 @@ Read against README, `docs/contracts.md`, all P-76–P-81 test scopes, P-80 prov
 | ID and sub-claim | Source → Lane A | Concrete evidence and limit |
 | --- | --- | --- |
 | 2a. Three distinct guests share one OPEN seating | PASS → PASS | `internal/tablesession/postgres_integration_test.go::TestPostgresSessionAcceptance/concurrent staff opens have one session and three clients join it` and `/direct scan creates one staff acceptance session atomically`; the P84 race also checks three distinct grants for one session. Guests are service clients, not physical phones. |
-| 2b. Shared add/delete/absolute quantity/options, CAS and safe replay | PASS → PASS | `internal/ordering/postgres_integration_test.go::TestPostgresSharedCartAndOrderAcceptance` (three grants; concurrent add, quantity/options, removal and idempotency assertions); `web/src/ui/App.test.tsx::guest app mount > switches single-select options, clears optional choices, protects required groups, and replays a 503 with the same request`. |
+| 2b. Shared add/delete/absolute quantity/options, CAS and safe replay | GAP → PASS | `internal/ordering/postgres_integration_test.go::TestPostgresSharedCartAndOrderAcceptance` proves add/quantity/removal and replay but preserves the existing option selection during quantity edits. `P84::TestP84SharedOptionEditAndHeldLineRemoval` now changes yuzu to ginger using another guest, checks absolute quantity and the third guest's persisted read, rejects a stale edit, and replays without mutation. `web/src/ui/App.test.tsx::guest app mount > switches single-select options, clears optional choices, protects required groups, and replays a 503 with the same request` covers the mocked UI boundary. |
 | 2c. Concurrent STRIPE/CASH commit with real keyless payment policy leaves one method and no orphan attempt | GAP → PASS | `P84::TestP84ThreeGuestsStripeCashCommitRace`: six generations; barrier-started contenders converge on one order/method, one operational state, exactly one attempt/CREATE work for a STRIPE winner and zero for a CASH winner. Does not prescribe the scheduling winner or call Stripe. |
 | 2d. Committed order and winning method immutable | PASS → PASS | `internal/ordering/postgres_integration_test.go::TestPostgresSharedCartAndOrderAcceptance/concurrent add CAS, idempotency, immutable order, and next generation` rejects order UPDATE/DELETE and conflicting replay; preserves copied price/options/tax. |
 | 2e. Stale cart/price/publication/availability/tax quote requires fresh consent | PASS → PASS | Same ordering test; `internal/ordering/company_hold_integration_test.go::TestPostgresCompanyEmergencyHoldBlocksQuoteAndCommitWithoutLosingCart` adds hold generation changes. |
@@ -81,9 +81,9 @@ For repeated references below, `PaymentService` = `internal/payments/service_int
 | 5a. End-to-end merchant-to-merchant isolation | GAP → GAP | `internal/stripeprovider/provider_test.go::TestCreateCheckoutUsesScopedTestModeJPYAndStableIdempotency` checks the account header; `PaymentService` rejects a wrong-account webhook. One synthetic merchant is not a multi-merchant Connect acceptance journey. Pending P-80 Sandbox. |
 | 5b. Exact raw webhook signatures verified before durable acknowledgement | PASS → PASS | `internal/stripeprovider/provider_test.go::TestVerifyWebhookExactBytesRotationAndSafeProjection`, `internal/stripeprovider/provider_test.go::TestVerifyWebhookRejectsOldFutureLiveWrongVersionAndOversize`; `PaymentHTTP` checks signed HTTP ingress and durable inbox/work before processing. |
 | 5c. Completed-unpaid is PROCESSING; verified paid outcome is PAID | PASS → PASS | `PaymentService` processing/cutoff and paid retry assertions; `PaymentHTTP` signed verified-paid completion processing. This proves fixture state transitions, not a true external asynchronous payment. |
-| 5d. Duplicate events and out-of-order failure/expiry/paid do not duplicate or downgrade payment | PASS → PASS | `PaymentService`, `PaymentHTTP`. |
+| 5d. Duplicate events and out-of-order failure/expiry/paid do not duplicate or downgrade payment | GAP → PASS | `PaymentService` covers failure → delayed expiry → paid; `PaymentHTTP` covers duplicate signed ingress. `P84::TestP84PaidCheckoutIgnoresStaleFailureAndExpiry` adds PAID → older `payment_intent.payment_failed`, `checkout.session.async_payment_failed`, and `checkout.session.expired`, processing each after PAID. Complete attempt, original order, operational state, payment/operation history, KDS and outbox rows remain identical; each inbox event is processed and work DONE without error/lease; replay creates no new work. Source lacked this post-PAID evidence. |
 | 5e. Expired/paid/unknown distinctions and bounded same-attempt reconciliation | PASS → PASS | `PaymentService`: expiry cutoff cases preserve confirmed states; unknown cutoff stops provider retries; explicit reconciliation retrieves the same Checkout. |
-| 5f. Original submitter proof alone resumes existing Checkout; shared guest refused | PASS → PASS | `PaymentHTTP` tests absent proof, another guest, cookie/Origin/Host, expired session and lost original cookie; `PaymentService` rejects unbound proof and scoped continuation. |
+| 5f. Original submitter proof alone resumes existing Checkout; shared guest refused with HTTP 403 and no URL | FAIL → FAIL | `P84::TestP84OpenCheckoutResumeRefusesOtherBrowser` first commits and processes CREATE, confirms provider/local OPEN and unpaid, then uses a second guest's independently issued cookie. With and without that guest's bearer, actual response is **409 `payment_unavailable`, expected 403**; no URL/Location is exposed. These two subtests have conditional `t.Skip("P-84 defect: ...")` only for that exact known response. Original cookie resumes the same Checkout; missing original cookie is 403/no URL. `PaymentHTTP` only denies context issuance on closed/expired sessions, not resume of an existing OPEN Checkout after session expiry. Lost-grant recovery remains 5h; do not infer it from missing-cookie refusal. Repro below. |
 | 5g. ORDER_READ explicitly refused as CHECKOUT_RESUME authority | GAP → GAP | Protected ORDER_READ flow is absent at this source; ordinary TABLE_JOIN refusal is not this claim. Pending P-83 and P-82 continuation seams. |
 | 5h. Original lost grant recovery via staff verification | GAP → GAP | Current staff reconciliation is tested, but approved lost-grant verification/receipt recovery is not. Pending P-83/P-82; no replacement identity or checkout transfer is invented. |
 | 5i. Actual Sandbox Connect mapping, signed async payment, expiry/reconciliation journey | GAP → GAP | P-80 Sandbox #19/#20, credential/mapping and actual provider acceptance. Keyless tests cannot fill this gate. |
@@ -94,14 +94,14 @@ For repeated references below, `PaymentService` = `internal/payments/service_int
 
 | ID and sub-claim | Source → Lane A | Concrete evidence and limit |
 | --- | --- | --- |
-| 6a. HQ hold serializes with quote/order admission | PASS → PASS | `internal/ordering/company_hold_integration_test.go::TestPostgresCompanyEmergencyHoldBlocksQuoteAndCommitWithoutLosingCart`, `internal/ordering/company_hold_integration_test.go::TestPostgresCompanyHoldSerializesWithCommitInBothOrders`; `internal/catalog/company_product_hold_operations_integration_test.go::TestPostgresCompanyHoldReadFailureRejectsCommitWithoutMutation`. |
+| 6a. HQ hold serializes with quote/order admission | GAP → GAP | `internal/ordering/company_hold_integration_test.go::TestPostgresCompanyEmergencyHoldBlocksQuoteAndCommitWithoutLosingCart` proves quote refusal after an active hold and stale-consent refusal after ON/OFF. `internal/ordering/company_hold_integration_test.go::TestPostgresCompanyHoldSerializesWithCommitInBothOrders` forces both hold/commit lock orders; `internal/catalog/company_product_hold_operations_integration_test.go::TestPostgresCompanyHoldReadFailureRejectsCommitWithoutMutation` proves failure closure. None forces a simultaneous hold/quote-preview race. That concurrency portion remains GAP; the combined claim cannot be PASS. |
 | 6b. HQ hold reaches issued Checkout across create/persist races | GAP → GAP | `PaymentService` models an operational hold in provider create hooks; this does not prove complete company-HQ-to-Checkout propagation. Pending P-82 #22/#25 + C. |
-| 6c. Blocked cart line retained/removable; new consent after hold | PASS → PASS | Company-hold ordering test above; `web/src/ui/App.test.tsx::guest app mount > shows a company hold in both menu and retained cart, blocks additions and quote, and still allows removal`. |
-| 6d. Provider-confirmed expiry and bounded ambiguous expiry retries | PASS → PASS | `PaymentService`, under synthetic operational hold. Actual Stripe confirmation remains 5i. |
-| 6e. Paid under hold requires review and cannot release KDS | PASS → PASS | `PaymentService` checks PAID/review gate and late payment; `PaymentHTTP` checks paid/reception/KDS separation. Manager disposition is separately 6f. |
+| 6c. Blocked cart line retained/removable; new consent after hold | GAP → PASS | `P84::TestP84SharedOptionEditAndHeldLineRemoval` reads the retained `COMPANY_EMERGENCY_HOLD` line, removes it while the company hold is still active, and checks another guest sees the empty cart. The company-hold ordering test in 6a proves fresh consent after ON/OFF. Previously, service removal covered store PAUSED and company-hold removal was only a mocked UI assertion (`web/src/ui/App.test.tsx::guest app mount > shows a company hold in both menu and retained cart, blocks additions and quote, and still allows removal`). |
+| 6d. Provider-confirmed expiry and bounded ambiguous expiry retries | GAP → GAP | `PaymentService` covers synthetic operational-hold expiry retries, cutoff with no more provider calls, and payment completion racing expiry. Its EXPIRED case is injected via a verified webhook projection; it does not assert that an unpaid provider-confirmed `ExpireCheckout` result reaches local EXPIRED with work completed. `internal/stripeprovider/provider_test.go::TestRetrieveExpireAndPaymentIntentUseExplicitAccount` tests only the adapter. The combined worker-confirmation claim remains GAP. Actual Stripe confirmation also remains 5i. |
+| 6e. Paid under hold requires review and cannot release KDS | GAP → PASS | `P84::TestP84AcceptedPaidReviewOrderExcludedFromKDS` processes payment under a fixture operational hold, clears only that hold in the fixture, preserves REVIEW_REQUIRED on another paid event, then performs real staff acceptance with hold=false/review=true. The returned order is PAID, staff-accepted, WAITING and review-required; authorized kitchen HTTP returns no card and DB has no card, KDS_RELEASED history or outbox entry. This exercises the release path with reception satisfied and review as the remaining gate. Source tests covered review and reception in separate scenarios. HQ propagation and manager disposition remain 6b/6f. |
 | 6f. Manager approve/cancel decisions with scoped authorization | GAP → GAP | Pending P-82 #22/#25 + C; no new tests against unmerged behavior. |
 | 6g. Partial refund including failure/timeout | GAP → GAP | Pending P-82 #22/#25 + C; no synthetic REFUNDED assertion is substituted. |
-| 6h. Original order/amount/tax/payment identity immutable | PASS → PASS | Shared-cart ordering test, `internal/catalog/company_product_hold_operations_integration_test.go::TestPostgresCompanyHoldPreservesExistingCashOrderAndKDSCard`, `PaymentService` immutable-attempt/history checks. |
+| 6h. Original order/amount/tax/payment identity immutable | PASS → PASS | Shared-cart ordering test rejects committed-order UPDATE/DELETE and preserves copied price/options/tax; `internal/catalog/company_product_hold_operations_integration_test.go::TestPostgresCompanyHoldPreservesExistingCashOrderAndKDSCard` compares historical snapshots across HQ hold ON/OFF. `PaymentService` rejects attempt ID, Checkout/PaymentIntent binding and paid-state downgrade mutations. `P84::TestP84PaidCheckoutIgnoresStaleFailureAndExpiry` also compares complete order/attempt/history rows across stale negative events. These assertions do not qualify a refund ledger or manager review history (6i GAP). |
 | 6i. Refund ledger and review/cancellation history invariant | GAP → GAP | Pending P-82; current original-order immutability does not qualify the unmerged ledger/refund lifecycle. |
 
 ## 7. Guest synchronization, private receipts and mobile access
@@ -132,7 +132,7 @@ For repeated references below, `PaymentService` = `internal/payments/service_int
 | 8f. Missed event recovers authoritative state | GAP → PASS | `P84::TestP84RestartOutboxRetryAndMissedEventResync`: after notification acknowledgment, a fresh authorized kitchen HTTP list still returns exactly one card. Payment reconciliation of same Checkout is separately covered by `PaymentService`; no websocket or automatic event-stream reconnect claim. |
 | 8g. Basic PIN/join rate bounds | PASS → PASS | Session acceptance PIN lockout and persistent table grant-cap subtests cited in 3b. |
 | 8h. Payment/API perimeter abuse and operational rate policy | GAP → GAP | No acceptance test for broad payment/staff/API throttling or approved pilot thresholds; request-size bounds and PIN limits alone do not establish this. Owning follow-up must select limits and test burst behavior without new infrastructure in this lane. |
-| 8i. Secret-free public DTOs and safe provider/network errors | PASS → PASS | `internal/httpapi/payments_test.go::TestPaymentStatusProjectionContainsNoProviderURLOrIdentifiers`; `PaymentHTTP` response privacy checks; `internal/httpapi/ordering_integration_test.go::TestOrderingGuestHTTP`; `internal/stripeprovider/provider_test.go::TestCreateCheckoutRejectsBadScopeAndNeverRetriesAmbiguousResult`; `web/src/shared/http.test.ts::shared HTTP core > does not expose the URL in network failure messages`. |
+| 8i. Secret-free public DTOs and safe provider/network errors | GAP → PASS | `internal/httpapi/payments_test.go::TestPaymentStatusProjectionContainsNoProviderURLOrIdentifiers` asserts an explicit forbidden-field list; `PaymentHTTP` checks real populated fixture responses; `internal/httpapi/ordering_integration_test.go::TestOrderingGuestHTTP` checks quote/list privacy. `internal/stripeprovider/p84_acceptance_test.go::TestP84ReturnedProviderErrorRedactsSyntheticSecrets` inspects the **actual returned error**, including wrapper text, for synthetic API-key, webhook-secret, Checkout-URL and private-detail markers supplied through HTTP 500 and transport errors; one provider request and no returned URL. Source only inspected `ErrOutcomeUnknown.Error()` and lacked this evidence. `web/src/shared/http.test.ts::shared HTTP core > does not expose the URL in network failure messages` separately asserts the fixed client error message. This finite set of projections/error paths does not qualify logs or every possible provider failure (8j). |
 | 8j. Runtime logs do not leak credentials, browser proof or private checkout data | GAP → GAP | No log-capture acceptance test found. SDK logging is disabled in provider construction, but configuration/source inspection is not executable log evidence. Follow-up should capture one provider error and webhook/retry lifecycle with synthetic secret markers. |
 | 8k. Untrusted menu category/product/description rendered as text | GAP → PASS | `web/src/ui/App.p84.test.tsx::P84 renders untrusted menu category, product and description as literal text`: mounts real App with script/img/svg payloads; asserts literal text and absence of injected elements/event attributes. This is a DOM-structure test, not reliance on jsdom executing attacks or a full security audit. |
 | 8l. Checkout mutation CSRF basics: exact Origin/Host and independent proof | PASS → PASS | `internal/httpapi/payments_test.go::TestPaymentsHTTPOriginMustMatchExactConfiguredOrigin`, `internal/httpapi/payments_test.go::TestPaymentsHTTPOriginMustMatchRequestHost`, `internal/httpapi/payments_test.go::TestPaymentsAPIGuestMutationsRequireOriginAndProof`; `PaymentHTTP` checks foreign Origin/Host and HttpOnly/SameSite fixture cookie. HTTPS Secure-cookie behavior remains production configuration. |
@@ -141,16 +141,41 @@ For repeated references below, `PaymentService` = `internal/payments/service_int
 
 ## New tests and defects
 
-Six new PostgreSQL test functions, all in `internal/httpapi/p84_acceptance_integration_test.go`, reuse `testguest`, `testoperations` and the existing keyless `newPaymentHTTPFixture`:
+Ten new PostgreSQL test functions in `internal/httpapi/p84_acceptance_integration_test.go` reuse the existing fixtures:
 
-- `TestP84ThreeTenantsTwoStoresHTTPIsolation` — rows 1a/1d, reinforces 1c.
-- `TestP84ThreeGuestsStripeCashCommitRace` — row 2c, reinforces 2a/2f.
-- `TestP84SameQRNextPartyPrivacy` — row 3e across all three QR modes.
-- `TestP84RestartOutboxRetryAndMissedEventResync` — rows 8a/8f, reinforces 4d.
-- `TestP84LateStripeCommitFailureRollsBackAllSideEffects` — rows 8a/8b.
-- `TestP84FailedStripeOrderDoesNotBlockNextCashGeneration` — row 8e.
+- `TestP84ThreeTenantsTwoStoresHTTPIsolation` — 1a/1d, reinforces 1c.
+- `TestP84ThreeGuestsStripeCashCommitRace` — 2c, reinforces 2a/2f; grant distinctness now checks every pair.
+- `TestP84SameQRNextPartyPrivacy` — 3e across all three QR modes.
+- `TestP84RestartOutboxRetryAndMissedEventResync` — 8a/8f, reinforces 4d.
+- `TestP84LateStripeCommitFailureRollsBackAllSideEffects` — 8a/8b.
+- `TestP84FailedStripeOrderDoesNotBlockNextCashGeneration` — 8e.
+- `TestP84OpenCheckoutResumeRefusesOtherBrowser` — 5f FAIL; original-cookie and missing-cookie controls pass, two known-defect subtests skip.
+- `TestP84PaidCheckoutIgnoresStaleFailureAndExpiry` — 5d.
+- `TestP84AcceptedPaidReviewOrderExcludedFromKDS` — 6e.
+- `TestP84SharedOptionEditAndHeldLineRemoval` — 2b/6c.
 
-One new Vitest file, `web/src/ui/App.p84.test.tsx`, fills row 8k. No existing test files were edited. No real merged-behavior defect was observed, no issue was filed, and **no `t.Skip("P-84 defect: ...")` was added**. New Go tests only skip when the required test DB environment is absent; that skip is not acceptance. An injected failure is expected test input, not a product defect. For any future FAIL, record test name, exact failure, source SHA and minimal repro here, open a minimal actionable issue, and use the required defect skip only if needed to keep CI viable; do not repair production in this lane.
+One new provider test file, `internal/stripeprovider/p84_acceptance_test.go`, contains `TestP84ReturnedProviderErrorRedactsSyntheticSecrets` (8i). The existing lane-created Vitest file `web/src/ui/App.p84.test.tsx` covers 8k. No pre-lane test files or production code were edited.
+
+**Observed defect (5f):** production remains identical to main `46b2391d36a33b8a7298a81f9792bf15fdf7001c`. Initial strict run on the revised tests failed both `shared_guest_own_cookie` and `shared_guest_cookie_only`: `HTTP 409 want 403: {"error":"payment_unavailable"}`. Minimal repro: join one DIRECT_SCAN session in browser A and B; issue independent checkout-context cookies; A commits STRIPE; process CREATE and confirm OPEN/unpaid with a URL; POST `/v1/guest/sessions/{session}/orders/{order}/checkout/resume` using B's cookie. Expected 403/no URL; observed 409/no URL. `internal/payments/merchant_resume.go::resume` denies the proof, but `internal/httpapi/payments.go::writePaymentError` maps `payments.ErrProofDenied` to 409. This is a denial-status contract defect; no unauthorized URL was observed. No production repair or external issue publication is part of this revision.
+
+Only the two affected subtests conditionally call `t.Skip("P-84 defect: another guest's cookie against an OPEN Checkout returns HTTP 409 payment_unavailable; require HTTP 403 (matrix 5f)")`. They first reject URL/Location leakage; any other unexpected response fails normally. After the status mapping is repaired elsewhere, 403 automatically executes the strict assertion. A green Go suite with these skips does **not** turn 5f PASS. Environment-only DB skips also never establish acceptance; all integration fixtures were exercised with the required DB URL. Injected rollback failures are expected test input, not product defects.
+
+## Strict PASS re-audit
+
+All earlier PASS entries were checked against executable assertions, including fixtures and ordering of events. The current PASS scope is enumerated here; source code, schema constraints, separate scenarios or test names alone do not extend it:
+
+| PASS IDs | Asserted boundary retained after re-audit |
+| --- | --- |
+| 1a–1e | Six real store targets in one schema, scoped positive/403 requests and denied-write audit count; published/detached price assertions; all 50 linked hold projections, detached/foreign controls. Fixture identities only. |
+| 2a–2f | One seating/three distinct grants; persisted cross-guest option and quantity edit/removal/replay; six simultaneous method races and durable row counts; rejected order mutation and stale consent; third-guest empty next generation. Physical phones and mounted propagation are separate gaps. |
+| 3a/3b/3d/3e | Mode snapshots, persisted lockout/reset/cap, paid-but-unreceived exclusion plus reception release, and actual closed/reopened QR identities with protected reads denied. Fixed-QR presence remains 3c GAP. |
+| 4a–4f | Snapshot cash modes, settlement races/replay/late sets, mixed-method due, exact eligible card counts/retry, explicit READY close denial in the operations HTTP test, paid/served/hold close gates and close/commit races. Stripe PAID setup in the cash-only test is fixture data. |
+| 5b–5e | Exact-byte signature tampering rejection/durable ingress, unpaid-completed vs paid projections, both negative-before-paid and stale-negative-after-paid sequences, cutoff preserving confirmed states and same-Checkout reconciliation. 5f is FAIL; protected capabilities and actual Sandbox remain gaps. |
+| 6c/6e/6h | Active company-hold line removal plus stale-consent rejection; paid/reception/review KDS exclusion in one release-path scenario; historical order/quote/tax preservation, rejected order writes and immutable attempt/Checkout/PaymentIntent binding or paid downgrade. 6a and 6d are now GAP for unexercised portions. |
+| 7c/7d | Mocked mounted-App periodic menu/payment reads while hidden, terminal polling, stale selected-order/resume results; reducer rejects older generation/version. This does not measure shared-cart propagation or receipts. |
+| 8a–8g/8i/8k/8l | Same-schema service/worker recreation, failed notification and expired lease, late rollback with eight empty side-effect tables, migration cycle, replay/failed-order independence, fresh KDS read, persistent PIN/grant limits, specific public projections and actual returned errors, DOM text rendering, exact checkout Origin/Host/proof checks. Log/perimeter/deployment/restore evidence remains GAP. |
+
+Besides the four review findings, this revision fills the missing shared-option edit and active-company-hold removal assertions (2b/6c), marks the untested simultaneous quote/hold and worker-confirmed expiry portions GAP (6a/6d), narrows expired-session/lost-cookie wording in 5f, and corrects both source and candidate counts. No external chat or review URL is acceptance evidence.
 
 ## Pending on open PRs
 
@@ -180,13 +205,14 @@ Run from the repository root against the supplied disposable loopback PostgreSQL
 ```sh
 export TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable'
 export PATH="$HOME/.local/share/fnm/node-versions/v24.15.0/installation/bin:$PATH"
-gofmt -w internal/httpapi/p84_acceptance_integration_test.go
+gofmt -w internal/httpapi/p84_acceptance_integration_test.go internal/stripeprovider/p84_acceptance_test.go
 go test -race -count=1 ./...
 make fmt-check vet build migration-smoke
 pnpm --dir web install --frozen-lockfile --store-dir /private/tmp/tojima-p84-pnpm-store
 pnpm --dir web check
 pnpm --dir web build
-rm -rf .pnpm-store web/.pnpm-store
+# Focused defect receipt (two explicit P-84 skips, never acceptance PASS):
+# go test -race -count=1 -v ./internal/httpapi -run '^TestP84OpenCheckoutResumeRefusesOtherBrowser$'
 # Optional focused recovery drill (already exercised by ./... above):
 # go test -race -count=1 ./internal/httpapi -run '^TestP84(RestartOutboxRetryAndMissedEventResync|LateStripeCommitFailureRollsBackAllSideEffects)$'
 # Optional migration up/down/reapply drill (also included in ./...):
@@ -195,16 +221,16 @@ rm -rf .pnpm-store web/.pnpm-store
 
 Integration helpers create random schemas, apply all paired PostgreSQL migrations transactionally, and drop only their owned schema on normal cleanup. Operational recovery here means re-create the service/worker over **the same schema**, retry durable work with the same provider identity, and reload authorized KDS state after missed notifications. No payment method conversion, table generation rewind or new provider key is a recovery action. Test-trigger failure injection stays inside the owned schema and is removed before retry; teardown removes it even if the test aborts. Crash residue should be identified by exact owned schema before any manual teardown; never reset a shared database or execute destructive down migrations against payment history.
 
-Local validation receipt: PostgreSQL race suite PASS with the required DB URL (no integration skip accepted); `make fmt-check vet build migration-smoke` PASS; pinned frozen pnpm install PASS; web check PASS (10 files, 120 tests including the new XSS case); web production build PASS. The final handoff names the containing commit SHA. No push, PR, deployment or migration mutation is part of lane A.
+Local validation receipt: PostgreSQL race suite exits 0 with the required DB URL; the focused verbose receipt records exactly two known-defect subtest skips for 5f, which remains FAIL (no missing-DB skip accepted); `make fmt-check vet build migration-smoke` exits 0 (Go build emitted a non-fatal module stat-cache write permission warning in this sandbox); pinned frozen pnpm install PASS; web check PASS (10 files, 120 tests including the new XSS case); web production build PASS. The final handoff names the containing commit SHA. No push, PR, deployment or migration mutation is part of lane A.
 
 ## 日本語サマリー
 
-基準は `46b2391`。8行を61項目に分け、Lane Aは **PASS 43 / FAIL 0 / GAP 18**。既存テストを再利用し、3テナント×2店舗の認可、鍵なしSTRIPE/CASH同時確定、3方式の同じQRで次の客への履歴遮断、サービス再生成後のoutbox/期限切れlease復旧、決済処理後段のtransaction rollback、決済失敗後の別世代CASH注文、メニュー文字列XSSを追加した。9件のcoverage GAPを解消した。
+基準は `46b2391`。8行を61項目に分け、Lane Aは **PASS 40 / FAIL 1 / GAP 20**。既存テストを再利用し、3テナント×2店舗の認可、鍵なしSTRIPE/CASH同時確定、3方式の同じQRで次の客への履歴遮断、サービス再生成後のoutbox/期限切れlease復旧、決済処理後段のtransaction rollback、決済失敗後の別世代CASH注文、メニュー文字列XSSを追加した。根拠を再監査し、基準側はPASS 26 / FAIL 1 / GAP 34に訂正、14件のcoverage GAPを解消した。
 
-本番コード・既存テスト・migrationは変更しない。実不具合とdefect skipはゼロ。P-80 Sandbox #19/#20、P-82 #22/#25 + C、P-83 #21/#24は未統合内容として扱い、実Stripe・返金・ORDER_READ・モバイル/アクセシビリティ・運用判断はPASSにしない。現行statusは20秒で、要求の30秒との整合はP-83で確認する。上記単一コマンド列で再現し、Oracle/Ego-lite独立審査・実IdP・pilot・本番復旧は別gate。
+本番コード・既存テスト・migrationは変更しない。別ゲストのcookieでOPEN Checkoutを再開すると要求403に対し409となる不具合を記録した（URL漏洩なし）。5fはFAIL、該当2 subtestのみdefect skip。6aのquote競合と6dのworker経由のexpiry確認はGAP。P-80 Sandbox #19/#20、P-82 #22/#25 + C、P-83 #21/#24は未統合内容として扱い、実Stripe・返金・ORDER_READ・モバイル/アクセシビリティ・運用判断はPASSにしない。現行statusは20秒で、要求の30秒との整合はP-83で確認する。上記単一コマンド列で再現し、Oracle/Ego-lite独立審査・実IdP・pilot・本番復旧は別gate。
 
 ## 繁體中文摘要
 
-來源為 `46b2391`，8列拆成61項，Lane A為 **PASS 43 / FAIL 0 / GAP 18**。重用既有測試，新增3租戶×2分店隔離、無金鑰STRIPE/CASH競爭、三種QR模式換桌次的隱私、重建服務後outbox與逾期lease復原、付款資料寫入後段的交易rollback、付款失敗後新世代CASH訂單，以及菜單文字XSS檢查，共補足9項測試證據。
+來源為 `46b2391`，8列拆成61項，Lane A為 **PASS 40 / FAIL 1 / GAP 20**。重用既有測試，新增3租戶×2分店隔離、無金鑰STRIPE/CASH競爭、三種QR模式換桌次的隱私、重建服務後outbox與逾期lease復原、付款資料寫入後段的交易rollback、付款失敗後新世代CASH訂單，以及菜單文字XSS檢查，嚴格重審後來源側修正為PASS 26 / FAIL 1 / GAP 34，共補足14項測試證據。
 
-未更動正式程式、既有測試或migration；沒有發現真實缺陷，也沒有新增defect skip。P-80 Sandbox #19/#20、P-82 #22/#25 + C、P-83 #21/#24仍須以整合後SHA重驗。實際Stripe、退款、ORDER_READ、無障礙、手機瀏覽器與pilot風險不能由本次測試自動通過；現行status為20秒，與要求30秒的差異交P-83確認。復原命令與migration循環見上方唯一命令清單；Oracle/Ego-lite獨立審查、真實IdP與正式備援復原仍是獨立gate。
+未更動正式程式、既有測試或migration；發現其他客人的cookie對OPEN Checkout回傳409，與要求403不符（無URL洩漏），5f列為FAIL，僅兩個受影響subtest有defect skip。6a的quote競爭與6d經worker確認expiry的部分改列GAP。P-80 Sandbox #19/#20、P-82 #22/#25 + C、P-83 #21/#24仍須以整合後SHA重驗。實際Stripe、退款、ORDER_READ、無障礙、手機瀏覽器與pilot風險不能由本次測試自動通過；現行status為20秒，與要求30秒的差異交P-83確認。復原命令與migration循環見上方唯一命令清單；Oracle/Ego-lite獨立審查、真實IdP與正式備援復原仍是獨立gate。

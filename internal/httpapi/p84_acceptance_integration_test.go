@@ -168,8 +168,10 @@ func TestP84ThreeGuestsStripeCashCommitRace(t *testing.T) {
 			t.Fatal(err)
 		}
 		grants[i] = g
-		if i > 0 && (g.Session.ID != grants[0].Session.ID || g.Token == grants[i-1].Token) {
-			t.Fatal("three phones did not join one seating with distinct grants")
+		for j := 0; j < i; j++ {
+			if g.Session.ID != grants[j].Session.ID || g.Token == grants[j].Token {
+				t.Fatal("three phones did not join one seating with distinct grants")
+			}
 		}
 	}
 	// Repeated independent generations exercise scheduling without asserting
@@ -503,5 +505,279 @@ func TestP84FailedStripeOrderDoesNotBlockNextCashGeneration(t *testing.T) {
 	var methods, attempts int
 	if err = f.Pool.QueryRow(ctx, `SELECT (SELECT count(DISTINCT payment_method) FROM table_orders WHERE session_id=$1), (SELECT count(*) FROM stripe_payment_attempts WHERE session_id=$1)`, grant.Session.ID).Scan(&methods, &attempts); err != nil || methods != 2 || attempts != 1 {
 		t.Fatalf("failure converted payment or duplicated attempt: methods=%d attempts=%d err=%v", methods, attempts, err)
+	}
+}
+
+// Establish a real OPEN attempt through the ordinary browser-proof/commit
+// boundary. Negative resume assertions must run after CREATE, not while pending.
+func p84OpenStripeCheckout(t *testing.T, h *paymentHTTPFixture) (tablesession.Grant, string, *http.Cookie, stripeprovider.CheckoutResult) {
+	t.Helper()
+	ctx := context.Background()
+	f := h.fixture
+	grant, err := f.Sessions.DirectJoin(ctx, f.Locator, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/guest/sessions/" + grant.Session.ID
+	cart, preview := p84TeaPreview(t, ctx, f, grant, "p84-open-line")
+	proof := h.request(t, http.MethodPost, base+"/checkout-context", "", grant.Token, nil, paymentHTTPOrigin, "")
+	decodePaymentHTTP(t, proof, http.StatusNoContent, nil)
+	cookies := proof.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("browser proof cookies=%d want 1", len(cookies))
+	}
+	body := fmt.Sprintf(`{"expected_generation":%d,"expected_version":%d,"preview_fingerprint":%q,"payment_method":"STRIPE"}`, cart.Generation, cart.Version, preview.Fingerprint)
+	committed := h.requestWithKey(t, http.MethodPost, base+"/cart/commit", body, grant.Token, cookies[0], paymentHTTPOrigin, "", "p84-open-order")
+	var dto struct {
+		Order struct {
+			ID string `json:"order_id"`
+		} `json:"order"`
+	}
+	decodePaymentHTTP(t, committed, http.StatusOK, &dto)
+	if dto.Order.ID == "" {
+		t.Fatal("missing committed order")
+	}
+	if worked, err := h.service.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("CREATE: worked=%v err=%v", worked, err)
+	}
+	var id, state string
+	if err = f.Pool.QueryRow(ctx, `SELECT checkout_session_id,state FROM stripe_payment_attempts WHERE order_id=$1`, dto.Order.ID).Scan(&id, &state); err != nil || state != string(payments.StateOpen) {
+		t.Fatalf("attempt not OPEN: state=%s err=%v", state, err)
+	}
+	checkout, err := h.provider.RetrieveCheckout(ctx, h.account, id)
+	if err != nil || checkout.Status != stripeprovider.CheckoutOpen || checkout.PaymentStatus != stripeprovider.PaymentUnpaid || checkout.URL == "" {
+		t.Fatalf("provider Checkout not open/unpaid/resumable: %+v err=%v", checkout, err)
+	}
+	return grant, dto.Order.ID, cookies[0], checkout
+}
+
+func TestP84OpenCheckoutResumeRefusesOtherBrowser(t *testing.T) {
+	h := newPaymentHTTPFixture(t)
+	first, orderID, cookie, checkout := p84OpenStripeCheckout(t, h)
+	second, err := h.fixture.Sessions.DirectJoin(context.Background(), h.fixture.Locator, first.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/v1/guest/sessions/" + first.Session.ID
+	proof := h.request(t, http.MethodPost, base+"/checkout-context", "", second.Token, nil, paymentHTTPOrigin, "")
+	decodePaymentHTTP(t, proof, http.StatusNoContent, nil)
+	cookies := proof.Result().Cookies()
+	if len(cookies) != 1 || cookies[0].Value == cookie.Value {
+		t.Fatal("second browser did not receive independent proof")
+	}
+	path := base + "/orders/" + orderID + "/checkout/resume"
+	for _, tc := range []struct {
+		name   string
+		cookie *http.Cookie
+		token  string
+	}{{"shared guest own cookie", cookies[0], second.Token}, {"shared guest cookie only", cookies[0], ""}, {"original guest missing cookie", nil, first.Token}} {
+		t.Run(tc.name, func(t *testing.T) {
+			denied := h.request(t, http.MethodPost, path, "", tc.token, tc.cookie, paymentHTTPOrigin, "")
+			if denied.Header().Get("Location") != "" || strings.Contains(denied.Body.String(), "url") || strings.Contains(denied.Body.String(), "https://") {
+				t.Fatalf("resume denial exposed URL: headers=%v body=%s", denied.Header(), denied.Body.String())
+			}
+			if tc.cookie != nil && denied.Code == http.StatusConflict && strings.TrimSpace(denied.Body.String()) == `{"error":"payment_unavailable"}` {
+				t.Skip("P-84 defect: another guest's cookie against an OPEN Checkout returns HTTP 409 payment_unavailable; require HTTP 403 (matrix 5f)")
+			}
+			decodePaymentHTTP(t, denied, http.StatusForbidden, nil)
+		})
+	}
+	var resumed struct {
+		URL string `json:"url"`
+	}
+	allowed := h.request(t, http.MethodPost, path, "", "", cookie, paymentHTTPOrigin, "")
+	decodePaymentHTTP(t, allowed, http.StatusOK, &resumed)
+	if resumed.URL != checkout.URL {
+		t.Fatalf("original browser did not resume the same OPEN Checkout: %+v", resumed)
+	}
+}
+
+func p84ProcessVerifiedEvent(t *testing.T, h *paymentHTTPFixture, event stripeprovider.VerifiedEvent) {
+	t.Helper()
+	ctx := context.Background()
+	if accepted, err := h.service.EnqueueVerifiedWebhook(ctx, event); err != nil || !accepted {
+		t.Fatalf("enqueue %s: accepted=%v err=%v", event.Type, accepted, err)
+	}
+	if worked, err := h.service.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("process %s: worked=%v err=%v", event.Type, worked, err)
+	}
+	var done bool
+	if err := h.fixture.Pool.QueryRow(ctx, `SELECT e.processed_at IS NOT NULL AND e.safe_error_code IS NULL AND w.status='DONE' AND w.safe_error_code IS NULL AND w.lease_token IS NULL AND w.lease_until IS NULL
+		FROM stripe_webhook_events e JOIN stripe_payment_work w USING(webhook_row_id) WHERE e.stripe_event_id=$1`, event.ID).Scan(&done); err != nil || !done {
+		t.Fatalf("%s did not finish inbox/work cleanly: done=%v err=%v", event.Type, done, err)
+	}
+}
+
+// Compare complete durable payment/order rows and history, including timestamps
+// and versions. Inbox/work legitimately grow, and are checked separately.
+func p84PaymentSnapshot(t *testing.T, h *paymentHTTPFixture, orderID string) map[string]string {
+	t.Helper()
+	snapshot := make(map[string]string)
+	for _, table := range []string{"table_orders", "stripe_payment_attempts", "stripe_payment_attempt_events", "operation_order_state", "operation_order_events", "operation_kds_cards", "operation_outbox"} {
+		var rows string
+		if err := h.fixture.Pool.QueryRow(context.Background(), `SELECT coalesce(jsonb_agg(to_jsonb(r) ORDER BY to_jsonb(r)::text),'[]'::jsonb)::text FROM `+table+` r WHERE order_id=$1`, orderID).Scan(&rows); err != nil {
+			t.Fatal(err)
+		}
+		snapshot[table] = rows
+	}
+	return snapshot
+}
+
+func TestP84PaidCheckoutIgnoresStaleFailureAndExpiry(t *testing.T) {
+	h := newPaymentHTTPFixture(t)
+	grant, orderID, _, open := p84OpenStripeCheckout(t, h)
+	ctx := context.Background()
+	// Capture genuine pre-payment projections for delayed negative events.
+	intent, err := h.provider.RetrievePaymentIntent(ctx, h.account, open.PaymentIntentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := open
+	expired.Status, expired.URL = stripeprovider.CheckoutExpired, ""
+	failed := open
+	failed.Status, failed.URL = stripeprovider.CheckoutComplete, ""
+	paid, err := h.provider.SetOutcome(open.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	at := time.Now().UTC()
+	p84ProcessVerifiedEvent(t, h, stripeprovider.VerifiedEvent{ID: "evt_p84_paid", Type: "checkout.session.completed", AccountID: h.account.StripeAccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: at, ObjectID: paid.SessionID, Checkout: &paid})
+	scope := operations.TableScope{TenantID: h.fixture.TenantID, StoreID: h.fixture.StoreID, TableID: h.fixture.TableID}
+	status, err := h.service.ReadSafeStatus(ctx, scope, grant.Session.ID, orderID)
+	if err != nil || status.State != payments.StatePaid || status.PaymentStatus != "paid" {
+		t.Fatalf("baseline not PAID: %+v err=%v", status, err)
+	}
+	detail, err := h.fixture.Operations.ReadSession(ctx, scope, grant.Session.ID)
+	if err != nil || len(detail.Orders) != 1 || detail.Orders[0].PaymentStatus != operations.Paid {
+		t.Fatalf("baseline operation not PAID: %+v err=%v", detail, err)
+	}
+	before := p84PaymentSnapshot(t, h, orderID)
+	for _, event := range []stripeprovider.VerifiedEvent{
+		{ID: "evt_p84_stale_pi_failed", Type: "payment_intent.payment_failed", ObjectID: intent.ID, PaymentIntent: &intent},
+		{ID: "evt_p84_stale_async_failed", Type: "checkout.session.async_payment_failed", ObjectID: failed.SessionID, Checkout: &failed},
+		{ID: "evt_p84_stale_expired", Type: "checkout.session.expired", ObjectID: expired.SessionID, Checkout: &expired},
+	} {
+		t.Run(event.Type, func(t *testing.T) {
+			event.AccountID, event.APIVersion, event.CreatedAt = h.account.StripeAccountID, stripeprovider.APIVersion, at.Add(-time.Minute)
+			p84ProcessVerifiedEvent(t, h, event)
+			if after := p84PaymentSnapshot(t, h, orderID); !reflect.DeepEqual(before, after) {
+				t.Fatalf("stale %s changed paid state/history: before=%v after=%v", event.Type, before, after)
+			}
+			if accepted, err := h.service.EnqueueVerifiedWebhook(ctx, event); err != nil || accepted {
+				t.Fatalf("duplicate stale event: accepted=%v err=%v", accepted, err)
+			}
+			if worked, err := h.service.ProcessNext(ctx); err != nil || worked {
+				t.Fatalf("duplicate left extra work: worked=%v err=%v", worked, err)
+			}
+		})
+	}
+}
+
+func TestP84AcceptedPaidReviewOrderExcludedFromKDS(t *testing.T) {
+	h := newPaymentHTTPFixture(t)
+	grant, orderID, _, open := p84OpenStripeCheckout(t, h)
+	ctx := context.Background()
+	f := h.fixture
+	scope := operations.TableScope{TenantID: f.TenantID, StoreID: f.StoreID, TableID: f.TableID}
+	if _, err := f.Pool.Exec(ctx, `UPDATE operation_order_state SET operational_hold=true,version=version+1 WHERE order_id=$1`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	paid, err := h.provider.SetOutcome(open.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	event := stripeprovider.VerifiedEvent{ID: "evt_p84_review_paid", Type: "checkout.session.completed", AccountID: h.account.StripeAccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now().UTC(), ObjectID: paid.SessionID, Checkout: &paid}
+	p84ProcessVerifiedEvent(t, h, event)
+	// Fixture-only clear of the operational hold isolates the REVIEW gate.
+	// This is not manager review approval or evidence of HQ propagation.
+	if _, err = f.Pool.Exec(ctx, `UPDATE operation_order_state SET operational_hold=false,version=version+1 WHERE order_id=$1`, orderID); err != nil {
+		t.Fatal(err)
+	}
+	// A distinct paid observation must preserve the review requirement.
+	event.ID = "evt_p84_review_paid_again"
+	p84ProcessVerifiedEvent(t, h, event)
+	status, err := h.service.ReadSafeStatus(ctx, scope, grant.Session.ID, orderID)
+	if err != nil || status.State != payments.StateReviewRequired || status.PaymentStatus != "paid" || !status.PaymentReviewRequired {
+		t.Fatalf("paid review state missing: %+v err=%v", status, err)
+	}
+	detail, err := f.Operations.ReadSession(ctx, scope, grant.Session.ID)
+	if err != nil || len(detail.Orders) != 1 {
+		t.Fatalf("read review order: %+v err=%v", detail, err)
+	}
+	// Acceptance now invokes the real release path with hold=false and review=true.
+	state, err := f.Operations.AcceptOrder(ctx, operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: orderID, Actor: "p84-cashier", ExpectedVersion: detail.Orders[0].Version, IdempotencyKey: "p84-review-reception"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.RequiresStaffAcceptance || !state.StaffAccepted || state.OperationalHold || !state.PaymentReviewRequired || state.PaymentStatus != operations.Paid || state.FulfillmentStatus != operations.Waiting {
+		t.Fatalf("review is not the sole remaining release gate: %+v", state)
+	}
+	kds := h.request(t, http.MethodGet, "/v1/staff/tenants/test-tenant/stores/test-store/operations/kds", "", h.creds.Kitchen.Token, nil, "", "")
+	var dto struct {
+		Orders []operations.OrderState `json:"orders"`
+	}
+	decodePaymentHTTP(t, kds, http.StatusOK, &dto)
+	if len(dto.Orders) != 0 {
+		t.Fatalf("accepted paid review order leaked into KDS: %s", kds.Body.String())
+	}
+	var cards, releases, outbox int
+	if err = f.Pool.QueryRow(ctx, `SELECT (SELECT count(*) FROM operation_kds_cards WHERE order_id=$1), (SELECT count(*) FROM operation_order_events WHERE order_id=$1 AND event_type='KDS_RELEASED'), (SELECT count(*) FROM operation_outbox WHERE order_id=$1)`, orderID).Scan(&cards, &releases, &outbox); err != nil || cards != 0 || releases != 0 || outbox != 0 {
+		t.Fatalf("review order was released: cards=%d releases=%d outbox=%d err=%v", cards, releases, outbox, err)
+	}
+}
+
+func TestP84SharedOptionEditAndHeldLineRemoval(t *testing.T) {
+	ctx, f := p84GuestFixture(t)
+	grants := make([]tablesession.Grant, 3)
+	for i := range grants {
+		var err error
+		grants[i], err = f.Sessions.DirectJoin(ctx, f.Locator, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for j := 0; j < i; j++ {
+			if grants[i].Session.ID != grants[j].Session.ID || grants[i].Token == grants[j].Token {
+				t.Fatal("guests must have distinct grants for one OPEN session")
+			}
+		}
+	}
+	sid := grants[0].Session.ID
+	cart, err := f.Orders.Mutate(ctx, ordering.Mutation{SessionID: sid, GrantToken: grants[0].Token, ExpectedGeneration: 1, ExpectedVersion: 1,
+		IdempotencyKey: "p84-yuzu", Kind: ordering.AddLine, ProductKey: "tea", Quantity: 1, Options: []catalog.OptionSelection{{GroupKey: "aroma", OptionKey: "yuzu"}}})
+	if err != nil || len(cart.Lines) != 1 || len(cart.Lines[0].Options) != 1 || cart.Lines[0].Options[0].OptionKey != "yuzu" {
+		t.Fatalf("initial option not persisted: %+v err=%v", cart, err)
+	}
+	edit := ordering.Mutation{SessionID: sid, GrantToken: grants[1].Token, ExpectedGeneration: cart.Generation, ExpectedVersion: cart.Version,
+		IdempotencyKey: "p84-ginger", Kind: ordering.SetLine, LineID: cart.Lines[0].LineID, Quantity: 2, Options: []catalog.OptionSelection{{GroupKey: "aroma", OptionKey: "ginger"}}}
+	updated, err := f.Orders.Mutate(ctx, edit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := f.Orders.ReadCart(ctx, sid, grants[2].Token)
+	if err != nil || current.Version != cart.Version+1 || len(current.Lines) != 1 || current.Lines[0].Quantity != 2 || len(current.Lines[0].Options) != 1 || current.Lines[0].Options[0].OptionKey != "ginger" || !reflect.DeepEqual(current, updated) {
+		t.Fatalf("third guest lost shared option/quantity edit: %+v err=%v", current, err)
+	}
+	if replay, err := f.Orders.Mutate(ctx, edit); err != nil || !reflect.DeepEqual(replay, current) {
+		t.Fatalf("option replay changed cart: %+v err=%v", replay, err)
+	}
+	stale := edit
+	stale.GrantToken, stale.IdempotencyKey, stale.Quantity = grants[0].Token, "p84-stale-edit", 3
+	if _, err = f.Orders.Mutate(ctx, stale); !errors.Is(err, ordering.ErrConflict) {
+		t.Fatalf("stale shared edit accepted: %v", err)
+	}
+	if _, err = f.Menus.SetCompanyProductEmergencyHold(ctx, f.TenantID, "tea", "tenant-admin", true, "p84 safety review", 0, "p84-option-hold"); err != nil {
+		t.Fatal(err)
+	}
+	held, err := f.Orders.ReadCart(ctx, sid, grants[2].Token)
+	if err != nil || len(held.Lines) != 1 || held.Lines[0].ProductAvailable || held.Lines[0].UnavailableCode != "COMPANY_EMERGENCY_HOLD" {
+		t.Fatalf("company hold did not retain blocked line: %+v err=%v", held, err)
+	}
+	removed, err := f.Orders.Mutate(ctx, ordering.Mutation{SessionID: sid, GrantToken: grants[2].Token, ExpectedGeneration: held.Generation, ExpectedVersion: held.Version,
+		IdempotencyKey: "p84-remove-held", Kind: ordering.RemoveLine, LineID: held.Lines[0].LineID})
+	if err != nil || len(removed.Lines) != 0 || removed.Version != held.Version+1 {
+		t.Fatalf("active company hold prevented line removal: %+v err=%v", removed, err)
+	}
+	if fresh, err := f.Orders.ReadCart(ctx, sid, grants[0].Token); err != nil || !reflect.DeepEqual(fresh, removed) {
+		t.Fatalf("first guest did not observe held-line removal: %+v err=%v", fresh, err)
 	}
 }
