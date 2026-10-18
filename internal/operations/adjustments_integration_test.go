@@ -222,6 +222,14 @@ func TestPostgresC1CashLastItemClosesWithoutDeletingFacts(t *testing.T) {
 			if paid && (o.PaymentStatus != operations.Refunded || len(o.Refunds) != 1 || o.Refunds[0].AmountJPY != o.TotalGrossJPY) {
 				t.Fatalf("full cash refund=%+v", o)
 			}
+			guest, err := f.Operations.ReadGuestOperations(ctx, grant.Session.ID, grant.Token)
+			wantPayment := operations.Unpaid
+			if paid {
+				wantPayment = operations.Unknown
+			}
+			if err != nil || len(guest.Orders) != 1 || guest.Orders[0].PaymentStatus != wantPayment || guest.Orders[0].FulfillmentStatus != operations.Cancelled {
+				t.Fatalf("cancelled guest order=%+v err=%v", guest, err)
+			}
 			if err = f.Sessions.Close(ctx, grant.Session.Scope, grant.Session.ID, "cashier"); err != nil {
 				t.Fatalf("resolved cancelled session cannot close: %v", err)
 			}

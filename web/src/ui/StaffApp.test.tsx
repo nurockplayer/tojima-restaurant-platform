@@ -620,6 +620,24 @@ describe('staff operations', () => {
     expect(host?.querySelector('dialog[open]')).toBe(dialog);
   });
 
+  it.each([
+    { label: 'uses the reduced effective total', order: staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID', effective_total_gross_jpy: '710' }), due: '710', tax: '65', expected: '¥710' },
+    { label: 'falls back when no effective total is present', order: staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID' }), due: '1210', tax: '110', expected: '¥1,210' },
+  ])('$label in the cash dialog order list', async ({ order, due, tax, expected }) => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/tables/table-1/sessions/session-1/operations`) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url === `${base}/tables/table-1/sessions/session-1/cash/preview`) return json({ session_id: 'session-1', fingerprint: 'cash-snapshot-1', order_ids: ['order-1'], due_jpy: due, tax: { gross_jpy: due, net_jpy: String(Number(due) - Number(tax)), tax_jpy: tax, groups: [] } });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    await click(host!, '詳細');
+    await click(host!, '現金を精算');
+    expect(host?.textContent).toContain(`今回の現金合計 ¥${Number(due).toLocaleString('ja-JP')}`);
+    expect(host?.querySelector('.cash-order-list')?.textContent).toContain(expected);
+  });
+
   it('keeps the cash dialog open when cancel is pressed while settlement is pending', async () => {
     const settlement = deferred<Response>();
     const order = staffOrder({ payment_method: 'CASH', payment_status: 'UNPAID', fulfillment_status: 'ACCEPTED' });
