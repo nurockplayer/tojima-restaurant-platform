@@ -208,7 +208,7 @@ func (a PaymentsAPI) guestCheckoutStatus(w http.ResponseWriter, r *http.Request)
 			}
 		}
 	}
-	writePaymentStatus(w, state, resumeAvailable)
+	writePaymentStatus(w, state, resumeAvailable, false)
 }
 
 func (a PaymentsAPI) resumeCheckout(w http.ResponseWriter, r *http.Request) {
@@ -253,7 +253,7 @@ func (a PaymentsAPI) staffPaymentStatus(w http.ResponseWriter, r *http.Request) 
 		writePaymentError(w, err)
 		return
 	}
-	writePaymentStatus(w, state, false)
+	writePaymentStatus(w, state, false, true)
 }
 
 func (a PaymentsAPI) reconcilePayment(w http.ResponseWriter, r *http.Request) {
@@ -269,7 +269,7 @@ func (a PaymentsAPI) reconcilePayment(w http.ResponseWriter, r *http.Request) {
 		writePaymentError(w, err)
 		return
 	}
-	writePaymentStatus(w, state, false)
+	writePaymentStatus(w, state, false, true)
 }
 
 func (a PaymentsAPI) webhook(w http.ResponseWriter, r *http.Request) {
@@ -295,14 +295,17 @@ func operationTableScope(scope tablesession.Scope) operations.TableScope {
 	return operations.TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}
 }
 
-func writePaymentStatus(w http.ResponseWriter, state payments.Status, resumeAvailable bool) {
-	writeJSON(w, http.StatusOK, map[string]any{
+func writePaymentStatus(w http.ResponseWriter, state payments.Status, resumeAvailable, staff bool) {
+	projection := map[string]any{
 		"order_id": state.OrderID, "state": state.State,
 		"checkout_status": state.CheckoutStatus, "payment_status": state.PaymentStatus,
 		"provider_expires_at": state.ProviderExpiresAt, "last_reconciled_at": state.LastReconciledAt,
 		"payment_review_required": state.PaymentReviewRequired, "resume_available": resumeAvailable,
-		"safe_error_code": state.SafeErrorCode,
-	})
+	}
+	if staff {
+		projection["safe_error_code"] = state.SafeErrorCode
+	}
+	writeJSON(w, http.StatusOK, projection)
 }
 
 func checkEmptyPaymentRequest(w http.ResponseWriter, r *http.Request) bool {

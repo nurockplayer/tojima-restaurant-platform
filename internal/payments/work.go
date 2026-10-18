@@ -26,9 +26,12 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var item workItem
+	// Prefer fresh CREATE/webhook work, but after 30 seconds overdue let EXPIRE
+	// compete by available_at. New arrivals cannot indefinitely overtake it.
+	// Retry backoff resets available_at, so a recurring expiry gets no head start.
 	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id,attempts+1 FROM stripe_payment_work
 		WHERE (status='READY' AND available_at<=clock_timestamp()) OR (status='LEASED' AND lease_until<=clock_timestamp())
-		ORDER BY CASE WHEN work_type='EXPIRE' THEN 1 ELSE 0 END,available_at,created_at
+		ORDER BY CASE WHEN work_type='EXPIRE' AND available_at>statement_timestamp()-interval '30 seconds' THEN 1 ELSE 0 END,available_at,created_at
 		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID, &item.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil

@@ -852,3 +852,86 @@ func TestPostgresP82RetainedExpiryDoesNotStarveCreateOrWebhook(t *testing.T) {
 	h.work()
 	h.assertState(held.Order.ID, StateExpired, false, false)
 }
+
+func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
+	h := newHoldFixture(t)
+	order, proof := h.commit(h.Locator, "teishoku", ordering.Stripe)
+	var x stripeprovider.CheckoutResult
+	h.provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) { x = result })
+	h.provider.LoseNextCreateResponse()
+	h.work() // Provider created the Checkout, but CREATE has not bound it locally.
+	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp()+interval '1 hour' WHERE work_type='CREATE'`); err != nil {
+		t.Fatal(err)
+	}
+	intent, err := h.provider.RetrievePaymentIntent(h.ctx, stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: x.AccountID}, x.PaymentIntentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := h.service.EnqueueVerifiedWebhook(h.ctx, stripeprovider.VerifiedEvent{ID: "unbound-decline", Type: "payment_intent.payment_failed", AccountID: x.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now(), ObjectID: intent.ID, PaymentIntent: &intent})
+	if err != nil || !accepted {
+		t.Fatalf("decline webhook: %v %v", accepted, err)
+	}
+	h.work()
+	h.assertState(order.Order.ID, StateFailed, false, false)
+	var unbound bool
+	if err = h.Pool.QueryRow(h.ctx, `SELECT checkout_session_id IS NULL AND payment_intent_id=$2 FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, intent.ID).Scan(&unbound); err != nil || !unbound {
+		t.Fatalf("expected only PaymentIntent binding: unbound=%v err=%v", unbound, err)
+	}
+	h.hold(true, 0)
+	h.assertRetained(order.Order.ID)
+	h.hold(false, 1)
+	h.assertRetained(order.Order.ID)
+	h.ready()
+	h.work() // Same-key CREATE recovery persists the late Checkout after OFF.
+	if got := h.checkout(order.Order.ID); got.SessionID != x.SessionID {
+		t.Fatalf("late CREATE did not recover original Checkout: %+v", got)
+	}
+	if ok, err := h.service.CanResume(h.ctx, order.Order.SessionID, order.Order.ID, proof); err != nil || ok {
+		t.Fatalf("OFF restored continuation: %v %v", ok, err)
+	}
+	x, err = h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.event(x, "unbound-decline-paid-after-off", "checkout.session.async_payment_succeeded")
+	h.work()
+	h.assertState(order.Order.ID, StateReviewRequired, true, true) // Includes no KDS/outbox release.
+	if creates, sessions := h.provider.Counts(); creates != 2 || sessions != 1 {
+		t.Fatalf("same-key recovery: creates=%d sessions=%d", creates, sessions)
+	}
+}
+
+func TestPostgresP82ExpiryAgesThroughContinuouslyReplenishedQueue(t *testing.T) {
+	h := newHoldFixture(t)
+	held, _ := h.commit(h.Locator, "teishoku", ordering.Stripe)
+	h.work()
+	other, _ := h.commit(h.Locator, "tea", ordering.Stripe)
+	h.work()
+	x := h.checkout(other.Order.ID)
+	h.hold(true, 0)
+	// Advance eligibility age without sleeping. Before every lease, replenish
+	// BOTH competing queues; EXPIRE must progress while both still have work.
+	for i, age := range []time.Duration{0, 10 * time.Second, 20 * time.Second, 31 * time.Second} {
+		h.commit(h.Locator, "tea", ordering.Stripe)
+		h.event(x, fmt.Sprintf("replenished-%d", i), "checkout.session.completed")
+		if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp()-$2::interval WHERE order_id=$1 AND work_type='EXPIRE'`, held.Order.ID, age.String()); err != nil {
+			t.Fatal(err)
+		}
+		var creates, webhooks int
+		if err := h.Pool.QueryRow(h.ctx, `SELECT count(*) FILTER(WHERE work_type='CREATE'),count(*) FILTER(WHERE work_type='WEBHOOK') FROM stripe_payment_work WHERE status='READY' AND available_at<=clock_timestamp()`).Scan(&creates, &webhooks); err != nil || creates == 0 || webhooks == 0 {
+			t.Fatalf("missing competing backlog: create=%d webhook=%d err=%v", creates, webhooks, err)
+		}
+		h.work()
+		var attempts int
+		if err := h.Pool.QueryRow(h.ctx, `SELECT attempts FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, held.Order.ID).Scan(&attempts); err != nil {
+			t.Fatal(err)
+		}
+		if age < 30*time.Second && attempts != 0 {
+			t.Fatalf("fresh expiry displaced CREATE/webhook: attempts=%d age=%s", attempts, age)
+		}
+		if age > 30*time.Second && attempts != 1 {
+			t.Fatalf("aged expiry starved behind replenished queue: attempts=%d age=%s", attempts, age)
+		}
+	}
+	h.assertState(held.Order.ID, StateExpired, false, false)
+}
