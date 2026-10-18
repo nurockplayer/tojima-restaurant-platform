@@ -89,6 +89,8 @@ orders. No real cash or Stripe charge is performed. The test adapter qualifies
 only the local flow, not production MOD-08 identity. See the
 [P-79 boundary](docs/p79-test-scope.md) for receipt and acceptance details.
 
+For a temporary, attended P-85 walkthrough, see the [remote demo guide](docs/remote-demo.md).
+
 日本語：P-75〜P-79は統合・受入済み。P-80は鍵なしの決済境界を追加する。実Stripe Test Mode・IdP・本番hostingの受入は別であり、既存Flutter/Firebase原価アプリを変更しない。
 
 繁中：P-75至P-79已驗收，P-80加入無金鑰的交易邊界。真實Stripe Test Mode、正式IdP與託管仍有獨立gate；測試成功不代表上線。每包回報確切SHA、CI、獨立審查、rollback與剩餘阻礙。

@@ -1,7 +1,13 @@
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
+  // Remote demos must use the gated same-origin proxy, regardless of shell or .env overrides.
+  ...(mode === 'remote-demo' ? {
+    envDir: false,
+    envPrefix: [],
+    define: { 'import.meta.env.VITE_API_BASE_URL': JSON.stringify('') },
+  } : {}),
   plugins: [react()],
   server: {
     host: '127.0.0.1',
@@ -11,4 +17,4 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.{ts,tsx}'],
   },
-});
+}));
