@@ -901,6 +901,101 @@ func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
 	}
 }
 
+func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
+	for _, outcome := range []string{"complete-unpaid-then-paid", "still-open"} {
+		t.Run(outcome, func(t *testing.T) {
+			h := newHoldFixtureWithRetryWindow(t, 2*time.Second)
+			order, proof := h.commit(h.Locator, "teishoku", ordering.Stripe)
+			var x stripeprovider.CheckoutResult
+			h.provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) { x = result })
+			h.provider.LoseNextCreateResponse()
+			h.work()
+			if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp()+interval '1 hour' WHERE work_type='CREATE'`); err != nil {
+				t.Fatal(err)
+			}
+			intent, err := h.provider.RetrievePaymentIntent(h.ctx, stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: x.AccountID}, x.PaymentIntentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := h.service.EnqueueVerifiedWebhook(h.ctx, stripeprovider.VerifiedEvent{ID: "decline-before-binding", Type: "payment_intent.payment_failed", AccountID: x.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now(), ObjectID: intent.ID, PaymentIntent: &intent})
+			if err != nil || !accepted {
+				t.Fatalf("decline webhook: %v %v", accepted, err)
+			}
+			h.work()
+			h.assertState(order.Order.ID, StateFailed, false, false)
+			var unbound bool
+			var deadline time.Time
+			if err = h.Pool.QueryRow(h.ctx, `SELECT checkout_session_id IS NULL AND payment_intent_id=$2,retry_not_after FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, intent.ID).Scan(&unbound, &deadline); err != nil || !unbound {
+				t.Fatalf("failed before binding: unbound=%v err=%v", unbound, err)
+			}
+			h.hold(true, 0)
+			h.hold(false, 1)
+			h.assertRetained(order.Order.ID)
+			if delay := time.Until(deadline) + 50*time.Millisecond; delay > 0 {
+				time.Sleep(delay)
+			}
+			h.ready()
+			h.work() // CREATE exhausts its immutable deadline without another call.
+			var status, code string
+			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "DONE" || code != "RETRY_WINDOW_ELAPSED" {
+				t.Fatalf("CREATE cutoff: %s %s %v", status, code, err)
+			}
+			h.work() // Retained EXPIRE still waits for the missing Checkout ID.
+			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "READY" || code != "HOLD_RECONCILIATION_NEEDED" {
+				t.Fatalf("retained expiry: %s %s %v", status, code, err)
+			}
+			if outcome == "complete-unpaid-then-paid" {
+				x, err = h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentUnpaid)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.event(x, "late-unpaid-binding", "checkout.session.completed")
+			h.work()
+			h.assertState(order.Order.ID, StateFailed, false, false) // Binding must not resurrect FAILED.
+			var bound, processed bool
+			if err = h.Pool.QueryRow(h.ctx, `SELECT coalesce(checkout_session_id=$2 AND payment_intent_id=$3 AND checkout_status=$4,false),
+				(SELECT processed_at IS NOT NULL FROM stripe_webhook_events WHERE stripe_event_id='late-unpaid-binding')
+				FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, x.SessionID, intent.ID, string(x.Status)).Scan(&bound, &processed); err != nil || !bound || !processed {
+				t.Fatalf("late webhook binding: bound=%v processed=%v err=%v", bound, processed, err)
+			}
+			r0, e0 := h.provider.CheckoutOperationCounts()
+			h.ready()
+			h.work()
+			r1, e1 := h.provider.CheckoutOperationCounts()
+			if outcome == "complete-unpaid-then-paid" {
+				if r1-r0 != 1 || e1-e0 != 0 {
+					t.Fatalf("complete/unpaid must retrieve without expire: retrieve=%d expire=%d", r1-r0, e1-e0)
+				}
+				h.assertRetained(order.Order.ID)
+				if _, err = h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid); err != nil {
+					t.Fatal(err)
+				}
+				h.ready()
+				h.work() // Retrieve the eventual payment; no new external webhook.
+				h.work() // Apply the verified paid reconciliation through existing rules.
+				h.assertState(order.Order.ID, StateReviewRequired, true, true)
+			} else {
+				if r1-r0 != 1 || e1-e0 != 1 {
+					t.Fatalf("open Checkout must retrieve then expire: retrieve=%d expire=%d", r1-r0, e1-e0)
+				}
+				h.assertState(order.Order.ID, StateExpired, false, false)
+			}
+			var done, retained bool
+			if err = h.Pool.QueryRow(h.ctx, `SELECT w.status='DONE',a.company_hold_expire_requested_at IS NOT NULL AND a.continuation_revoked_at IS NOT NULL
+				FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='EXPIRE'`, order.Order.ID).Scan(&done, &retained); err != nil || !done || !retained {
+				t.Fatalf("recovery: done=%v retained=%v err=%v", done, retained, err)
+			}
+			if ok, err := h.service.CanResume(h.ctx, order.Order.SessionID, order.Order.ID, proof); err != nil || ok {
+				t.Fatalf("late binding restored continuation: %v %v", ok, err)
+			}
+			if creates, sessions := h.provider.Counts(); creates != 1 || sessions != 1 {
+				t.Fatalf("recovery created another Checkout: %d/%d", creates, sessions)
+			}
+		})
+	}
+}
+
 func TestPostgresP82ExpiryAgesThroughContinuouslyReplenishedQueue(t *testing.T) {
 	h := newHoldFixture(t)
 	held, _ := h.commit(h.Locator, "teishoku", ordering.Stripe)

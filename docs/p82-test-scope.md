@@ -63,6 +63,13 @@ threshold (eligibility timestamps advance without sleeps). HTTP route tests veri
 that guest status omits internal codes while staff status and reconciliation
 retain them.
 
+Late verified Checkout webhooks persist a missing binding even for terminal
+attempts, preserving their state and existing correlation checks. Regressions
+cover lost CREATE response → payment_failed before binding → ON → OFF → CREATE
+deadline → delayed completed/unpaid webhook: FAILED remains unchanged at binding,
+then retained EXPIRE retrieves complete/unpaid through eventual paid/review, or
+retrieves and expires a still-open Checkout, without creating another session.
+
 ```sh
 TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
   go test -race -count=1 ./internal/... ./migrations/postgres
@@ -94,6 +101,10 @@ safe_error_code に HOLD_RECONCILIATION_NEEDED を返す。期限後の復旧、
 CREATE／webhook と同順位の時刻順で処理し、継続投入されるキューでも進むことを検証する。
 再試行の待機で経過時間をリセットする。ゲスト応答から safe_error_code を完全に除き、
 職員向け状態照会・照合では保持することを HTTP 経由で検証する。
+遅延した検証済み webhook は、終端状態を変えずに未紐付けの Checkout ID を保存する。
+CREATE 応答喪失 → 紐付け前の決済失敗 → ON → OFF → CREATE 期限経過 → 遅延した
+completed／未払い webhook を検証する。保持した EXPIRE が取得を再開し、完了・未払いから
+支払成功・要確認へ照合する場合と、まだ開いている Checkout を失効する場合を確認する。
 
 繁體中文：P-82 A 實作本部停售後未付款 Stripe Checkout 的失效及結果核對，僅涵蓋
 同租戶 LINKED 分店與訂單快照內的指定商品。建立中、回應不明及解除停售後仍保留
@@ -112,3 +123,7 @@ HOLD_RECONCILIATION_NEEDED。另驗證期限後恢復、不重建 Checkout，以
 不放行 KDS。EXPIRE 超過 available_at 30 秒後與 CREATE／webhook 同優先級，依時間排序；
 持續補入佇列的測試驗證其仍能前進，重試退避會重設等待時間。HTTP 測試確認訪客回應完全不含
 safe_error_code，員工狀態及核對回應則保留該欄位。
+延遲的已驗證 webhook 會保存尚未綁定的 Checkout ID，且不改變終態。回歸涵蓋
+CREATE 回應遺失 → 綁定前付款失敗 → ON → OFF → CREATE 期限已過 → 延遲的
+completed／未付款 webhook；保留的 EXPIRE 恢復取得，核對完成未付款後的付款成功與
+待覆核結果，或讓仍開放的 Checkout 失效，全程不建立新 Checkout。

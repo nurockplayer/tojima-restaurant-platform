@@ -541,6 +541,14 @@ func (s *Service) processWebhook(ctx context.Context, w workItem) error {
 		if err != nil {
 			return err
 		}
+	} else if existingCheckout == "" && e.checkout != "" {
+		// A terminal state must not discard a validated late binding. Retained
+		// EXPIRE work needs this ID to retrieve the outcome after CREATE stops.
+		// Save only the binding and Checkout status; preserve payment/state rules.
+		_, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET checkout_session_id=$2,payment_intent_id=coalesce(payment_intent_id,NULLIF($3,'')),checkout_status=coalesce(NULLIF($4,''),checkout_status),last_reconciled_at=clock_timestamp(),updated_at=clock_timestamp() WHERE order_id=$1`, e.order, e.checkout, e.pi, e.checkoutStatus)
+		if err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE stripe_webhook_events SET processed_at=clock_timestamp(),safe_error_code=NULL WHERE webhook_row_id=$1`, e.rowID); err != nil {
 		return err
