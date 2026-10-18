@@ -20,6 +20,9 @@ import (
 const maxHoldRequestKeyRunes = 128
 const maxHoldReasonRunes = 1000
 
+// Stripe payment attempt events have the strictest downstream actor limit.
+const maxHoldActorRunes = 200
+
 // GetCompanyProductEmergencyHold reads the current hold and its bounded admin
 // summary. A retired product remains readable while it has a hold row so an
 // administrator can explicitly clear that historical hold.
@@ -57,7 +60,7 @@ func (s *Service) GetCompanyProductEmergencyHold(ctx context.Context, tenantID, 
 // hold row exists yet. It is acquired before request replay lookup, matching
 // order admission and detach lock ordering.
 func (s *Service) SetCompanyProductEmergencyHold(ctx context.Context, tenantID, productKey, actor string, active bool, reason string, expectedVersion int64, idempotencyKey string) (CompanyProductEmergencyHold, error) {
-	if s == nil || !cleanKey(tenantID) || !catalogKey(productKey) || !cleanKey(actor) || !validHoldReason(reason) || expectedVersion < 0 || !validHoldRequestKey(idempotencyKey) {
+	if s == nil || !cleanKey(tenantID) || !catalogKey(productKey) || !cleanKey(actor) || utf8.RuneCountInString(actor) > maxHoldActorRunes || !validHoldReason(reason) || expectedVersion < 0 || !validHoldRequestKey(idempotencyKey) {
 		return CompanyProductEmergencyHold{}, ErrInvalid
 	}
 	tx, err := s.db.Begin(ctx)
