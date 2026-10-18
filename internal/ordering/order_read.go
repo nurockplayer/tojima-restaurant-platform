@@ -20,6 +20,11 @@ const DefaultOrderReadTTL = 24 * time.Hour
 const MinOrderReadTTL = time.Minute
 const MaxOrderReadTTL = 7 * 24 * time.Hour
 
+// MaxActiveOrderReadGrants includes the grant returned by a new commit.
+const MaxActiveOrderReadGrants = 5
+
+var ErrOrderReadLimit = errors.New("order read grant limit reached")
+
 func NewWithOrderReadTTL(db *pgxpool.Pool, sessions *tablesession.Service, menus *catalog.Service, policy OrderCommitPolicy, ttl time.Duration) (*Service, error) {
 	if ttl < MinOrderReadTTL || ttl > MaxOrderReadTTL {
 		return nil, ErrInvalid
@@ -50,6 +55,23 @@ type OrderReadStatus struct {
 }
 
 func (s *Service) issueOrderReadTx(ctx context.Context, tx pgx.Tx, session tablesession.Session, orderID string) (*OrderReadGrant, error) {
+	// Both callers hold the session row lock until commit. Check scope before
+	// reporting the budget, and serialize counting with every issuance path.
+	var active int
+	err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM order_read_grants g
+  WHERE g.order_id=o.order_id AND g.session_id=o.session_id
+  AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp())
+  FROM table_orders o WHERE o.order_id=$1 AND o.session_id=$2 AND o.tenant_id=$3 AND o.store_id=$4 AND o.table_id=$5`,
+		orderID, session.ID, session.Scope.TenantID, session.Scope.StoreID, session.Scope.TableID).Scan(&active)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrDenied
+	}
+	if err != nil {
+		return nil, err
+	}
+	if active >= MaxActiveOrderReadGrants {
+		return nil, ErrOrderReadLimit
+	}
 	var raw [32]byte
 	if _, err := rand.Read(raw[:]); err != nil {
 		return nil, err
@@ -57,7 +79,7 @@ func (s *Service) issueOrderReadTx(ctx context.Context, tx pgx.Tx, session table
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
 	hash := sha256.Sum256([]byte(token))
 	var expiry time.Time
-	err := tx.QueryRow(ctx, `INSERT INTO order_read_grants(token_hash,order_id,session_id,tenant_id,store_id,table_id,created_at,expires_at)
+	err = tx.QueryRow(ctx, `INSERT INTO order_read_grants(token_hash,order_id,session_id,tenant_id,store_id,table_id,created_at,expires_at)
   SELECT $1,o.order_id,o.session_id,o.tenant_id,o.store_id,o.table_id,clock_timestamp(),clock_timestamp()+$6*interval '1 millisecond'
   FROM table_orders o WHERE o.order_id=$2 AND o.session_id=$3 AND o.tenant_id=$4 AND o.store_id=$5 AND o.table_id=$7
   RETURNING expires_at`, hash[:], orderID, session.ID, session.Scope.TenantID, session.Scope.StoreID, s.orderReadTTL.Milliseconds(), session.Scope.TableID).Scan(&expiry)

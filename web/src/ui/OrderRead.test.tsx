@@ -104,11 +104,15 @@ describe('read-only order status', () => {
   });
 
   it('uses the fragment for sharing and sends the token only in the bearer header', async () => {
-    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    // Testing Library's async wrapper also needs its final zero-delay timer.
+    vi.useRealTimers();
+    const user = userEvent.setup();
     const write = vi.spyOn(navigator.clipboard, 'writeText').mockResolvedValue();
     const fetcher = vi.fn(async () => json(state)); vi.stubGlobal('fetch', fetcher);
-    render(<OrderStatusView grant={grant} locale="ja" />); await flush();
+    render(<OrderStatusView grant={grant} locale="ja" />);
+    expect(await screen.findByText('¥9,007,199,254,740,993')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '共有リンクをコピー' }));
+    expect(await screen.findByRole('button', { name: 'コピーしました' })).toBeTruthy();
     const link = write.mock.calls[0]![0]; const url = new URL(link);
     expect(url.search).toBe(''); expect(url.hash).toContain(grant.order_read_token);
     expect(grantFromFragment(url.hash)).toEqual(grant);

@@ -37,6 +37,10 @@ func (a OrderingAPI) requestOrderRead(w http.ResponseWriter, r *http.Request) {
 }
 
 func writeOrderRead(w http.ResponseWriter, value any, err error) {
+	if errors.Is(err, ordering.ErrOrderReadLimit) {
+		writeError(w, http.StatusTooManyRequests, "order_read_limit_reached")
+		return
+	}
 	if errors.Is(err, ordering.ErrDenied) {
 		writeError(w, 403, "forbidden")
 		return

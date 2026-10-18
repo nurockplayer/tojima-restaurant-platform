@@ -202,6 +202,68 @@ func TestPostgresOrderReadGrantBoundary(t *testing.T) {
 	decode(req("POST", base+"/orders/"+oid+"/read-grant", "", original.Token, ""), 403, nil)
 	decode(req("POST", base+"/checkout-context", "", original.Token, ""), 403, nil)
 	decode(req("POST", base+"/orders/"+oid+"/checkout/resume", "", original.Token, ""), 403, nil)
+	// The commit grant and joined grant consume the same per-order budget.
+	grantPath := base + "/orders/" + oid + "/read-grant"
+	checkLimit := func(w *httptest.ResponseRecorder) {
+		t.Helper()
+		var body apiError
+		decode(w, 429, &body)
+		if body.Error != "order_read_limit_reached" || w.Header().Get("Cache-Control") != "private, no-store" || w.Header().Get("Referrer-Policy") != "no-referrer" {
+			t.Fatal("unstable or cacheable issuance limit response")
+		}
+	}
+	checkCounts := func(wantTotal int) {
+		t.Helper()
+		var total, active int
+		if err := f.Pool.QueryRow(ctx, `SELECT count(*),count(*) FILTER (WHERE revoked_at IS NULL AND expires_at>clock_timestamp())
+  FROM order_read_grants WHERE session_id=$1 AND order_id=$2`, sid, oid).Scan(&total, &active); err != nil {
+			t.Fatal(err)
+		}
+		if total != wantTotal || active != ordering.MaxActiveOrderReadGrants {
+			t.Fatalf("issuance exceeded budget or inserted rejected grants: total=%d active=%d", total, active)
+		}
+	}
+	extra := make([]ordering.OrderReadGrant, ordering.MaxActiveOrderReadGrants-2)
+	for i := range extra {
+		decode(req("POST", grantPath, "", guests[2].Token, ""), 200, &extra[i])
+	}
+	for i := range guests {
+		checkLimit(req("POST", grantPath, "", guests[i].Token, ""))
+	}
+	checkCounts(ordering.MaxActiveOrderReadGrants)
+	// Full budgets must not change wrong-scope or invalid-credential denials.
+	decode(req("POST", base+"/orders/"+strings.Repeat("0", 32)+"/read-grant", "", guests[0].Token, ""), 403, nil)
+	decode(req("POST", grantPath, "", original.Token, ""), 403, nil)
+	for _, g := range extra {
+		if err = f.Orders.RevokeOrderRead(ctx, oid, g.Token); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// All joined guests race for the restored slots. The session lock must
+	// serialize the count and insert, even for different TABLE_JOIN tokens.
+	const requests = 2 * ordering.MaxActiveOrderReadGrants
+	start := make(chan struct{})
+	results := make(chan *httptest.ResponseRecorder, requests)
+	for i := 0; i < requests; i++ {
+		go func(token string) {
+			<-start
+			results <- req("POST", grantPath, "", token, "")
+		}(guests[i%len(guests)].Token)
+	}
+	close(start)
+	issued := 0
+	for i := 0; i < requests; i++ {
+		w := <-results
+		if w.Code == 200 {
+			issued++
+		} else {
+			checkLimit(w)
+		}
+	}
+	if issued != len(extra) {
+		t.Fatalf("concurrent issuance: got %d grants want %d", issued, len(extra))
+	}
+	checkCounts(ordering.MaxActiveOrderReadGrants + len(extra))
 	// Expiry and revocation are immediately effective for that token only.
 	joinedHash := sha256.Sum256([]byte(joined.Token))
 	if _, err = f.Pool.Exec(ctx, `UPDATE order_read_grants SET created_at=clock_timestamp()-interval '2 seconds',expires_at=clock_timestamp()-interval '1 second' WHERE token_hash=$1`, joinedHash[:]); err != nil {

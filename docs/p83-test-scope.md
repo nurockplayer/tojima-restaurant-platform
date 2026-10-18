@@ -22,6 +22,12 @@ original-browser CHECKOUT_RESUME are reused without modification.
   the session remains OPEN. Session/grant locks and a final trusted-time check
   serialize this issuance with close, expiry and join revocation. No catalog
   availability or provider call is needed to request a read link.
+- Issuance allows at most **5 active, unexpired, unrevoked grants per
+  (session, order)**, including the grant returned by a new commit. The existing
+  session lock serializes the budget check and insert across joined guests.
+  Further requests return HTTP **429** with `order_read_limit_reached` and
+  insert no row; expiry or internal revocation frees a slot. Scope/credential
+  denials remain HTTP 403 even when the budget is full.
 - `GET /v1/guest/orders/{orderID}/status` requires the specific ORDER_READ bearer
   in `Authorization`. Neither an order ID nor TABLE_JOIN nor another order's
   read bearer authorizes it. Query parameters are rejected. Invalid, absent,
@@ -111,6 +117,9 @@ hash-only database storage; expired/revoked tokens; response allowlist/headers;
 ORDER_READ denial for submit/grant issuance/Checkout context/resume; real cash,
 acceptance and kitchen transitions; terminal/version changes; real close and
 next-party physical-QR isolation; and rejected out-of-bounds TTL configuration.
+Repeated and concurrent grant requests check the shared five-grant budget,
+stable HTTP 429 errors, no inserts on rejection, and slot recovery after
+revocation/expiry, using the same real PostgreSQL fixture and HTTP handler.
 The migration test covers 009 up/down/reapply. The runner's explicit version
 list supports gaps, so 008 remains reserved for P-82; integration must insert
 008 before 009 in the list, with renumbering only if the director chooses it.
@@ -120,7 +129,9 @@ immediate resume, a 35-second slow request without overlap, abort on hide and
 unmount, a late response after abort, failure/stale/recovery, server terminal
 behavior, capability changes, fragment/header transport, clipboard, interval
 clamping, persistence, corrupt/expired data and throwing storage. Tests use
-user-event for the copy control. They are added for the director to execute:
+user-event with real timers for the copy control, awaiting the rendered result
+before checking clipboard and fragment/bearer transport assertions. Polling
+tests retain fake timers. They are added for the director to execute:
 **Vitest is not run by the implementing sandbox**, per lane instructions.
 
 Required handoff checks: `make fmt-check vet build`, real PostgreSQL
@@ -136,6 +147,10 @@ P-83 A は注文ごとの匿名・期限付き ORDER_READ を追加する。新�
 のみ保存し、失効・期限・tenant/store/order の実データ所属を検証する。閉卓後も
 既発行リンクは自身の期限まで有効だが、同じ物理 QR の次の客は前卓の閲覧権限を
 取得できない。支払継続は既存の本人 cookie proof のみであり、読取権限では不可。
+発行上限は (session, order) ごとに有効期限内・未失効の権限5件（新規確定時の1件を
+含む）。既存のセッションロック内で検査・発行し、超過は行を追加せず HTTP 429
+`order_read_limit_reached` を返す。期限切れ・内部失効で枠が空き、並行要求でも
+上限を超えないことを PostgreSQL 実試験で検証する。
 画面は可視時のみ30秒（設定15〜30秒）で取得し、非表示・終了時は中止、再表示時は
 即時確認、失敗時は古い情報の注意を表示する。マイ注文とコピーリンクを提供する。
 PostgreSQL 実試験とフロント試験を追加した。Vitest と独立レビューは director が
@@ -153,6 +168,11 @@ tenant/store/order 所屬。關桌後原連結依自身期限有效，但下一�
 的記憶體備援。已新增真實 PostgreSQL 與前端測試；Vitest 與獨立審查由 director
 執行。**24小時只是暫定工程預設，具體天數仍待 Owner 核准（EXT-4），不承諾永久
 歷史。** 退款顯示與 REVIEW_REQUIRED 文案仍屬 lane B。
+
+每組 (session, order) 最多可持有5筆未到期且未撤銷的權限，包含新送單時發出的
+1筆。檢查與新增都在既有桌次鎖內執行；超額回傳 HTTP 429
+`order_read_limit_reached`，不新增資料列。到期或內部撤銷後可釋出名額；真實
+PostgreSQL 測試涵蓋重複及並行申請，確認不超過上限。
 
 ## Implementer execution receipt
 
