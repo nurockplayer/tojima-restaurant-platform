@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -225,6 +226,92 @@ func TestP84ThreeGuestsStripeCashCommitRace(t *testing.T) {
 		if err != nil || current.Generation != generation+1 || current.Version != 1 || len(current.Lines) != 0 {
 			t.Fatalf("third phone rollover: %+v err=%v", current, err)
 		}
+	}
+}
+
+// D7 accepts that a photo of the fixed QR can join an open STAFF_OPEN seating
+// and submit PAY_LATER cash orders that reach KDS without staff acceptance.
+func TestP84StaffOpenFixedQRPayLaterAutoRelease(t *testing.T) {
+	ctx, f := p84GuestFixture(t)
+	if err := f.Sessions.SetStoreMode(ctx, f.TenantID, f.StoreID, tablesession.StaffOpen); err != nil {
+		t.Fatal(err)
+	}
+	settings, err := f.Operations.ReadCashSettings(ctx, operations.StoreScope{TenantID: f.TenantID, StoreID: f.StoreID})
+	if err != nil || !settings.Enabled || settings.Mode != operations.PayLater {
+		t.Fatalf("expected cash-enabled PAY_LATER fixture: %+v err=%v", settings, err)
+	}
+	h := NewSessionHandler(f.Sessions, nil, nil)
+	qrPath := "/v1/guest/tables/" + f.Locator
+	status := requestJSON(t, h, http.MethodGet, qrPath, "", "")
+	var table tablesession.PublicTable
+	if err = json.Unmarshal(status.Body.Bytes(), &table); err != nil {
+		t.Fatal(err)
+	}
+	if status.Code != http.StatusOK || table.Mode != tablesession.StaffOpen || table.Open || table.CurrentSessionID != "" {
+		t.Fatalf("table should await staff open: HTTP %d %+v", status.Code, table)
+	}
+	if denied := requestJSON(t, h, http.MethodPost, qrPath+"/join", `{}`, ""); denied.Code != http.StatusForbidden {
+		t.Fatalf("guest joined before staff open: HTTP %d %s", denied.Code, denied.Body.String())
+	}
+	var grantCount int
+	if err = f.Pool.QueryRow(ctx, `SELECT count(*) FROM table_join_grants`).Scan(&grantCount); err != nil || grantCount != 0 {
+		t.Fatalf("grant issued before staff open: count=%d err=%v", grantCount, err)
+	}
+	opened, err := f.Sessions.Open(ctx, tablesession.Scope{TenantID: f.TenantID, StoreID: f.StoreID, TableID: f.TableID}, "fixture-staff")
+	if err != nil {
+		t.Fatal(err)
+	}
+	grants := make([]tablesession.Grant, 2)
+	for i := range grants {
+		// Each guest starts with only the fixed QR, no cookie, token or PIN.
+		// Guest 2 represents an independent client holding a photo of that QR.
+		status = requestJSON(t, h, http.MethodGet, qrPath, "", "")
+		var current tablesession.PublicTable
+		if err = json.Unmarshal(status.Body.Bytes(), &current); err != nil {
+			t.Fatal(err)
+		}
+		if status.Code != http.StatusOK || !current.Open || current.Mode != tablesession.StaffOpen || current.CurrentSessionID != opened.Session.ID {
+			t.Fatalf("guest %d could not discover the same seating: HTTP %d %+v", i+1, status.Code, current)
+		}
+		joined := requestJSON(t, h, http.MethodPost, "/v1/guest/sessions/"+current.CurrentSessionID+"/join", `{}`, "")
+		if joined.Code != http.StatusOK {
+			t.Fatalf("guest %d join: HTTP %d %s", i+1, joined.Code, joined.Body.String())
+		}
+		if err = json.Unmarshal(joined.Body.Bytes(), &grants[i]); err != nil {
+			t.Fatal(err)
+		}
+		if grants[i].Token == "" || grants[i].Session.ID != opened.Session.ID || grants[i].Session.RequiresStaffAcceptance {
+			t.Fatalf("guest %d did not receive a grant for the staff-opened seating", i+1)
+		}
+	}
+	if grants[0].Token == grants[1].Token {
+		t.Fatal("independent guests received the same TABLE_JOIN grant")
+	}
+	guest := grants[1]
+	cart, preview := p84TeaPreview(t, ctx, f, guest, "photo-guest-line")
+	committed, err := f.Orders.Commit(ctx, ordering.CommitRequest{SessionID: guest.Session.ID, GrantToken: guest.Token,
+		ExpectedGeneration: cart.Generation, ExpectedVersion: cart.Version, PreviewFingerprint: preview.Fingerprint,
+		PaymentMethod: ordering.Cash, IdempotencyKey: "photo-guest-order"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if committed.Outcome != ordering.Committed || committed.Order.SessionID != opened.Session.ID || committed.Order.PaymentMethod != ordering.Cash || committed.Order.RequiresStaffAcceptance {
+		t.Fatalf("unexpected STAFF_OPEN cash commit: %+v", committed)
+	}
+	// Read durable state immediately after commit: no AcceptOrder or other action.
+	var orderRequiresAcceptance, stateRequiresAcceptance, staffAccepted bool
+	var paymentMethod, cashMode, fulfillment string
+	var cards int
+	if err = f.Pool.QueryRow(ctx, `SELECT o.requires_staff_acceptance,s.requires_staff_acceptance,s.staff_accepted,
+		s.payment_method,s.cash_mode,s.fulfillment_status,
+		(SELECT count(*) FROM operation_kds_cards k WHERE k.order_id=o.order_id)
+		FROM table_orders o JOIN operation_order_state s USING(order_id) WHERE o.order_id=$1`, committed.Order.ID).
+		Scan(&orderRequiresAcceptance, &stateRequiresAcceptance, &staffAccepted, &paymentMethod, &cashMode, &fulfillment, &cards); err != nil {
+		t.Fatal(err)
+	}
+	if orderRequiresAcceptance || stateRequiresAcceptance || staffAccepted || paymentMethod != string(ordering.Cash) || cashMode != string(operations.PayLater) || fulfillment != string(operations.Accepted) || cards != 1 {
+		t.Fatalf("expected automatic PAY_LATER release: orderRequiresAcceptance=%t stateRequiresAcceptance=%t staffAccepted=%t payment=%s cashMode=%s fulfillment=%s cards=%d",
+			orderRequiresAcceptance, stateRequiresAcceptance, staffAccepted, paymentMethod, cashMode, fulfillment, cards)
 	}
 }
 

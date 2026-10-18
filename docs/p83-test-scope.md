@@ -60,19 +60,20 @@ without modification.
   context or replace the independent original submitter cookie proof. No
   CHECKOUT_RESUME code or payment/operations transitions are changed.
 
-## TTL configuration — EXT-4 remains open
+## TTL configuration — ORDER_READ TTL approved (D5); rest of EXT-4 open
 
-`ordering.DefaultOrderReadTTL` is a **provisional engineering default of 24
-hours**, not Owner-approved guest-history policy. The constructor
+`ordering.DefaultOrderReadTTL` is **24 hours**, approved for the MVP pilot by
+Owner decision D5 (2026-10-19). The constructor
 `ordering.NewWithOrderReadTTL` accepts 1 minute through 7 days inclusive and
-rejects values outside that range; existing constructors use the provisional
-default. Composition configures it once, never from guest input. Expiry uses
-trusted database time. `RevokeOrderRead` is an internal token-specific lifecycle
+rejects values outside that range; existing constructors use that default.
+Composition configures it once, never from guest input. Expiry uses trusted
+database time. `RevokeOrderRead` is an internal token-specific lifecycle
 method with no guest write endpoint. Neither expiry nor revocation changes
 immutable orders, payment, fulfillment or other grants.
 
-**Owner has NOT approved exact days. The default and commercial TTL policy
-await Owner approval (EXT-4). This feature promises no indefinite history.**
+**D5 approves only the 24-hour ORDER_READ lifetime for the MVP pilot. Other
+TTLs and retention/sharing policy remain open (EXT-4). This feature promises no
+indefinite history.**
 
 ## Guest web contract
 
@@ -155,8 +156,8 @@ P-83 A は注文ごとの匿名・期限付き ORDER_READ を追加する。新�
 画面は可視時のみ30秒（設定15〜30秒）で取得し、非表示・終了時は中止、再表示時は
 即時確認、失敗時は古い情報の注意を表示する。マイ注文とコピーリンクを提供する。
 PostgreSQL 実試験とフロント試験を追加した。Vitest と独立レビューは director が
-実施する。**24時間は暫定実装値で、具体的日数は Owner 未承認（EXT-4）。無期限の
-履歴を約束しない。** 要確認文言は下記 P-83 B で追加し、返金表示は lane C / P-82 C に残す。
+実施する。**24時間は D5（2026-10-19）で MVP 試店向けに承認済み。他の TTL・保存方針は
+未決（EXT-4）。無期限の履歴を約束しない。** 要確認文言は下記 P-83 B で追加し、返金表示は lane C / P-82 C に残す。
 
 ## 繁體中文
 
@@ -167,8 +168,8 @@ tenant/store/order 所屬。關桌後原連結依自身期限有效，但下一�
 代替。新畫面只在可見時每30秒（設定限制15〜30秒）輪詢，隱藏或卸載即中止，重新
 可見立即更新，失敗保留已確認值並顯示過期提示。提供我的訂單與複製連結、儲存失敗
 的記憶體備援。已新增真實 PostgreSQL 與前端測試；Vitest 與獨立審查由 director
-執行。**24小時只是暫定工程預設，具體天數仍待 Owner 核准（EXT-4），不承諾永久
-歷史。** 付款待店家確認文案由下述 P-83 B 加入，退款顯示仍屬 lane C / P-82 C。
+執行。**24小時已由 D5（2026-10-19）核准用於 MVP 試店；其他 TTL 與保留政策仍待決定
+（EXT-4），不承諾永久歷史。** 付款待店家確認文案由下述 P-83 B 加入，退款顯示仍屬 lane C / P-82 C。
 
 每組 (session, order) 最多可持有5筆未到期且未撤銷的權限，包含新送單時發出的
 1筆。檢查與新增都在既有桌次鎖內執行；超額回傳 HTTP 429

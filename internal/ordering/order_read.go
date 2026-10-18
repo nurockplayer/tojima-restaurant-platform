@@ -14,8 +14,9 @@ import (
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 )
 
-// DefaultOrderReadTTL is a provisional engineering default, not Owner-approved
-// retention policy (EXT-4). Configure once at construction, never per request.
+// DefaultOrderReadTTL is the 24-hour lifetime approved for the MVP pilot by
+// Owner decision D5; other retention policy remains open (EXT-4). Configure
+// once at construction, never per request.
 const DefaultOrderReadTTL = 24 * time.Hour
 const MinOrderReadTTL = time.Minute
 const MaxOrderReadTTL = 7 * 24 * time.Hour
