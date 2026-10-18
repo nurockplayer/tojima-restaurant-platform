@@ -27,11 +27,6 @@ type holdFixture struct {
 
 func newHoldFixture(t *testing.T) *holdFixture {
 	t.Helper()
-	return newHoldFixtureWithRetryWindow(t, time.Hour)
-}
-
-func newHoldFixtureWithRetryWindow(t *testing.T, retryWindow time.Duration) *holdFixture {
-	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL required")
@@ -45,7 +40,7 @@ func newHoldFixtureWithRetryWindow(t *testing.T, retryWindow time.Duration) *hol
 	t.Cleanup(func() { f.Close(context.Background()) })
 	provider := testpayments.NewProvider()
 	account := stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: "acct_holdFixture"}
-	service, err := New(f.Pool, f.Operations, testResolver{"fixture:hold": {Provider: provider, Account: account, ProfileFingerprint: sha256.Sum256([]byte("hold-test"))}}, Config{CreateRetryWindow: retryWindow, ContinuationTTL: 20 * time.Minute, WorkLeaseTTL: time.Minute})
+	service, err := New(f.Pool, f.Operations, testResolver{"fixture:hold": {Provider: provider, Account: account, ProfileFingerprint: sha256.Sum256([]byte("hold-test"))}}, Config{CreateRetryWindow: time.Hour, ContinuationTTL: 20 * time.Minute, WorkLeaseTTL: time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -120,6 +115,35 @@ func (h *holdFixture) work() {
 func (h *holdFixture) ready() {
 	h.t.Helper()
 	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE status='READY'`); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// elapseCreateDeadline drives the deadline transition explicitly. The normal
+// one-hour window exceeds the fixture's 90-second context, so setup cannot cross
+// it under load. Only this fixture's isolated schema is changed; restore the
+// immutable-snapshot guard in the same transaction before any worker runs.
+func (h *holdFixture) elapseCreateDeadline(order string) {
+	h.t.Helper()
+	tx, err := h.Pool.Begin(h.ctx)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer tx.Rollback(context.Background())
+	if _, err = tx.Exec(h.ctx, `ALTER TABLE stripe_payment_attempts DISABLE TRIGGER stripe_payment_attempt_snapshot_immutable`); err != nil {
+		h.t.Fatal(err)
+	}
+	result, err := tx.Exec(h.ctx, `UPDATE stripe_payment_attempts SET retry_not_after=clock_timestamp()-interval '1 second' WHERE order_id=$1`, order)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	if result.RowsAffected() != 1 {
+		h.t.Fatalf("expected one attempt deadline, updated %d", result.RowsAffected())
+	}
+	if _, err = tx.Exec(h.ctx, `ALTER TABLE stripe_payment_attempts ENABLE TRIGGER stripe_payment_attempt_snapshot_immutable`); err != nil {
+		h.t.Fatal(err)
+	}
+	if err = tx.Commit(h.ctx); err != nil {
 		h.t.Fatal(err)
 	}
 }
@@ -703,7 +727,7 @@ func (p *holdRetrieveProvider) RetrieveCheckout(ctx context.Context, account str
 func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T) {
 	for _, mode := range []string{"retrieve-failure", "waiting-for-checkout", "unconfigured", "complete-unpaid"} {
 		t.Run(mode, func(t *testing.T) {
-			h := newHoldFixtureWithRetryWindow(t, 2*time.Second)
+			h := newHoldFixture(t)
 			order, proof := h.commit(h.Locator, "teishoku", ordering.Stripe)
 			var x stripeprovider.CheckoutResult
 			if mode == "waiting-for-checkout" {
@@ -753,21 +777,21 @@ func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T)
 					t.Fatalf("retry: attempts=%d delay=%v status=%s code=%s; want %d %v %s", actualAttempts, actualDelay, status, actualCode, attempt, delay, code)
 				}
 				h.assertRetained(order.Order.ID)
+				// The persisted delay above proves the backoff. Separately prove
+				// that future work is ineligible without racing that short delay.
+				// ready() explicitly releases it for the next retry.
+				if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE order_id=$1 AND status='READY'`, order.Order.ID); err != nil {
+					t.Fatal(err)
+				}
 				if worked, err := h.service.ProcessNext(h.ctx); err != nil || worked {
 					t.Fatalf("retry ran before available_at: %v %v", worked, err)
 				}
 			}
 			h.work()
 			assertRetry(1, 5*time.Second, initialCode)
-			var deadline time.Time
-			if err = h.Pool.QueryRow(h.ctx, `SELECT retry_not_after FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID).Scan(&deadline); err != nil {
-				t.Fatal(err)
-			}
-			if delay := time.Until(deadline) + 50*time.Millisecond; delay > 0 {
-				time.Sleep(delay)
-			}
+			h.elapseCreateDeadline(order.Order.ID)
 			if mode == "waiting-for-checkout" {
-				// CREATE stops at its real immutable deadline; EXPIRE must survive.
+				// CREATE stops at its elapsed deadline; EXPIRE must survive.
 				h.ready()
 				h.work()
 				var status, code string
@@ -1011,7 +1035,7 @@ func TestPostgresP82UnboundFailedCreateRecoveryWithoutHoldExpiresCheckout(t *tes
 func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
 	for _, outcome := range []string{"complete-unpaid-then-paid", "still-open"} {
 		t.Run(outcome, func(t *testing.T) {
-			h := newHoldFixtureWithRetryWindow(t, 2*time.Second)
+			h := newHoldFixture(t)
 			order, proof := h.commit(h.Locator, "teishoku", ordering.Stripe)
 			var x stripeprovider.CheckoutResult
 			h.provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) { x = result })
@@ -1031,18 +1055,15 @@ func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
 			h.work()
 			h.assertState(order.Order.ID, StateFailed, false, false)
 			var unbound bool
-			var deadline time.Time
-			if err = h.Pool.QueryRow(h.ctx, `SELECT checkout_session_id IS NULL AND payment_intent_id=$2,retry_not_after FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, intent.ID).Scan(&unbound, &deadline); err != nil || !unbound {
+			if err = h.Pool.QueryRow(h.ctx, `SELECT checkout_session_id IS NULL AND payment_intent_id=$2 FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, intent.ID).Scan(&unbound); err != nil || !unbound {
 				t.Fatalf("failed before binding: unbound=%v err=%v", unbound, err)
 			}
 			h.hold(true, 0)
 			h.hold(false, 1)
 			h.assertRetained(order.Order.ID)
-			if delay := time.Until(deadline) + 50*time.Millisecond; delay > 0 {
-				time.Sleep(delay)
-			}
+			h.elapseCreateDeadline(order.Order.ID)
 			h.ready()
-			h.work() // CREATE exhausts its immutable deadline without another call.
+			h.work() // CREATE exhausts its elapsed deadline without another call.
 			var status, code string
 			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "DONE" || code != "RETRY_WINDOW_ELAPSED" {
 				t.Fatalf("CREATE cutoff: %s %s %v", status, code, err)
