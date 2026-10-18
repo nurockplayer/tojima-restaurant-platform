@@ -12,13 +12,13 @@ The eight quoted requirements and 61 sub-claims are retained from lane A. **Befo
 | --- | --- | --- | --- |
 | 1. Tenant/store, catalog, RBAC, IDOR, HQ scale | 5 / 0 / 0 | **5 / 0 / 0** | Retained assertions revalidated |
 | 2. Shared cart and atomic commit | 6 / 0 / 0 | **6 / 0 / 0** | Retained assertions revalidated |
-| 3. QR and next-party privacy | 4 / 0 / 1 | **5 / 0 / 0** | Fixed-QR risk accepted by Owner decision D7 (2026-10-19) |
+| 3. QR and next-party privacy | 4 / 0 / 1 | **4 / 0 / 1** | Owner fixed-QR risk acknowledgement remains (D7 re-confirmation pending) |
 | 4. Cash, KDS and closing | 6 / 0 / 0 | **6 / 0 / 0** | Retained assertions revalidated |
 | 5. Stripe isolation, webhook and resume | 5 / 0 / 4 | **6 / 0 / 3** | ORDER_READ refusal added; Sandbox and staff recovery open |
 | 6. Hold, review, cancellation and refunds | 3 / 0 / 6 | **9 / 0 / 0** | HQ admission/Checkout HTTP races, disposition, refund/history covered locally |
 | 7. Guest refresh, receipt, accessibility/mobile | 2 / 0 / 5 | **5 / 0 / 2** | ORDER_READ cadence/capability and mounted cart propagation; devices/a11y open |
 | 8. Recovery, idempotency and security basics | 10 / 0 / 4 | **11 / 0 / 3** | Local runtime log gap closed; migration failure recovered; perimeter, deployment and real restore remain |
-| **Total (61 sub-claims)** | **41 / 0 / 20** | **53 / 0 / 8** | **12 gaps closed since lane A (one by C, one by Owner decision D7); no newly observed FAIL** |
+| **Total (61 sub-claims)** | **41 / 0 / 20** | **52 / 0 / 9** | **11 coverage gaps closed since lane A (one by C); no newly observed FAIL** |
 
 ## 1. Tenant/store isolation and company catalog
 
@@ -53,7 +53,7 @@ The eight quoted requirements and 61 sub-claims are retained from lane A. **Befo
 | --- | --- | --- |
 | 3a. STAFF_OPEN / SESSION_PIN / DIRECT_SCAN entry contracts | PASS → PASS | `internal/tablesession/postgres_integration_test.go::TestPostgresSessionAcceptance`; `internal/httpapi/sessions_integration_test.go::TestSessionHTTPIntegration`. Mode snapshot and future-session settings are covered. |
 | 3b. Persistent PIN attempt/lockout/reset and grant limits | PASS → PASS | `internal/tablesession/postgres_integration_test.go::TestPostgresSessionAcceptance/PIN lockout persists across service instances and reset revokes grants`, `internal/tablesession/postgres_integration_test.go::TestPostgresSessionAcceptance/join grant cap is persistent per table and shared by direct and session joins`. Operating thresholds remain pilot decisions. |
-| 3c. Fixed-QR remote-entry risk understood and accepted | GAP → PASS (Owner decision) | `docs/p76-test-scope.md` explains that possession of a photographed locator does not prove physical presence. No automated test can establish guest presence or approve the operational risk. Owner must select mode, PIN/TTL/rate policy and staff acceptance workflow. **Owner decision D7 (2026-10-19):** keep the store default STAFF_OPEN (a guest can join only after staff open the table) with one fixed QR per table, and accept the photographed-QR remote-entry risk because staff must open the table and kitchen release still requires staff acceptance. TTL is D5 (24 h); rate thresholds are D8 (row 8h, still GAP). See [Owner decisions](mvp-owner-decisions.md). |
+| 3c. Fixed-QR remote-entry risk understood and accepted | GAP → GAP | `docs/p76-test-scope.md` explains that possession of a photographed locator does not prove physical presence. No automated test can establish guest presence or approve the operational risk. Owner must select mode, PIN/TTL/rate policy and staff acceptance workflow. **D7 (2026-10-19), re-confirmation pending:** the Owner accepted STAFF_OPEN with one fixed QR per table, but the stated mitigation was wrong. Staff acceptance before kitchen release applies only to DIRECT_SCAN (`internal/tablesession/service.go` sets `requires_staff_acceptance` only for DIRECT_SCAN). Under STAFF_OPEN, anyone who holds the fixed QR (including a photo of it) can join while staff have the table open, and PAY_LATER cash orders go straight to the kitchen (`internal/operations/service.go`). Stays GAP until the Owner re-confirms on that basis. See [Owner decisions](mvp-owner-decisions.md). |
 | 3d. DIRECT_SCAN requires staff reception before eligible KDS release | PASS → PASS | `internal/operations/service_integration_test.go::TestPostgresCashSnapshotSettlementConcurrencyAndCloseGate`; `internal/httpapi/operations_integration_test.go::TestOperationsHTTPPermissionsAndCashJourney`; `internal/httpapi/payments_lifecycle_integration_test.go::TestPaymentsHTTPProofWebhookAndStaffLifecyclePostgres` checks paid-but-unaccepted Stripe exclusion. |
 | 3e. Same physical QR after explicit close creates private new party | PASS → PASS | `internal/httpapi/p84_acceptance_integration_test.go::TestP84SameQRNextPartyPrivacy`, subtests `STAFF_OPEN`, `SESSION_PIN`, `DIRECT_SCAN`: commit/pay/serve/close old order, leave an abandoned cart line, reopen at unchanged locator, assert new session ID and empty cart/orders; deny old and new tokens against old session and old token against new session menu/cart/orders/operations. Protected shared-session history is denied after close. Previously issued ORDER_READ links intentionally retain their own authority (7e). |
 
@@ -182,11 +182,11 @@ Rows 5–7 now cite integrated P-82 A/B/C1/C2 and P-83 A/B/B2 assertions plus th
 
 ## Owner decisions 2026-10-19
 
-On 2026-10-19 the Owner accepted the director's defaults D1–D11 ([record](mvp-owner-decisions.md)) on main `907e6ce`. Only 3c changes status (GAP → PASS by explicit risk acceptance), so the total moves from **52 / 0 / 9** to **53 / 0 / 8**. D5, D8 and D9 are recorded on their rows; 5h and 8h stay GAP. No code or test changed.
+On 2026-10-19 the Owner accepted the director's defaults D1–D11 ([record](mvp-owner-decisions.md)) on main `907e6ce`. No status changes: D7's rationale misdescribed STAFF_OPEN, so 3c waits for re-confirmation. D5 (ORDER_READ 24 h), D8 (ingress thresholds) and D9 (lost grant out of MVP scope) are recorded on their rows; 5h, 8h and the rest of EXT-4 stay GAP. Total remains **52 / 0 / 9**. No code or test changed.
 
-日本語：Owner が D1〜D11 を一括承認。状態が変わるのは 3c のみ（明示的なリスク受容で GAP → PASS）、合計 **53 / 0 / 8**。5h・8h は判断を記録したうえで GAP のまま。
+日本語：Owner が D1〜D11 を一括承認。ただし D7 の根拠説明に誤り（STAFF_OPEN ではスタッフ受付がなく、後払い現金は自動で厨房へ）があったため 3c は再確認待ちで GAP のまま。合計 **52 / 0 / 9** は不変。
 
-繁中：Owner 一次採用 D1～D11。僅 3c 因明確接受風險由 GAP 改為 PASS，合計 **53 / 0 / 8**；5h、8h 記錄決定但仍為 GAP。
+繁中：Owner 一次採用 D1～D11。但 D7 的理由說明有誤（STAFF_OPEN 沒有店員接單關卡，後付現金單會直接進廚房），3c 待重新確認、維持 GAP；合計仍為 **52 / 0 / 9**。
 
 ## Remaining GAPs and external gates
 
@@ -196,11 +196,11 @@ P-82/P-83 are **integrated**, not pending open-PR dependencies. Re-entry is agai
 | --- | --- | --- |
 | EXT-1, 5a/5i | **GAP — P-80 payments/merchant owner** | Approved merchant/Connect charge mode and test account mappings; actual isolated two-merchant Sandbox signed async/failed/paid/expired/unknown/reconcile/refund journeys. No secrets in receipts; keyless tests cannot close it. |
 | 5h lost original grant/cookie | **GAP — Product Owner + store operations lead** | Approved staff verification and receipt recovery procedure with authorized identity evidence; reconciliation or a new ORDER_READ grant does not replace submitter Checkout proof. Owner decision D9 (2026-10-19): out of MVP scope (P-73). |
-| 3c fixed QR | **Closed — Owner decision D7 (2026-10-19)** | STAFF_OPEN with fixed QR per table and the remote-entry risk accepted; see [Owner decisions](mvp-owner-decisions.md). |
+| 3c fixed QR | **GAP — Product Owner + pilot store operations lead (D7 re-confirmation pending)** | Explicit remote-entry risk acknowledgement against actual STAFF_OPEN behaviour (no staff acceptance; PAY_LATER cash auto-releases to the kitchen), entry mode, staff reception, PIN/join limits and abuse policy; a photographed locator cannot establish presence. |
 | 7f accessibility | **GAP — guest UX/accessibility lead** | Complete Japanese/Traditional Chinese keyboard and assistive-technology journeys including receipt/refund/expired-link states. Locale/unit DOM tests are supporting evidence only. |
 | 7g devices | **GAP — QA/device acceptance lead** | WebKit + Chromium mobile and physical-device acceptance receipts. No browser journey was executed by lane B. |
 | EXT-3, 8m and deployment portion of 8n | **GAP — identity/hosting/security owner** | Real MOD-08 current-membership/MFA accounts, hosting direct /order entry, HTTPS cookies, CORS/CSRF/ingress and deployed recovery acceptance. Fixture account roles and local SPA tests are insufficient. |
-| EXT-4 TTL policy (cross-cutting 3c/7e) | **GAP — Product Owner** | Approved exact read-history/session/grant/PIN TTLs and retention/sharing policy. 24 hours is provisional; bounded engineering TTL tests do not approve days. This gate is tracked separately, not counted as a 62nd sub-claim. Owner decision D5 (2026-10-19): keep 24 hours for the MVP pilot. |
+| EXT-4 TTL policy (cross-cutting 3c/7e) | **GAP — Product Owner** | Approved exact read-history/session/grant/PIN TTLs and retention/sharing policy. 24 hours is provisional; bounded engineering TTL tests do not approve days. This gate is tracked separately, not counted as a 62nd sub-claim. Owner decision D5 (2026-10-19) approves only the 24-hour ORDER_READ lifetime; session/grant/PIN TTLs and retention/sharing policy remain GAP. |
 | 8h perimeter/rate | **GAP — API/security owner** | Approved payment/staff/API rate thresholds and burst tests; PIN/join bounds are insufficient. Owner decision D8 (2026-10-19) sets ingress thresholds; deployment and burst test remain. |
 | 8j logs (local PASS; deployment follow-up) | **Local PASS — deployment observability/security owner retains deployed checks** | Lane C captures actual local error/webhook/retry/capability paths. Review deployed proxy/APM/collector logs under EXT-3; no additional counted sub-claim. |
 | 8n migration failure/restore | **Partially GAP — database/hosting recovery owner** | Local injected failure recovery + Down/Up PASS in lane C. Owner must still approve and execute real backup/restore and RPO/RTO; [runbook](deploy-runbook.md) is a rehearsal procedure, not production evidence. |

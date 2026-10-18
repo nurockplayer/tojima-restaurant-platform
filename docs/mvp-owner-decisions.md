@@ -8,9 +8,9 @@ Authority: Owner accepted all director defaults on 2026-10-19 ([P-74](https://li
 | D2 | Stripe Sandbox merchants: reuse A (`acct_1URmck1Hm4yzytJz`, tagged `synthetic_merchant_a`) and create B and C. The Owner completes Stripe-hosted onboarding with Stripe test data. The two JP accounts that hold jabiko.app details and personal data are **not** used. | Prerequisite for P-84 5a/5i |
 | D3 | The Owner installs Stripe CLI 1.54.0 and types the `sk_test_` key at the hidden prompt. Agents never handle the key. GitHub `stripe-test` environment secrets are deferred until local Sandbox acceptance passes. | Prerequisite for 5a/5i |
 | D4 | Remote test-card payment for 東島さん is phase 2, after local Sandbox E2E passes. | None yet |
-| D5 | ORDER_READ link lifetime stays 24 hours. | EXT-4 decided |
+| D5 | ORDER_READ link lifetime stays 24 hours. | Approves only the ORDER_READ TTL; other EXT-4 TTL and retention items remain GAP |
 | D6 | MVP supports guests' own phones only; clearing "My orders" on a shared store tablet is post-MVP. | Scope |
-| D7 | Keep the STAFF_OPEN default with a fixed QR per table; accept the photographed-QR risk (staff open the table; kitchen release needs staff acceptance). | 3c → PASS |
+| D7 | Keep the STAFF_OPEN default with a fixed QR per table and accept the photographed-QR risk. **Re-confirmation pending:** the proposal said kitchen release needs staff acceptance, which is wrong. Actual behaviour: a guest can join only after staff open the table, but while it is open anyone with the fixed QR (including a photo) can join, and PAY_LATER cash orders go straight to the kitchen. Staff acceptance applies only to DIRECT_SCAN. | 3c stays GAP until re-confirmed |
 | D8 | No new in-app throttling. Pilot ingress returns 429 above 120 req/min/IP on `/v1` and 10 req/min/IP on cart commit and payment creation. | 8h stays GAP until deployed and burst-tested |
 | D9 | Lost original Checkout grant: no identity recovery in the MVP; staff use S02 reconciliation plus cash or refund. P-73 is post-MVP. | 5h stays GAP (out of MVP scope) |
 | D10 | Production hosting, IdP and backup (EXT-3) are proposed separately after 東島さん's demo feedback; they do not block the demo or Sandbox. | 8m/8n unchanged |
@@ -26,8 +26,8 @@ The Stripe connector available to agents cannot create connected accounts or onb
 
 ## 日本語
 
-Owner は 2026-10-19 に D1〜D11 の既定案を一括承認。遠隔 DEMO はパスコード制・Mac 稼働時のみ・再起動でリセット。Stripe テスト商戸は A を再利用し B/C を新規作成、Stripe ホスト型 onboarding をテストデータで Owner が実施（エージェント用 Stripe 連携では作成不可）。jabiko.app 由来の個人情報入りアカウントは使わない。CLI と `sk_test_` は Owner 本人。遠隔カード決済は第2段階。ORDER_READ は24時間。共用タブレットは Post-MVP。STAFF_OPEN＋固定 QR のリスクを受容（3c は PASS）。レート制限は入口で 120/分・10/分（8h は GAP のまま）。紛失 grant は S02 照合＋現金/返金、P-73 は Post-MVP（5h は GAP のまま）。hosting/IdP/backup は試用後に別提案。#18/#20 は close。
+Owner は 2026-10-19 に D1〜D11 の既定案を一括承認（D7 は根拠説明の誤りにより再確認待ち）。遠隔 DEMO はパスコード制・Mac 稼働時のみ・再起動でリセット。Stripe テスト商戸は A を再利用し B/C を新規作成、Stripe ホスト型 onboarding をテストデータで Owner が実施（エージェント用 Stripe 連携では作成不可）。jabiko.app 由来の個人情報入りアカウントは使わない。CLI と `sk_test_` は Owner 本人。遠隔カード決済は第2段階。ORDER_READ は24時間。共用タブレットは Post-MVP。D7：STAFF_OPEN＋固定 QR。提案時の「厨房へはスタッフ受付が必要」は誤りで、実際は卓が開いている間は固定 QR（写真含む）で誰でも参加でき、後払い現金は自動で厨房へ（スタッフ受付は DIRECT_SCAN のみ）。この前提で再確認するまで 3c は GAP。ORDER_READ 24時間は ORDER_READ のみの承認。レート制限は入口で 120/分・10/分（8h は GAP のまま）。紛失 grant は S02 照合＋現金/返金、P-73 は Post-MVP（5h は GAP のまま）。hosting/IdP/backup は試用後に別提案。#18/#20 は close。
 
 ## 繁體中文
 
-Owner 於 2026-10-19 一次採用 D1～D11。遠端 DEMO 採通行碼、僅 Mac 運行時可用、重啟即重置。Stripe 測試商戶 A 沿用、新建 B/C，由 Owner 以 Stripe 託管 onboarding 的測試資料完成（代理可用的 Stripe 連接器無法建立帳戶）；不使用含 jabiko.app 個資的兩個帳戶。CLI 與 `sk_test_` 由 Owner 本人處理。遠端刷卡為第二階段。ORDER_READ 維持 24 小時。共用平板列 Post-MVP。接受 STAFF_OPEN＋固定 QR 風險（3c 改為 PASS）。速率限制於入口設定 120/分、10/分（8h 仍為 GAP）。遺失續付憑證以 S02 對帳＋現金或退款處理，P-73 列 Post-MVP（5h 仍為 GAP）。託管／IdP／備份待試用回饋後另提。#18/#20 已關閉。
+Owner 於 2026-10-19 一次採用 D1～D11（D7 因理由說明有誤待重新確認）。遠端 DEMO 採通行碼、僅 Mac 運行時可用、重啟即重置。Stripe 測試商戶 A 沿用、新建 B/C，由 Owner 以 Stripe 託管 onboarding 的測試資料完成（代理可用的 Stripe 連接器無法建立帳戶）；不使用含 jabiko.app 個資的兩個帳戶。CLI 與 `sk_test_` 由 Owner 本人處理。遠端刷卡為第二階段。ORDER_READ 維持 24 小時。共用平板列 Post-MVP。D7：STAFF_OPEN＋固定 QR。提案中「進廚房需店員接單」有誤；實際上桌次開啟期間任何持固定 QR（含照片）者都能加入，後付現金單會直接進廚房（店員接單只適用 DIRECT_SCAN）。以此為前提重新確認前，3c 維持 GAP。ORDER_READ 24 小時僅核准唯讀連結。速率限制於入口設定 120/分、10/分（8h 仍為 GAP）。遺失續付憑證以 S02 對帳＋現金或退款處理，P-73 列 Post-MVP（5h 仍為 GAP）。託管／IdP／備份待試用回饋後另提。#18/#20 已關閉。
