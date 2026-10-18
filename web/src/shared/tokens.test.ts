@@ -219,6 +219,19 @@ describe('DS-1 static design-token regression gate', () => {
     for (const [fg, bg, minimum] of usagePairs) {
       expect(contrast(`var(${fg})`, `var(${bg})`), `${fg} / ${bg} must reach ${minimum}:1`).toBeGreaterThanOrEqual(minimum);
     }
+    const stepper = allRules.find((r) => r.file === '../ui/styles.css' && r.selector === '.stepper button' && !r.context);
+    const background = stepper && declarations(stepper, 'background')[0]?.value;
+    expect(background, 'Inset stepper focus must contrast with the button fill').toBeDefined();
+    expect(contrast('var(--color-focus)', background!)).toBeGreaterThanOrEqual(3);
+  });
+
+  it('overrides UA small shrinking with an unconditional base rule of at least 12px', () => {
+    const base = allRules.filter((r) => r.file === '../ui/styles.css' && !r.context && split(r.selector, ',').map(normal).includes('small'));
+    const sizes = base.flatMap((r) => declarations(r, 'font-size'));
+    expect(sizes.length, 'Shared base small rule must override the UA font-size: smaller').toBeGreaterThan(0);
+    const value = sizes.at(-1)!.value;
+    expect(value).toBe('var(--text-meta)');
+    expect(fontPixels(resolve(value)), 'Base small size must resolve to at least 12px').toBeGreaterThanOrEqual(12);
   });
 
   it('keeps every font-size at 12px or above with only reviewed 0/initial exceptions', () => {
@@ -231,7 +244,7 @@ describe('DS-1 static design-token regression gate', () => {
       const key = `${location(rule)} | font-size | ${d.value}`;
       if (d.value === '0' || d.value === 'initial') { exceptions.push(key); continue; }
       try {
-        const pixels = fontPixels(d.value);
+        const pixels = fontPixels(resolve(d.value));
         if (pixels < 12) failures.push(`${key}: ${pixels}px < 12px (rem base 15px)`);
       } catch (error) { failures.push(`${key}: ${String(error)}`); }
     }
@@ -278,7 +291,7 @@ describe('static gate grammar safeguards', () => {
   it.each(['11px', '.75rem'])('converts and rejects the below-floor size %s', (value) => {
     expect(fontPixels(value)).toBeLessThan(12);
   });
-  it.each(['calc(12px - 1px)', 'clamp(10px, 2vw, 14px)', '1em', '80%', 'var(--text-meta)'])('rejects unsupported font-size %s', (value) => {
+  it.each(['calc(12px - 1px)', 'clamp(10px, 2vw, 14px)', '1em', '80%', 'var(--text-meta)'])('rejects unresolved or unsupported font-size %s', (value) => {
     expect(() => fontPixels(value)).toThrow('unsupported font-size');
   });
   it.each(['var(--unknown)', 'currentColor', 'color-mix(in srgb, #fff, #000)', 'inherit'])('reports unsupported text colour %s', (value) => {

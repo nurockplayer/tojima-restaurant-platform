@@ -39,8 +39,13 @@ Readable text has a 12px declaration floor (the existing root remains 15px).
 The only font exceptions are the narrow-screen badge's deliberate `0` and its
 empty dot's `initial` reset, with exact source locations and reasons. Focus uses
 3px `--color-focus` outlines with a 2px offset on buttons, links, inputs,
-selects, textareas and `[tabindex]`; the stepper no longer clips its buttons'
-outline. Existing 44px targets and the native StaffDialog are retained.
+selects, textareas and `[tabindex]`. Inside `.cart-lines`, `.quote-lines` and
+`.confirm-dialog` (including native dialogs), a -3px offset keeps the ring inside
+the control so scroll edges cannot clip it. Green primary buttons and checked
+inputs use `--color-on-action` for inset focus. Blue on the stepper's `#f5f7f3`
+fill is 5.53:1; white on action/hover green is 9.71:1 / 7.24:1. Existing 44px
+targets, scrolling geometry and the native StaffDialog are retained. Catalog
+and KDS currently have no additional CSS scrolling regions.
 
 ## Static regression gate / 静的回帰ゲート・靜態回歸門檻
 
@@ -57,10 +62,11 @@ The gate checks:
 - Resolved semantic usage pairs: text ≥4.5:1; control boundaries and focus ≥3:1,
   including page, white and cream surfaces, selected actions, four status pairs
   and platform brand defaults. It uses WCAG sRGB relative luminance.
-- Every `font-size` declaration in `src/**/*.css`: px or rem only, using the
-  asserted 15px root. Anything below 12px or an unsupported expression (`em`,
-  `%`, `calc`, `clamp`, token expressions, etc.) fails. Only exact, reasoned
-  `0`/`initial` exceptions pass.
+- Every `font-size` declaration in `src/**/*.css`: px or rem, including known
+  tokens resolving to those units, using the asserted 15px root. Anything below
+  12px or an unsupported expression (`em`, `%`, `calc`, `clamp`, etc.) fails.
+  Only exact, reasoned `0`/`initial` exceptions pass. An unconditional shared
+  `small { font-size: var(--text-meta); }` rule must exist and resolve to ≥12px.
 - Text declarations paired with an opaque hex/known token background in the
   same rule. A rule without a background is checked on **both** default page
   and white surface. All text uses the conservative 4.5:1 threshold.
@@ -82,7 +88,12 @@ not calculate selector matching, specificity, DOM ancestry, browser control
 appearance, stacking, clipping, dynamic states or compositing. A colour-only
 rule's two default surfaces do not represent every actual ancestor. Font
 shorthands, inline styles and computed/inherited font sizes are outside the
-font-size declaration audit. The remaining reviewed inheritance/compositing
+font-size declaration audit. UA-relative defaults such as `small`'s `smaller`
+are invisible when no author declaration exists: a 12px legend can produce a
+10px child. The shared `small` base rule overrides that default, and the gate
+requires it and checks its resolved size. Existing specific `small` font rules
+are explicit 12px; none depends on UA shrinking. This mitigation does not turn
+the audit into a computed-style check. The remaining reviewed inheritance/compositing
 exceptions need Opus's computed-style audit. Native input appearance, 320px
 horizontal overflow, JA/ZH wrapping, focus visibility and touch targets need the
 planned browser, screenshot and keyboard acceptance. A green static check does
@@ -116,6 +127,13 @@ D-DS-20261019 の承認済み案Dを技術記録する。ADR-0006 の範囲内�
 人による受入のまま、GAPをPASSにしない。DS-2（顧客IA）、DS-3（Floor/KDS）、
 DS-4（店舗ブランド）、DS-5（Office）の順序を維持する。
 
+**制限と対策**：作者側の宣言がない UA 相対サイズ（`small` の `smaller`）は静的検査に
+現れず、12px の legend 内で10pxになり得る。共有の `small { font-size: var(--text-meta); }`
+で上書きし、ゲートで無条件の基底ルールの存在と解決後12px以上を確認する。既存の
+個別指定は明示的な12pxで、UA縮小への依存はない。スクロール領域内のフォーカスは
+3px・offset -3pxで内側に描き、濃緑の塗りには白を使用する。実描画・クリッピングの
+受入は引き続き必要で、レイアウトとスクロールの挙動は変更しない。
+
 ## 繁體中文摘要
 
 本 ADR 記錄 D-DS-20261019 已批准的方案 D。在 ADR-0006 範圍內維持既有綠色與
@@ -126,3 +144,9 @@ DS-4（店舗ブランド）、DS-5（Office）の順序を維持する。
 合成、原生控制項、窄螢幕與鍵盤需由 Opus 的渲染驗收補足。P-84 7f／7g 維持人工
 驗收，不把 GAP 改為 PASS。依序由 DS-2 處理顧客IA、DS-3 處理 Floor/KDS、DS-4
 處理店家品牌、DS-5 處理 Office 密度。
+
+**限制與對策**：沒有作者宣告的 UA 相對字級（`small` 的 `smaller`）不會出現在靜態檢查中，
+12px 的 legend 內可能產生10px文字。以共用 `small { font-size: var(--text-meta); }` 覆寫，
+門檻要求無條件的基底規則存在且解析後至少12px。既有個別字級皆明訂12px，不依賴 UA
+縮小。捲動區域內的焦點使用3px、offset -3px向內繪製，深綠底改用白色；仍需驗收實際
+渲染與裁切，版面及捲動行為維持不變。
