@@ -21,6 +21,7 @@ export function loadMyOrders(): OrderReadGrant[] {
   return fallback.filter((g) => Date.parse(g.expires_at) > Date.now());
 }
 export function rememberOrderGrant(grant: OrderReadGrant): void {
+  if (Date.parse(grant.expires_at) <= Date.now()) return;
   fallback = [grant, ...loadMyOrders().filter((g) => g.order_id !== grant.order_id)].slice(0, 100);
   try { const serialized = JSON.stringify(fallback); localStorage.setItem(key, serialized); lastStoredValue = serialized; } catch { /* In-memory fallback remains usable. */ }
   window.dispatchEvent(new Event(myOrdersChanged));
