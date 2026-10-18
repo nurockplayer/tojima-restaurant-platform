@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,9 @@ import (
 type workItem struct {
 	ID, Lease, Kind, OrderID string
 	WebhookID                *int64
+	RefundID                 *string
+	RefundEventID            *int64
+	RefundGeneration         *int64
 	Attempts                 int
 }
 
@@ -29,10 +33,10 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 	// Prefer fresh CREATE/webhook work, but after 30 seconds overdue let EXPIRE
 	// compete by available_at. New arrivals cannot indefinitely overtake it.
 	// Retry backoff resets available_at, so a recurring expiry gets no head start.
-	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id,attempts+1 FROM stripe_payment_work
+	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id,refund_id,refund_event_row_id,refund_generation,attempts+1 FROM stripe_payment_work
 		WHERE (status='READY' AND available_at<=clock_timestamp()) OR (status='LEASED' AND lease_until<=clock_timestamp())
 		ORDER BY CASE WHEN work_type='EXPIRE' AND available_at>statement_timestamp()-interval '30 seconds' THEN 1 ELSE 0 END,available_at,created_at
-		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID, &item.Attempts)
+		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID, &item.RefundID, &item.RefundEventID, &item.RefundGeneration, &item.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -57,6 +61,10 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 		err = s.processWebhook(ctx, item)
 	case "EXPIRE":
 		err = s.processExpire(ctx, item)
+	case "REFUND":
+		err = s.processRefund(ctx, item)
+	case "REFUND_WEBHOOK":
+		err = s.processRefundWebhook(ctx, item)
 	default:
 		err = ErrInvalid
 	}
@@ -337,6 +345,9 @@ func (s *Service) enqueueVerifiedWebhook(ctx context.Context, event stripeprovid
 	if event.ID == "" || event.AccountID == "" || event.APIVersion != stripeprovider.APIVersion || event.LiveMode || event.CreatedAt.IsZero() {
 		return false, stripeprovider.ErrWebhook
 	}
+	if event.Refund != nil || len(event.Refunds) > 0 {
+		return s.enqueueRefundWebhook(ctx, event)
+	}
 	var tenant, store, order, attempt, checkoutID, paymentIntentID, checkoutStatus, paymentStatus, piStatus string
 	var amount int64
 	metadata := map[string]string{}
@@ -442,6 +453,107 @@ func (s *Service) enqueueVerifiedWebhook(ctx context.Context, event stripeprovid
 		return false, err
 	}
 	return true, nil
+}
+
+func (s *Service) enqueueRefundWebhook(ctx context.Context, event stripeprovider.VerifiedEvent) (bool, error) {
+	refunds := append([]stripeprovider.RefundResult(nil), event.Refunds...)
+	if event.Refund != nil {
+		refunds = []stripeprovider.RefundResult{*event.Refund}
+	}
+	if len(refunds) == 0 {
+		return false, stripeprovider.ErrWebhook
+	}
+	if event.Type == "charge.refunded" {
+		if !strings.HasPrefix(event.ObjectID, "ch_") {
+			return false, stripeprovider.ErrWebhook
+		}
+	} else if event.Refund == nil || event.ObjectID != event.Refund.ID {
+		return false, stripeprovider.ErrWebhook
+	}
+	sort.Slice(refunds, func(i, j int) bool { return refunds[i].Metadata["refund_id"] < refunds[j].Metadata["refund_id"] })
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	accepted := false
+	for _, x := range refunds {
+		refundID := x.Metadata["refund_id"]
+		// Charge events contain a bounded embedded list, potentially including
+		// dashboard/other-application refunds. Only manager-created local refunds
+		// have our correlation metadata; ignore unrelated entries, never create one.
+		if event.Type == "charge.refunded" && refundID == "" {
+			continue
+		}
+		if x.AccountID != event.AccountID || x.ID == "" || refundID == "" || x.AmountJPY <= 0 || x.Currency != stripeprovider.CurrencyJPY || x.LiveMode || x.PaymentIntentID == "" ||
+			x.Metadata["tenant_id"] == "" || x.Metadata["store_id"] == "" || x.Metadata["order_id"] == "" ||
+			!(x.Status == "pending" || x.Status == "requires_action" || x.Status == "succeeded" || x.Status == "failed" || x.Status == "canceled") ||
+			!(event.Type == "charge.refunded" || event.Type == "refund.updated" || event.Type == "refund.failed") {
+			return false, stripeprovider.ErrWebhook
+		}
+		var order, tenant, store, account, pi, boundID string
+		var amount int64
+		var refundGeneration int64
+		err = tx.QueryRow(ctx, `SELECT r.order_id,a.tenant_id,a.store_id,a.stripe_account_id,coalesce(a.payment_intent_id,''),r.amount_jpy,r.generation,coalesce(r.provider_refund_id,'')
+			FROM operation_refunds r JOIN stripe_payment_attempts a USING(order_id) WHERE r.refund_id=$1`, refundID).
+			Scan(&order, &tenant, &store, &account, &pi, &amount, &refundGeneration, &boundID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		if err != nil {
+			return false, err
+		}
+		if order != x.Metadata["order_id"] || tenant != x.Metadata["tenant_id"] || store != x.Metadata["store_id"] || account != event.AccountID || pi != x.PaymentIntentID || amount != x.AmountJPY {
+			return false, ErrDenied
+		}
+		// Ingress must use the same lock order as adjustment/retry workers;
+		// taking refund SHARE before attempt UPDATE can deadlock a manager.
+		if err = lockPaymentSessionAny(ctx, tx, order); err != nil {
+			return false, err
+		}
+		if _, err = tx.Exec(ctx, `SELECT 1 FROM stripe_payment_attempts WHERE order_id=$1 FOR UPDATE`, order); err != nil {
+			return false, err
+		}
+		if _, err = tx.Exec(ctx, `SELECT 1 FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, order); err != nil {
+			return false, err
+		}
+		if err = tx.QueryRow(ctx, `SELECT generation,coalesce(provider_refund_id,'') FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, refundID).Scan(&refundGeneration, &boundID); err != nil {
+			return false, err
+		}
+		var wasUsed bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_refund_attempt_history WHERE refund_id=$1 AND provider_refund_id=$2)`, refundID, x.ID).Scan(&wasUsed); err != nil {
+			return false, err
+		}
+		if wasUsed {
+			continue
+		} // acknowledged stale generation; never bind it again
+		if boundID != "" && boundID != x.ID {
+			return false, ErrDenied
+		}
+		var eventRowID int64
+		err = tx.QueryRow(ctx, `INSERT INTO stripe_refund_webhook_events(stripe_account_id,stripe_event_id,refund_id,generation,provider_object_id,event_type,amount_jpy,payment_intent_id,provider_status,api_version,livemode,event_created_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11) ON CONFLICT(stripe_account_id,stripe_event_id,refund_id) DO NOTHING RETURNING event_row_id`, event.AccountID, event.ID, refundID, refundGeneration, x.ID, event.Type, x.AmountJPY, x.PaymentIntentID, x.Status, event.APIVersion, event.CreatedAt.UTC()).Scan(&eventRowID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		key := "refund-webhook:" + event.AccountID + ":" + event.ID + ":" + refundID
+		workID, err := s.randomID()
+		if err != nil {
+			return false, err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO stripe_payment_work(work_id,dedupe_key,work_type,order_id,refund_id,refund_event_row_id,refund_generation) VALUES($1,$2,'REFUND_WEBHOOK',$3,$4,$5,$6) ON CONFLICT(dedupe_key) DO NOTHING`, workID, key, order, refundID, eventRowID, refundGeneration)
+		if err != nil {
+			return false, err
+		}
+		accepted = true
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return accepted, nil
 }
 
 func supportedEvent(t string) bool {

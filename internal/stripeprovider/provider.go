@@ -116,16 +116,44 @@ type PaymentIntentResult struct {
 	Metadata  map[string]string
 }
 
+// CreateRefundRequest carries server-authorized refund facts to Stripe. The
+// adapter only transports the request; refund eligibility and totals belong to
+// the operations service.
+type CreateRefundRequest struct {
+	Account         AccountContext
+	TenantID        string
+	StoreID         string
+	OrderID         string
+	RefundID        string
+	PaymentIntentID string
+	IdempotencyKey  string
+	AmountJPY       int64
+}
+
+type RefundResult struct {
+	AccountID       string
+	ID              string
+	PaymentIntentID string
+	AmountJPY       int64
+	Currency        string
+	Status          string
+	LiveMode        bool
+	Metadata        map[string]string
+}
+
 type VerifiedEvent struct {
-	ID            string
-	Type          string
-	AccountID     string
-	APIVersion    string
-	CreatedAt     time.Time
-	LiveMode      bool
-	ObjectID      string
-	Checkout      *CheckoutResult
-	PaymentIntent *PaymentIntentResult
+	ID             string
+	Type           string
+	AccountID      string
+	APIVersion     string
+	CreatedAt      time.Time
+	LiveMode       bool
+	ObjectID       string
+	Checkout       *CheckoutResult
+	PaymentIntent  *PaymentIntentResult
+	Refund         *RefundResult
+	Refunds        []RefundResult
+	RefundsHasMore bool
 }
 
 func New(cfg Config) (*Provider, error) {
@@ -297,6 +325,54 @@ func (p *Provider) RetrievePaymentIntent(ctx context.Context, a AccountContext, 
 	return result, nil
 }
 
+// CreateRefund requests an exact integer-JPY refund against the original
+// PaymentIntent. Stripe idempotency is mandatory because a transport failure
+// can leave the result unknown to the caller.
+func (p *Provider) CreateRefund(ctx context.Context, req CreateRefundRequest) (RefundResult, error) {
+	if err := p.validateAccount(req.Account); err != nil {
+		return RefundResult{}, err
+	}
+	if !validRef(req.TenantID) || !validRef(req.StoreID) || !validRef(req.OrderID) || !validRef(req.RefundID) || !validStripeObjectID(req.PaymentIntentID, "pi") || !idempotencyPattern.MatchString(req.IdempotencyKey) || req.AmountJPY <= 0 || req.AmountJPY > p.maxAmountJPY {
+		return RefundResult{}, ErrInvalid
+	}
+	currency := CurrencyJPY
+	params := &stripe.RefundCreateParams{
+		Params:        stripe.Params{Context: ctx, IdempotencyKey: stripe.String(req.IdempotencyKey), StripeAccount: stripe.String(req.Account.StripeAccountID)},
+		PaymentIntent: stripe.String(req.PaymentIntentID), Amount: stripe.Int64(req.AmountJPY), Currency: &currency,
+		Metadata: map[string]string{"tenant_id": req.TenantID, "store_id": req.StoreID, "order_id": req.OrderID, "refund_id": req.RefundID},
+	}
+	r, err := p.client.V1Refunds.Create(ctx, params)
+	if err != nil {
+		return RefundResult{}, ErrOutcomeUnknown
+	}
+	result, err := refundResult(r, req.Account.StripeAccountID)
+	if err != nil || result.PaymentIntentID != req.PaymentIntentID || result.AmountJPY != req.AmountJPY || !refundMetadataMatches(result.Metadata, req.TenantID, req.StoreID, req.OrderID, req.RefundID) {
+		return RefundResult{}, ErrOutcomeUnknown
+	}
+	return result, nil
+}
+
+func (p *Provider) RetrieveRefund(ctx context.Context, a AccountContext, refundID string) (RefundResult, error) {
+	if err := p.validateAccount(a); err != nil {
+		return RefundResult{}, err
+	}
+	if !validStripeObjectID(refundID, "re") {
+		return RefundResult{}, ErrInvalid
+	}
+	r, err := p.client.V1Refunds.Retrieve(ctx, refundID, &stripe.RefundRetrieveParams{Params: stripe.Params{Context: ctx, StripeAccount: stripe.String(a.StripeAccountID)}})
+	if err != nil {
+		return RefundResult{}, classifyStripeError(err)
+	}
+	result, err := refundResult(r, a.StripeAccountID)
+	if err != nil {
+		return RefundResult{}, err
+	}
+	if result.ID != refundID || result.PaymentIntentID == "" {
+		return RefundResult{}, ErrUnsafeResponse
+	}
+	return result, nil
+}
+
 func validRef(s string) bool {
 	return len(s) > 0 && len(s) <= 200 && strings.TrimSpace(s) == s && !strings.ContainsAny(s, "\x00\r\n")
 }
@@ -328,6 +404,32 @@ func paymentIntentResult(pi *stripe.PaymentIntent, requestedAccount string) (Pay
 	}
 	account := requestedAccount
 	return PaymentIntentResult{AccountID: account, ID: pi.ID, Status: string(pi.Status), AmountJPY: pi.Amount, Currency: string(pi.Currency), LiveMode: pi.Livemode, Metadata: cloneMap(pi.Metadata)}, nil
+}
+
+func refundResult(r *stripe.Refund, requestedAccount string) (RefundResult, error) {
+	if r == nil || !validStripeObjectID(r.ID, "re") || r.Currency != stripe.Currency(CurrencyJPY) || r.Amount <= 0 || !validRefundStatus(string(r.Status)) {
+		return RefundResult{}, ErrUnsafeResponse
+	}
+	piID := ""
+	if r.PaymentIntent != nil {
+		piID = r.PaymentIntent.ID
+	}
+	if piID != "" && !validStripeObjectID(piID, "pi") {
+		return RefundResult{}, ErrUnsafeResponse
+	}
+	return RefundResult{AccountID: requestedAccount, ID: r.ID, PaymentIntentID: piID, AmountJPY: r.Amount, Currency: string(r.Currency), Status: string(r.Status), Metadata: cloneMap(r.Metadata)}, nil
+}
+
+func validRefundStatus(s string) bool {
+	switch s {
+	case "pending", "requires_action", "succeeded", "failed", "canceled":
+		return true
+	}
+	return false
+}
+
+func refundMetadataMatches(m map[string]string, tenant, store, order, refund string) bool {
+	return m["tenant_id"] == tenant && m["store_id"] == store && m["order_id"] == order && m["refund_id"] == refund
 }
 
 func cloneMap(in map[string]string) map[string]string {

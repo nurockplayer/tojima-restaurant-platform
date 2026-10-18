@@ -256,3 +256,155 @@ PAUSED 不阻止核准，由店長向廚房確認。已關閉或過期桌次也�
 繁中；過期版本重新載入並確認，回應不明則以固定內容與相同鍵明確重試。
 僅用 PostgreSQL 及 fake provider；Vitest 交 director 執行。取消／退款、訪客文案、
 真實 Stripe 與正式上線不屬於本線。
+
+# P-82 C1 — Item cancellation and refunds / 取消・減量と返金 / 取消減量與退款
+
+C1 is stacked on lane B `5c82115` (PR #25), over accepted lane A (PR #22).
+It adds manager-requested item cancellation and quantity reduction before
+preparation. The HTTP boundary requires a current STORE_MANAGER membership in
+exactly the requested tenant/store and verified MFA, including on idempotent
+replays. A cashier, kitchen user, tenant administrator alone, guest grant, or
+revoked/cross-store membership cannot adjust or retry refunds. Kitchen update
+acknowledgement requires the KITCHEN role.
+
+The endpoints under the existing staff table/session/order path are:
+
+- `POST .../orders/{orderID}/adjustments/preview`
+- `POST .../orders/{orderID}/adjustments`
+- `POST .../orders/{orderID}/refunds/{refundID}/retry`
+- `POST .../orders/{orderID}/acknowledge-update`
+
+Preview and adjustment accept `expected_version`, a mandatory trimmed reason
+(1–500 Unicode characters), and `lines` containing zero-based `line_index` and
+positive `cancelled_quantity`. These quantities are reductions of the current
+effective quantity, never replacements or additions. Paid CASH confirmation
+also requires `cash_hand_back_confirmed=true`. Writes require `Idempotency-Key`.
+The server derives every amount and tax total. Stable conflict responses include
+`stale_version`, `idempotency_conflict`, `preparation_started`,
+`payment_unresolved`, `cash_hand_back_required`, and `refund_not_retryable`.
+An unpaid/processing Stripe Checkout cannot be adjusted by this lane.
+
+Transactions lock company catalog SHARE → session → Stripe attempt, if present
+→ operation → refund rows → work/audit/idempotency. Approval and adjustment
+compare the same operation version and UNRESOLVED review decision. An already
+APPROVED review decision cannot be cancelled through C1. Partial adjustments
+leave review UNRESOLVED and do not release KDS; a subsequent manager approval
+is still required. Cancelled lines no longer cause an active product hold to
+block approval of the remaining lines. Cancelling the last effective item
+sets fulfillment/review decision CANCELLED, clears the review hold, and refunds
+the entire remaining paid amount. Original paid attempt state stays PAID;
+original order, unit prices, options, tax snapshots and receipts are retained.
+Closed/expired sessions support these explicit recovery actions without
+reopening the session or restoring guest capabilities.
+
+Migration **011** adds append-only `order_adjustments`, refund records,
+append-only cash refund ledger and failed provider-attempt history. Adjustment
+history copies original quantities/prices/tax rules, cumulative cancelled
+quantities, previous/effective totals and refund amount. Effective projections
+are separate columns on operation state. Historical tax is recomputed from the
+original transaction rules, inclusive integer JPY, one floor per normalized
+rate (ADR-0004). CASH receipts combine retained orders at the receipt boundary;
+the separate refund ledger retains the effective receipt calculation. An empty
+retained invoice is represented by no tax snapshot and zero gross, rather than
+inventing a tax rule or a zero-quantity invoice line. Original receipts are
+never rewritten. Refund reservations, including failed refunds awaiting retry,
+cannot exceed the original payment/allocation. Zero-value refunds are not created.
+
+Unpaid CASH only reduces session due and creates no refund. Paid CASH requires
+explicit hand-back confirmation and records a separate SUCCEEDED refund with
+actor plus cashier ledger entry against the original receipt. Stripe refunds
+use the original attempt's PaymentIntent/account/request profile. Manager writes
+enqueue existing durable payment work; provider calls occur outside database
+transactions. State is REQUESTED → PROCESSING → SUCCEEDED or FAILED, and only
+provider confirmation can record success. Pending/unknown outcomes remain
+unresolved; bound refunds are retrieved. Unbound unknown creates reuse the
+same provider key within the bounded retry horizon, never a new key after an
+ambiguous timeout. A confirmed FAILED refund can be retried manually with a new
+provider generation/key; the same staff idempotency key replays the saved result.
+Old provider bindings are retained so stale events/work cannot attach to a new
+retry generation. No refund is initiated by payment, hold, expiry, or table-close
+logic, and no whole-table automatic refund exists.
+
+**Payment-status decision:** partial refunds keep operation `payment_status=PAID`
+and carry their independent refund records. Whole-order Stripe cancellation is
+REFUND_PENDING until every refund is provider-confirmed SUCCEEDED, then REFUNDED.
+A completed full CASH refund is REFUNDED immediately. REQUESTED, PROCESSING and
+FAILED refunds all block close, as does unresolved review. Cancelled unpaid CASH
+and fully refunded cancelled orders may close once every other order is resolved.
+The staff review queue includes unresolved refunds in historical sessions so
+FAILED refunds remain reachable for manual retry after cancellation.
+
+**KDS decision:** the existing unique card is preserved. Only WAITING/no-card or
+ACCEPTED/not-started orders qualify; PREPARING, READY and SERVED return
+`preparation_started` (C2 owns STOP_REQUEST). A change to an existing waiting
+card updates its effective lines and sets `order_updated`. KITCHEN must acknowledge
+that version before starting preparation; repeat adjustments set the flag again.
+A cancelled card with a pending update remains visible until kitchen acknowledgement, then leaves the active KDS list. The immutable original order and card identity remain unchanged.
+
+The JA/zh-Hant staff native dialog is available in session detail and the review
+queue, requires a server preview, displays separate refund amount and status,
+and offers only explicit retry after failure. Identity/input changes invalidate
+previews; stale writes require refresh and confirmation; uncertain writes retain
+the exact body/key for retry. Controls are at least 44px. Safe staff order reads
+include original/effective totals, effective/original quantities, update flag,
+and refund ID/method/amount/status; provider IDs and keys stay internal. Guest
+refund UI/read journeys remain P-83 work.
+
+Validation uses the supplied loopback PostgreSQL database with disposable schemas,
+deterministic lock barriers, fake provider outcomes, no live keys and no network
+in tests. The acceptance suite covers Stripe 2000→1500 / 500 refund, unpaid and
+paid CASH, original historical tax/receipt boundaries, manager authorization,
+version/idempotency races, approval versus cancellation, full cancellation,
+failed refund retry, duplicate/out-of-order provider events, and kitchen update
+acknowledgement. Web Vitest covers preview/confirmation, cash hand-back, badges,
+retry, stale and uncertain writes, and identity/late-response isolation. Migration
+011 is paired; rollback refuses to discard populated adjustment/refund history.
+
+```sh
+TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
+  go test -race -count=1 ./internal/... ./migrations/postgres
+make fmt-check vet build migration-smoke
+pnpm --dir web lint
+pnpm --dir web exec tsc -b --pretty false
+pnpm --dir web test
+```
+
+日本語：P-82 C1 は調理開始前の取消・減量と、元決済に対する明示的な返金を追加する。
+対象店舗の現在の STORE_MANAGER 権限と MFA、理由・注文バージョン・冪等キーが必要。
+元の単価・税率・注文・現金領収書は変更せず、調整履歴と返金を別記録にする。部分取消は
+要確認を維持し、残る商品は店長の提供承認が必要。最後の商品を取り消すと注文を CANCELLED
+にし、支払済み残額を返金する。部分返金の支払状態は PAID、全額 Stripe 返金は
+REFUND_PENDING からプロバイダーの成功確認後に REFUNDED へ進む。未払い現金は請求額のみ
+減額し、支払済み現金は手渡し確認付きの別返金・出納記録を作成する。元の取引税率で税率別に
+一度だけ切捨て計算する。処理中・失敗返金と未解決の要確認は閉卓を止める。待機中 KDS は
+変更表示と厨房の確認操作を必須とし、調理中以降は C2 に委ねる。取消後の未完了返金も
+要確認一覧に残し、店長が明示的に再試行できる。自動返金・卓全体返金、ゲスト向け返金表示、
+実 Stripe・本番受入は含まない。
+
+繁體中文：P-82 C1 加入備餐開始前的取消減量，以及針對原付款的明確退款操作。限該分店目前
+STORE_MANAGER 成員且已驗證 MFA，必須提供原因、訂單版本與冪等鍵。原單價、稅率、訂單及
+現金收據維持不可變，另存調整與退款歷史。部分調整維持待審核，剩餘品項仍需主管核准出餐；
+最後一項取消時設為 CANCELLED 並退還已付款餘額。部分退款保留 PAID；全額 Stripe 退款由
+REFUND_PENDING 待服務商確認成功才成為 REFUNDED。未付款現金只減少應收款；已付款現金
+需確認已交付退款，另建退款及出納紀錄。依原交易稅率、各正規化稅率一次向下取整。未完成或
+失敗退款及未解決審核皆阻止關桌。待處理 KDS 顯示更新旗標，廚房確認後才可開始備餐；
+備餐中及之後由 C2 處理。取消後尚未完成的退款仍列於待審核佇列，可由主管明確重試。
+不包含自動退款、整桌自動退款、訪客退款畫面、真實 Stripe 金流或正式上線驗收。
+
+C1 local validation (2026-10-18): the commands above passed against the supplied
+loopback database, including the complete race-enabled internal/migration suite
+and 135 web tests. Additional regressions isolate the partial-refund close gate
+after service completion, expired refund-create deadlines without changing
+immutable history, and refund ingress versus manual retry with deterministic
+session-lock barriers. Charge events can contain unrelated refunds and previous
+failed generations; those entries do not create local refunds or prevent current
+local refunds from being reconciled. The project-local `.pnpm-store/` was removed.
+No push, PR, deployment, live credentials, or real-money provider calls were made.
+Independent Oracle/Ego-lite final review is **not claimed**: the installed Oracle
+CLI exposes Chrome/CDP attachment, and a supported Ego-lite route was not found.
+This is a local implementation/test candidate, not an independent review verdict.
+
+日本語：指定の全検証と Web 135 テストは成功。`.pnpm-store/` は削除済み。push・PR・
+本番操作は行わない。Oracle/Ego-lite の独立最終レビューは未実施で、検証成功と区別する。
+繁體中文：指定檢查與 135 項 Web 測試全部通過，已移除 `.pnpm-store/`。未推送、建立 PR
+或操作正式環境。Oracle/Ego-lite 獨立最終審查尚未執行，不將本地測試成功視為審查結論。

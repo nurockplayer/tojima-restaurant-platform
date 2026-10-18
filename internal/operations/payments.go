@@ -42,7 +42,7 @@ func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedSt
 	if method != "STRIPE" || tenant != v.TenantID || store != v.StoreID || table != v.TableID || session != v.SessionID || amount != v.AmountJPY {
 		return false, ErrDenied
 	}
-	if payment == "PAID" {
+	if payment == "PAID" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 		return false, nil
 	}
 	if payment != "PENDING" && payment != "UNKNOWN" {

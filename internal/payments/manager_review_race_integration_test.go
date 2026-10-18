@@ -69,6 +69,90 @@ func TestPostgresP82BApprovalSerializesWithPaidWebhookRedelivery(t *testing.T) {
 	}
 }
 
+func TestPostgresP82ApprovalSerializesWithWholeOrderRefund(t *testing.T) {
+	for _, cancelFirst := range []bool{true, false} {
+		t.Run(fmt.Sprintf("cancel-first-%v", cancelFirst), func(t *testing.T) {
+			h := newHoldFixture(t)
+			order := createHeldPaidReview(t, h)
+			h.hold(false, 1)
+			scope := operations.TableScope{TenantID: h.TenantID, StoreID: h.StoreID, TableID: h.TableID}
+			version := reviewOrderVersion(t, h, order.Order.ID)
+			approveRequest := managerApprovalRequest(h, order.Order.SessionID, order.Order.ID, version, "approve-cancel-race", "Kitchen confirms the paid order")
+			adjustRequest := operations.AdjustmentRequest{Scope: scope, SessionID: order.Order.SessionID, OrderID: order.Order.ID, Actor: "fixture-manager", IdempotencyKey: "cancel-review-order", ExpectedVersion: version, Reason: "Cancel all items after payment", Lines: []operations.AdjustmentLine{{LineIndex: 0, CancelledQuantity: 1}}}
+			approve := func() error { _, err := h.Operations.ApproveFulfillment(h.ctx, approveRequest); return err }
+			cancel := func() error { _, err := h.Operations.AdjustOrder(h.ctx, adjustRequest); return err }
+			first, second := cancel, approve
+			if !cancelFirst {
+				first, second = approve, cancel
+			}
+			firstErr, secondErr := runManagerReviewLockRace(t, h, order.Order.SessionID, first, second)
+			if firstErr != nil || secondErr == nil {
+				t.Fatalf("approval/cancel race did not have exactly one winner: first=%v second=%v", firstErr, secondErr)
+			}
+			state, err := h.Operations.ReadSession(h.ctx, scope, order.Order.SessionID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got operations.OrderState
+			for _, candidate := range state.Orders {
+				if candidate.ID == order.Order.ID {
+					got = candidate
+					break
+				}
+			}
+			if got.ID == "" {
+				t.Fatal("review order missing")
+			}
+			if cancelFirst {
+				if got.ReviewDecision != "CANCELLED" || got.FulfillmentStatus != operations.Cancelled || got.PaymentStatus != operations.RefundPending || len(got.Refunds) != 1 {
+					t.Fatalf("cancellation did not win: %+v", got)
+				}
+			} else if got.ReviewDecision != "APPROVED" || got.FulfillmentStatus != operations.Accepted || got.PaymentStatus != operations.Paid || len(got.Refunds) != 0 {
+				t.Fatalf("approval did not win: %+v", got)
+			}
+		})
+	}
+}
+
+func TestPostgresP82TwoManagersCancelReviewOrderOnce(t *testing.T) {
+	h := newHoldFixture(t)
+	order := createHeldPaidReview(t, h)
+	h.hold(false, 1)
+	scope := operations.TableScope{TenantID: h.TenantID, StoreID: h.StoreID, TableID: h.TableID}
+	version := reviewOrderVersion(t, h, order.Order.ID)
+	makeCancel := func(actor, key string) func() error {
+		return func() error {
+			_, err := h.Operations.AdjustOrder(h.ctx, operations.AdjustmentRequest{Scope: scope, SessionID: order.Order.SessionID, OrderID: order.Order.ID, Actor: actor, IdempotencyKey: key, ExpectedVersion: version, Reason: "Manager cancelled the paid review order", Lines: []operations.AdjustmentLine{{LineIndex: 0, CancelledQuantity: 1}}})
+			return err
+		}
+	}
+	firstErr, secondErr := runManagerReviewLockRace(t, h, order.Order.SessionID, makeCancel("manager-one", "cancel-manager-one"), makeCancel("manager-two", "cancel-manager-two"))
+	if (firstErr == nil) == (secondErr == nil) {
+		t.Fatalf("expected exactly one cancellation winner: first=%v second=%v", firstErr, secondErr)
+	}
+	state, err := h.Operations.ReadSession(h.ctx, scope, order.Order.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got operations.OrderState
+	for _, candidate := range state.Orders {
+		if candidate.ID == order.Order.ID {
+			got = candidate
+			break
+		}
+	}
+	if got.ID == "" || got.ReviewDecision != "CANCELLED" || got.FulfillmentStatus != operations.Cancelled || got.PaymentStatus != operations.RefundPending || len(got.Refunds) != 1 {
+		t.Fatalf("single cancellation result=%+v", got)
+	}
+	var adjustments, refunds int
+	if err = h.Pool.QueryRow(h.ctx, `SELECT (SELECT count(*) FROM order_adjustments WHERE order_id=$1), (SELECT count(*) FROM operation_refunds WHERE order_id=$1)`, order.Order.ID).Scan(&adjustments, &refunds); err != nil {
+		t.Fatal(err)
+	}
+	if adjustments != 1 || refunds != 1 {
+		t.Fatalf("duplicate cancellation effects: adjustments=%d refunds=%d", adjustments, refunds)
+	}
+}
+
 func TestPostgresP82BApprovalSerializesWithTableClose(t *testing.T) {
 	for _, approvalFirst := range []bool{true, false} {
 		t.Run(fmt.Sprintf("approval-first-%v", approvalFirst), func(t *testing.T) {

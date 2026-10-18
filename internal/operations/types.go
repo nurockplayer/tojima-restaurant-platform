@@ -98,6 +98,9 @@ type OrderState struct {
 	ReviewDecision          string            `json:"review_decision"`
 	ReviewReasonCodes       []string          `json:"review_reason_codes"`
 	Version                 int64             `json:"version"`
+	EffectiveTotalGrossJPY  int64             `json:"effective_total_gross_jpy"`
+	OrderUpdated            bool              `json:"order_updated"`
+	Refunds                 []Refund          `json:"refunds"`
 	TotalGrossJPY           int64             `json:"total_gross_jpy"`
 	CreatedAt               time.Time         `json:"created_at"`
 	Lines                   []OrderLine       `json:"lines"`
@@ -105,11 +108,13 @@ type OrderState struct {
 }
 
 type OrderLine struct {
-	ProductName  string        `json:"product_name"`
-	Quantity     int64         `json:"quantity"`
-	UnitGrossJPY int64         `json:"unit_gross_jpy"`
-	LineGrossJPY int64         `json:"line_gross_jpy"`
-	Options      []OrderOption `json:"options"`
+	LineIndex        int           `json:"line_index"`
+	OriginalQuantity int64         `json:"original_quantity"`
+	ProductName      string        `json:"product_name"`
+	Quantity         int64         `json:"quantity"`
+	UnitGrossJPY     int64         `json:"unit_gross_jpy"`
+	LineGrossJPY     int64         `json:"line_gross_jpy"`
+	Options          []OrderOption `json:"options"`
 }
 
 type OrderOption struct {

@@ -110,9 +110,9 @@ func (s *Service) ApproveFulfillment(ctx context.Context, input OrderActionReque
 		return OrderState{}, ErrConflict
 	}
 	var activeHold bool
-	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM table_orders o CROSS JOIN LATERAL jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l
+	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM table_orders o JOIN operation_order_state os USING(order_id) CROSS JOIN LATERAL jsonb_array_elements(o.quote_snapshot->'quote'->'lines') WITH ORDINALITY AS lines(l,idx)
 		JOIN company_product_emergency_holds h ON h.tenant_id=o.tenant_id AND h.product_key=l->>'product_key' AND h.active
-		WHERE o.order_id=$1)`, input.OrderID).Scan(&activeHold)
+		WHERE o.order_id=$1 AND (l->>'quantity')::bigint>coalesce((os.cancelled_quantities->>(idx-1)::int)::bigint,0))`, input.OrderID).Scan(&activeHold)
 	if err != nil {
 		return OrderState{}, err
 	}
@@ -215,7 +215,16 @@ func (s *Service) ListPaymentReviews(ctx context.Context, scope StoreScope) ([]O
 		if !ok {
 			return nil, ErrNotFound
 		}
-		codes := []string{"PAYMENT_REVIEW"}
+		codes := []string{}
+		if orders[i].PaymentReviewRequired {
+			codes = append(codes, "PAYMENT_REVIEW")
+		}
+		for _, refund := range orders[i].Refunds {
+			if refund.Status != "SUCCEEDED" {
+				codes = append(codes, "REFUND_UNRESOLVED")
+				break
+			}
+		}
 		if r.hold {
 			codes = append(codes, "OPERATIONAL_HOLD")
 		}

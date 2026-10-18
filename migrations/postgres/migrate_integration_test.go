@@ -55,8 +55,33 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("idempotent up: %v", err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 10 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 11 {
 		t.Fatalf("migration version %d err %v", version, err)
+	}
+	// Exercise 011 rollback before 010 and verify it restores lane B guards.
+	down011, err := os.ReadFile("011_item_adjustments_refunds.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx011, err := target.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx011.Exec(ctx, string(down011)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx011.Exec(ctx, "DELETE FROM schema_migrations WHERE version=11"); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx011.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var guard011 string
+	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('validate_operation_order_transition()'::regprocedure)`).Scan(&guard011); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(guard011, "order_adjustments") || !strings.Contains(guard011, "MANAGER_REVIEW_APPROVED") {
+		t.Fatalf("011 down failed to restore B guard: %s", guard011)
 	}
 	// Exercise 010 alone: full Down would immediately drop the restored
 	// functions and could conceal a broken rollback body.
@@ -111,6 +136,11 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	}
 	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='operation_order_state' AND column_name='review_decision')`, schema).Scan(&exists); err != nil || !exists {
 		t.Fatalf("010 manager review state missing after reapply: exists=%v err=%v", exists, err)
+	}
+	for _, name := range []string{"order_adjustments", "operation_refunds", "cash_refund_ledger", "stripe_refund_webhook_events", "operation_refund_attempt_history"} {
+		if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+"."+name).Scan(&exists); err != nil || !exists {
+			t.Fatalf("011 table %s missing: %v", name, err)
+		}
 	}
 	if err = postgres.Down(ctx, target); err != nil {
 		t.Fatalf("final down: %v", err)

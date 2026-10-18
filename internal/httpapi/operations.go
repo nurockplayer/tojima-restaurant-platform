@@ -50,6 +50,10 @@ func NewOperationsHandler(service *operations.Service, sessions *tablesession.Se
 	m.HandleFunc("POST "+session+"/orders/{orderID}/accept", a.accept)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/approve-fulfillment", a.approveFulfillment)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/fulfillment", a.fulfillment)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments/preview", a.previewAdjustment)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments", a.adjustOrder)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/refunds/{refundID}/retry", a.retryRefund)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/acknowledge-update", a.acknowledgeUpdate)
 	m.HandleFunc("GET /v1/guest/sessions/{sessionID}/operations", a.guest)
 	return noStore(m)
 }
@@ -375,6 +379,8 @@ func operationRespond(w http.ResponseWriter, v any, err error) {
 		writeError(w, 403, "forbidden")
 	case errors.Is(err, operations.ErrReconfirm):
 		writeError(w, 409, "reconfirm")
+	case errors.Is(err, operations.ErrUpdateAcknowledgementRequired):
+		writeError(w, 409, "kitchen_acknowledgement_required")
 	case errors.Is(err, operations.ErrCashUnavailable):
 		writeError(w, 409, "cash_unavailable")
 	case errors.Is(err, operations.ErrConflict), errors.Is(err, operations.ErrIdempotencyConflict):

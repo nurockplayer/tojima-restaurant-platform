@@ -2,6 +2,7 @@ package stripeprovider
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -125,6 +126,84 @@ func TestCreateCheckoutUsesScopedTestModeJPYAndStableIdempotency(t *testing.T) {
 		if value == "" || gotForm.Get("payment_intent_data[metadata]["+key+"]") != value {
 			t.Errorf("scope metadata %q not copied to PaymentIntent: session=%q PI=%q", key, value, gotForm.Get("payment_intent_data[metadata]["+key+"]"))
 		}
+	}
+}
+
+func TestRefundCreateAndRetrieveUseOriginalIntentScopeAndIdempotency(t *testing.T) {
+	var gotForm url.Values
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.Header.Get("Stripe-Account") != testAccount {
+			t.Errorf("account header=%q", r.Header.Get("Stripe-Account"))
+		}
+		if r.Method == http.MethodPost {
+			if r.URL.Path != "/v1/refunds" || r.Header.Get("Idempotency-Key") != "refund-key-1" {
+				t.Errorf("create request %s %s key=%q", r.Method, r.URL.Path, r.Header.Get("Idempotency-Key"))
+			}
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+			}
+			gotForm = r.Form
+		} else if r.URL.Path != "/v1/refunds/re_test123" {
+			t.Errorf("retrieve path=%s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		io.WriteString(w, `{"id":"re_test123","object":"refund","livemode":false,"amount":500,"currency":"jpy","status":"pending","payment_intent":"pi_test123","metadata":{"tenant_id":"tenant-1","store_id":"store-1","order_id":"order-1","refund_id":"refund-1"}}`)
+	}))
+	defer ts.Close()
+	p, err := New(testConfig(&http.Client{Timeout: 2 * time.Second, Transport: redirectTransport{target: ts.URL}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := CreateRefundRequest{Account: AccountContext{Mode: ModeConnectedDirectFixture, StripeAccountID: testAccount}, TenantID: "tenant-1", StoreID: "store-1", OrderID: "order-1", RefundID: "refund-1", PaymentIntentID: "pi_test123", IdempotencyKey: "refund-key-1", AmountJPY: 500}
+	got, err := p.CreateRefund(context.Background(), req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "pending" || got.AmountJPY != 500 || got.PaymentIntentID != "pi_test123" || got.LiveMode {
+		t.Fatalf("refund result %#v", got)
+	}
+	if gotForm.Get("payment_intent") != "pi_test123" || gotForm.Get("amount") != "500" || gotForm.Get("currency") != "jpy" || gotForm.Get("metadata[tenant_id]") != "tenant-1" || gotForm.Get("metadata[store_id]") != "store-1" || gotForm.Get("metadata[order_id]") != "order-1" || gotForm.Get("metadata[refund_id]") != "refund-1" {
+		t.Fatalf("unexpected refund form %#v", gotForm)
+	}
+	retrieved, err := p.RetrieveRefund(context.Background(), req.Account, "re_test123")
+	if err != nil || retrieved.ID != got.ID || calls.Load() != 2 {
+		t.Fatalf("retrieve=%#v err=%v calls=%d", retrieved, err, calls.Load())
+	}
+}
+
+func TestCreateRefundRejectsInvalidScopeAmountAndPaymentIntentBeforeNetwork(t *testing.T) {
+	var calls atomic.Int32
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1) }))
+	defer ts.Close()
+	p, err := New(testConfig(&http.Client{Timeout: time.Second, Transport: redirectTransport{target: ts.URL}}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := CreateRefundRequest{Account: AccountContext{Mode: ModeConnectedDirectFixture, StripeAccountID: testAccount}, TenantID: "tenant-1", StoreID: "store-1", OrderID: "order-1", RefundID: "refund-1", PaymentIntentID: "pi_test123", IdempotencyKey: "refund-key-1", AmountJPY: 500}
+	cases := []struct {
+		name   string
+		mutate func(*CreateRefundRequest)
+	}{
+		{name: "empty tenant", mutate: func(r *CreateRefundRequest) { r.TenantID = "" }},
+		{name: "empty refund id", mutate: func(r *CreateRefundRequest) { r.RefundID = "" }},
+		{name: "bad payment intent", mutate: func(r *CreateRefundRequest) { r.PaymentIntentID = "cs_test123" }},
+		{name: "zero amount", mutate: func(r *CreateRefundRequest) { r.AmountJPY = 0 }},
+		{name: "above ceiling", mutate: func(r *CreateRefundRequest) { r.AmountJPY = 100001 }},
+		{name: "missing idempotency", mutate: func(r *CreateRefundRequest) { r.IdempotencyKey = "" }},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			req := base
+			tc.mutate(&req)
+			if _, err := p.CreateRefund(context.Background(), req); !errors.Is(err, ErrInvalid) {
+				t.Fatalf("err=%v", err)
+			}
+		})
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("invalid requests reached transport %d times", calls.Load())
 	}
 }
 
@@ -332,6 +411,57 @@ func TestVerifyWebhookExactBytesRotationAndSafeProjection(t *testing.T) {
 	}
 	if _, err = VerifyWebhook(body, header, []string{"whsec_wrong"}, now); !errors.Is(err, ErrWebhook) {
 		t.Fatalf("wrong secret err=%v", err)
+	}
+}
+
+func TestVerifyWebhookProjectsRefundLifecycleAndChargeRefunds(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, typ, object string
+		wantID            string
+		plural            bool
+	}{
+		{name: "refund-failed", typ: "refund.failed", wantID: "re_test123", object: `{"id":"re_test123","object":"refund","livemode":false,"amount":500,"currency":"jpy","status":"failed","payment_intent":"pi_test123","metadata":{"tenant_id":"t","store_id":"s","order_id":"o","refund_id":"r"}}`},
+		{name: "charge-refunded", typ: "charge.refunded", wantID: "ch_test123", plural: true, object: `{"id":"ch_test123","object":"charge","livemode":false,"payment_intent":"pi_test123","refunds":{"object":"list","has_more":true,"data":[{"id":"re_test123","object":"refund","livemode":false,"amount":500,"currency":"jpy","status":"succeeded","metadata":{"tenant_id":"t","store_id":"s","order_id":"o","refund_id":"r"}},{"id":"re_other123","object":"refund","amount":50,"currency":"jpy","status":"succeeded","metadata":{"tenant_id":"other-tenant","store_id":"other-store","order_id":"other-order","refund_id":"other-refund"}}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"id": "evt_test_refund", "object": "event", "type": tc.typ, "account": testAccount, "api_version": APIVersion, "created": now.Unix(), "livemode": false, "data": map[string]any{"object": json.RawMessage(tc.object)}})
+			sig := stripe.ComputeSignature(now, body, "whsec_refund")
+			got, err := VerifyWebhook(body, fmt.Sprintf("t=%d,v1=%x", now.Unix(), sig), []string{"whsec_refund"}, now)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.ObjectID != tc.wantID {
+				t.Fatalf("object id=%q", got.ObjectID)
+			}
+			if tc.plural {
+				if len(got.Refunds) != 2 || got.Refunds[0].PaymentIntentID != "pi_test123" || got.Refunds[1].PaymentIntentID != "pi_test123" || got.Refunds[1].Metadata["tenant_id"] != "other-tenant" || !got.RefundsHasMore {
+					t.Fatalf("refunds %#v", got.Refunds)
+				}
+			} else if got.Refund == nil || got.Refund.ID != tc.wantID || got.Refund.Status != "failed" {
+				t.Fatalf("refund %#v", got.Refund)
+			}
+		})
+	}
+}
+
+func TestVerifyWebhookRejectsLiveRefundEnvelopeAndChargePIConflict(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		name, eventType string
+		live            bool
+		object          string
+	}{
+		{name: "live refund event", eventType: "refund.failed", live: true, object: `{"id":"re_test123","object":"refund","amount":500,"currency":"jpy","status":"failed","payment_intent":"pi_test123"}`},
+		{name: "charge refund PI conflict", eventType: "charge.refunded", object: `{"id":"ch_test123","object":"charge","livemode":false,"payment_intent":"pi_test123","refunds":{"object":"list","data":[{"id":"re_test123","object":"refund","amount":500,"currency":"jpy","status":"succeeded","payment_intent":"pi_other123"}]}}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, _ := json.Marshal(map[string]any{"id": "evt_test_refund", "object": "event", "type": tc.eventType, "account": testAccount, "api_version": APIVersion, "created": now.Unix(), "livemode": tc.live, "data": map[string]any{"object": json.RawMessage(tc.object)}})
+			sig := stripe.ComputeSignature(now, body, "whsec_refund")
+			if _, err := VerifyWebhook(body, fmt.Sprintf("t=%d,v1=%x", now.Unix(), sig), []string{"whsec_refund"}, now); !errors.Is(err, ErrWebhook) {
+				t.Fatalf("err=%v", err)
+			}
+		})
 	}
 }
 

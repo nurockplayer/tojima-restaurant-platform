@@ -34,6 +34,8 @@ type Provider interface {
 	RetrieveCheckout(context.Context, stripeprovider.AccountContext, string) (stripeprovider.CheckoutResult, error)
 	RetrievePaymentIntent(context.Context, stripeprovider.AccountContext, string) (stripeprovider.PaymentIntentResult, error)
 	ExpireCheckout(context.Context, stripeprovider.AccountContext, string, string) (stripeprovider.CheckoutResult, error)
+	CreateRefund(context.Context, stripeprovider.CreateRefundRequest) (stripeprovider.RefundResult, error)
+	RetrieveRefund(context.Context, stripeprovider.AccountContext, string) (stripeprovider.RefundResult, error)
 }
 
 type ResolvedProvider struct {
