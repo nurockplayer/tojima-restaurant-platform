@@ -1,3 +1,7 @@
+-- Deployment precondition: apply 008 with application writers stopped. The
+-- backfill below marks Checkouts covered by holds that are already active; a
+-- pre-008 binary activating a hold while 008 runs (or afterwards) would not
+-- mark its Checkouts, so do not roll application versions across 008.
 -- Retain the ON decision independently of the current company hold. Clearing
 -- a hold never restores a previously issued Checkout continuation.
 ALTER TABLE stripe_payment_attempts ADD COLUMN company_hold_expire_requested_at timestamptz;
