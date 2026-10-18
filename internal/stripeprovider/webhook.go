@@ -47,7 +47,9 @@ func VerifyWebhook(raw []byte, signature string, activeSecrets []string, now tim
 		if strings.TrimSpace(secret) == "" {
 			continue
 		}
-		candidate, err := stripe.ConstructEvent(raw, signature, secret)
+		// Tolerance was enforced against the injected clock above; avoid the
+		// SDK's additional wall-clock check while retaining signature verification.
+		candidate, err := stripe.ConstructEvent(raw, signature, secret, stripe.WithIgnoreTolerance())
 		if err == nil {
 			event = candidate
 			verified = true
