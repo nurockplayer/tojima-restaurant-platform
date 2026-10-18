@@ -39,6 +39,8 @@ CREATE TABLE operation_refunds (
  provider_refund_id text,
  generation bigint NOT NULL DEFAULT 1 CHECK(generation>0),
  provider_key text NOT NULL UNIQUE,
+ -- CAS for overlapping retrievals of the same provider object.
+ observation_version bigint NOT NULL DEFAULT 0 CHECK(observation_version>=0),
  -- Unset until first configured dispatch; immutable once anchored per generation.
  retry_not_after timestamptz,
  safe_error_code text,
@@ -84,7 +86,7 @@ BEGIN
   IF OLD.status<>'FAILED' OR OLD.provider_refund_id IS NULL OR NEW.status<>'REQUESTED' OR NEW.generation<>OLD.generation+1 OR NEW.provider_key=OLD.provider_key OR NEW.provider_refund_id IS NOT NULL OR NEW.retry_not_after IS NOT NULL THEN RAISE EXCEPTION 'only confirmed failure may retry'; END IF;
  ELSE
   IF NEW.provider_key<>OLD.provider_key OR (OLD.retry_not_after IS NOT NULL AND NEW.retry_not_after IS DISTINCT FROM OLD.retry_not_after) OR (OLD.provider_refund_id IS NOT NULL AND NEW.provider_refund_id IS DISTINCT FROM OLD.provider_refund_id) THEN RAISE EXCEPTION 'refund provider attempt is immutable'; END IF;
-  IF NEW.status<>OLD.status AND NOT ((OLD.status='REQUESTED' AND NEW.status='PROCESSING') OR (OLD.status='PROCESSING' AND NEW.status IN ('SUCCEEDED','FAILED')) OR (OLD.method='STRIPE' AND OLD.status='SUCCEEDED' AND NEW.status='FAILED' AND OLD.provider_refund_id IS NOT NULL)) THEN RAISE EXCEPTION 'unsupported refund transition'; END IF;
+  IF NEW.status<>OLD.status AND NOT ((OLD.status='REQUESTED' AND NEW.status='PROCESSING') OR (OLD.method='STRIPE' AND NEW.provider_refund_id IS NOT NULL AND NEW.status IN ('PROCESSING','SUCCEEDED','FAILED'))) THEN RAISE EXCEPTION 'unsupported refund transition'; END IF;
  END IF;
  RETURN NEW;
 END;
@@ -172,7 +174,7 @@ BEGIN
         (OLD.payment_method='CASH' AND OLD.payment_status='UNPAID' AND NEW.payment_status='PAID') OR
         (OLD.payment_method='STRIPE' AND OLD.payment_status IN ('PENDING','UNKNOWN') AND NEW.payment_status='PAID') OR
         (OLD.payment_status='PAID' AND NEW.payment_status IN ('REFUND_PENDING','REFUNDED') AND NEW.fulfillment_status='CANCELLED') OR
-        (OLD.payment_method='STRIPE' AND OLD.payment_status='REFUNDED' AND NEW.payment_status='REFUND_PENDING' AND NEW.fulfillment_status='CANCELLED' AND EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=OLD.order_id AND r.status='FAILED')) OR
+        (OLD.payment_method='STRIPE' AND OLD.payment_status='REFUNDED' AND NEW.payment_status='REFUND_PENDING' AND NEW.fulfillment_status='CANCELLED' AND EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=OLD.order_id AND r.status<>'SUCCEEDED')) OR
         (OLD.payment_status='REFUND_PENDING' AND NEW.payment_status='REFUNDED' AND NOT EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=OLD.order_id AND r.status<>'SUCCEEDED'))) THEN
         RAISE EXCEPTION 'unsupported payment transition';
     END IF;

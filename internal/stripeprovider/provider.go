@@ -406,8 +406,9 @@ func paymentIntentResult(pi *stripe.PaymentIntent, requestedAccount string) (Pay
 	return PaymentIntentResult{AccountID: account, ID: pi.ID, Status: string(pi.Status), AmountJPY: pi.Amount, Currency: string(pi.Currency), LiveMode: pi.Livemode, Metadata: cloneMap(pi.Metadata)}, nil
 }
 
+// Unknown statuses are transported intact for fail-closed reconciliation.
 func refundResult(r *stripe.Refund, requestedAccount string) (RefundResult, error) {
-	if r == nil || !validStripeObjectID(r.ID, "re") || r.Currency != stripe.Currency(CurrencyJPY) || r.Amount <= 0 || !validRefundStatus(string(r.Status)) {
+	if r == nil || !validStripeObjectID(r.ID, "re") || r.Currency != stripe.Currency(CurrencyJPY) || r.Amount <= 0 {
 		return RefundResult{}, ErrUnsafeResponse
 	}
 	piID := ""
@@ -418,14 +419,6 @@ func refundResult(r *stripe.Refund, requestedAccount string) (RefundResult, erro
 		return RefundResult{}, ErrUnsafeResponse
 	}
 	return RefundResult{AccountID: requestedAccount, ID: r.ID, PaymentIntentID: piID, AmountJPY: r.Amount, Currency: string(r.Currency), Status: string(r.Status), Metadata: cloneMap(r.Metadata)}, nil
-}
-
-func validRefundStatus(s string) bool {
-	switch s {
-	case "pending", "requires_action", "succeeded", "failed", "canceled":
-		return true
-	}
-	return false
 }
 
 func refundMetadataMatches(m map[string]string, tenant, store, order, refund string) bool {

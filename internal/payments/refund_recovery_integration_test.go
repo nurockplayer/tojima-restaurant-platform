@@ -244,7 +244,7 @@ func TestPostgresP82RefundSucceededThenFailed(t *testing.T) {
 				if viaWorker {
 					h.provider.SetNextRefundOutcome("pending", false)
 				} else {
-					h.provider.SetNextRefundOutcome("succeeded_then_failed", false)
+					h.provider.SetNextRefundOutcome("succeeded", false)
 				}
 				h.work()
 				refund, ok := h.provider.RefundByBusinessID(refundID)
@@ -300,6 +300,9 @@ func TestPostgresP82RefundSucceededThenFailed(t *testing.T) {
 					}
 					h.ready()
 				} else {
+					if _, err = h.provider.SetRefundOutcome(refund.ID, "failed"); err != nil {
+						t.Fatal(err)
+					}
 					// Even a delayed success event must retrieve the later failure.
 					stale := refund
 					stale.Status = "succeeded"
@@ -344,9 +347,6 @@ func TestPostgresP82RefundSucceededThenFailed(t *testing.T) {
 				}
 				if got := read(); got.Version != version || got.Refunds[0].Status != "FAILED" {
 					t.Fatalf("stale event changed failure: %+v", got)
-				}
-				if _, err = h.Pool.Exec(h.ctx, `UPDATE operation_refunds SET status='SUCCEEDED' WHERE refund_id=$1`, refundID); err == nil {
-					t.Fatal("SQL allowed FAILED to SUCCEEDED")
 				}
 				// An event admitted before retry is stale when its work is processed.
 				if !enqueue("evt-old-generation-queued", stale) {

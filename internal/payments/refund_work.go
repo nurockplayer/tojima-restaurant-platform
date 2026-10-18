@@ -14,7 +14,7 @@ type refundWorkRow struct {
 	ID, OrderID, RefundID, TenantID, StoreID, Credential, Mode, Account, PaymentIntent, Key, ProviderRefundID string
 	APIVersion                                                                                                string
 	Profile                                                                                                   []byte
-	Amount, Generation                                                                                        int64
+	Amount, Generation, ObservationVersion                                                                    int64
 	RetryNotAfter                                                                                             *time.Time
 	Status                                                                                                    string
 }
@@ -22,9 +22,9 @@ type refundWorkRow struct {
 func (s *Service) loadRefundWork(ctx context.Context, refundID string) (refundWorkRow, error) {
 	var r refundWorkRow
 	err := s.db.QueryRow(ctx, `SELECT r.refund_id,r.order_id,r.refund_id,a.tenant_id,a.store_id,a.credential_ref,a.provider_mode,a.stripe_account_id,
-		coalesce(a.payment_intent_id,''),r.provider_key,coalesce(r.provider_refund_id,''),r.amount_jpy,r.generation,r.retry_not_after,r.status,a.api_version,a.request_profile_fingerprint
+		coalesce(a.payment_intent_id,''),r.provider_key,coalesce(r.provider_refund_id,''),r.amount_jpy,r.generation,r.retry_not_after,r.status,a.api_version,a.request_profile_fingerprint,r.observation_version
 		FROM operation_refunds r JOIN stripe_payment_attempts a USING(order_id) WHERE r.refund_id=$1`, refundID).
-		Scan(&r.ID, &r.OrderID, &r.RefundID, &r.TenantID, &r.StoreID, &r.Credential, &r.Mode, &r.Account, &r.PaymentIntent, &r.Key, &r.ProviderRefundID, &r.Amount, &r.Generation, &r.RetryNotAfter, &r.Status, &r.APIVersion, &r.Profile)
+		Scan(&r.ID, &r.OrderID, &r.RefundID, &r.TenantID, &r.StoreID, &r.Credential, &r.Mode, &r.Account, &r.PaymentIntent, &r.Key, &r.ProviderRefundID, &r.Amount, &r.Generation, &r.RetryNotAfter, &r.Status, &r.APIVersion, &r.Profile, &r.ObservationVersion)
 	return r, err
 }
 
@@ -44,9 +44,6 @@ func (s *Service) processRefund(ctx context.Context, w workItem) error {
 	}
 	if r.Generation != *w.RefundGeneration {
 		return s.finishWork(ctx, w, false, 0, "STALE_REFUND_GENERATION")
-	}
-	if r.Status == "FAILED" {
-		return s.finishWork(ctx, w, false, 0, "REFUND_TERMINAL")
 	}
 	if r.PaymentIntent == "" || r.Amount <= 0 {
 		return s.retryRefund(ctx, w, "REFUND_PAYMENT_BINDING_MISSING")
@@ -77,10 +74,14 @@ func (s *Service) processRefund(ctx context.Context, w workItem) error {
 	if !validRefundResult(result, r) {
 		return s.retryRefund(ctx, w, "UNSAFE_REFUND_RESPONSE")
 	}
-	// A concurrent webhook may already have recorded success. Confirm a create
-	// failure by retrieval too before allowing it to supersede that success.
-	if r.ProviderRefundID == "" && (result.Status == "failed" || result.Status == "canceled") {
+	// Create only discovers the object. Every provider status projection, including
+	// initial success and unknown statuses, must come from retrieval.
+	if r.ProviderRefundID == "" {
 		r.ProviderRefundID = result.ID
+		// Retain the known binding even if retrieval fails past the create horizon.
+		if err = s.persistRefundObservation(ctx, w, r, result, false); err != nil {
+			return err
+		}
 		result, err = resolved.Provider.RetrieveRefund(ctx, resolved.Account, r.ProviderRefundID)
 		if err != nil {
 			return s.retryRefund(ctx, w, "REFUND_RETRIEVE_UNKNOWN")
@@ -116,7 +117,7 @@ func (s *Service) markRefundProcessing(ctx context.Context, w workItem, r *refun
 	}
 	var status string
 	var currentGeneration int64
-	if err = tx.QueryRow(ctx, `SELECT status,generation,coalesce(provider_refund_id,''),retry_not_after FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, r.RefundID).Scan(&status, &currentGeneration, &r.ProviderRefundID, &r.RetryNotAfter); err != nil {
+	if err = tx.QueryRow(ctx, `SELECT status,generation,coalesce(provider_refund_id,''),retry_not_after,observation_version FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, r.RefundID).Scan(&status, &currentGeneration, &r.ProviderRefundID, &r.RetryNotAfter, &r.ObservationVersion); err != nil {
 		return err
 	}
 	var workGeneration int64
@@ -124,9 +125,6 @@ func (s *Service) markRefundProcessing(ctx context.Context, w workItem, r *refun
 		return ErrConflict
 	}
 	if workGeneration != r.Generation || currentGeneration != r.Generation {
-		return ErrConflict
-	}
-	if status == "FAILED" {
 		return ErrConflict
 	}
 	if r.ProviderRefundID == "" && r.RetryNotAfter == nil {
@@ -147,15 +145,22 @@ func (s *Service) markRefundProcessing(ctx context.Context, w workItem, r *refun
 
 func validRefundResult(x stripeprovider.RefundResult, r refundWorkRow) bool {
 	return x.AccountID == r.Account && x.ID != "" && (r.ProviderRefundID == "" || x.ID == r.ProviderRefundID) && x.PaymentIntentID == r.PaymentIntent && x.AmountJPY == r.Amount && x.Currency == stripeprovider.CurrencyJPY && !x.LiveMode &&
-		x.Metadata["tenant_id"] == r.TenantID && x.Metadata["store_id"] == r.StoreID && x.Metadata["order_id"] == r.OrderID && x.Metadata["refund_id"] == r.RefundID &&
-		(x.Status == "pending" || x.Status == "requires_action" || x.Status == "succeeded" || x.Status == "failed" || x.Status == "canceled")
+		x.Metadata["tenant_id"] == r.TenantID && x.Metadata["store_id"] == r.StoreID && x.Metadata["order_id"] == r.OrderID && x.Metadata["refund_id"] == r.RefundID
 }
 
 func (s *Service) retryRefund(ctx context.Context, w workItem, code string) error {
 	return s.finishWork(ctx, w, true, 5*time.Second, code)
 }
 
+// Both work sources share binding, staleness, projection, audit and retry rules.
 func (s *Service) persistRefundResult(ctx context.Context, w workItem, r refundWorkRow, x stripeprovider.RefundResult) error {
+	return s.persistRefundObservation(ctx, w, r, x, true)
+}
+
+func (s *Service) persistRefundObservation(ctx context.Context, w workItem, r refundWorkRow, x stripeprovider.RefundResult, retrieved bool) error {
+	if !validRefundResult(x, r) {
+		return ErrDenied
+	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return err
@@ -171,15 +176,16 @@ func (s *Service) persistRefundResult(ctx context.Context, w workItem, r refundW
 	if _, err = tx.Exec(ctx, `SELECT 1 FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, r.OrderID); err != nil {
 		return err
 	}
-	var currentStatus, providerID string
-	var currentGeneration int64
-	if err = tx.QueryRow(ctx, `SELECT status,coalesce(provider_refund_id,''),generation FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, r.RefundID).Scan(&currentStatus, &providerID, &currentGeneration); err != nil {
+	var currentStatus, providerID, currentCode string
+	var currentGeneration, observationVersion int64
+	if err = tx.QueryRow(ctx, `SELECT status,coalesce(provider_refund_id,''),generation,observation_version,coalesce(safe_error_code,'') FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, r.RefundID).Scan(&currentStatus, &providerID, &currentGeneration, &observationVersion, &currentCode); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM stripe_payment_work WHERE work_id=$1 FOR UPDATE`, w.ID); err != nil {
-		return err
+	var workGeneration int64
+	if err = tx.QueryRow(ctx, `SELECT refund_generation FROM stripe_payment_work WHERE work_id=$1 AND status='LEASED' AND lease_token=$2 AND lease_until>clock_timestamp() FOR UPDATE`, w.ID, w.Lease).Scan(&workGeneration); err != nil {
+		return ErrConflict
 	}
-	if currentGeneration != r.Generation || w.RefundGeneration == nil || currentGeneration != *w.RefundGeneration {
+	if currentGeneration != r.Generation || w.RefundGeneration == nil || currentGeneration != *w.RefundGeneration || workGeneration != currentGeneration {
 		if err = s.completeLeased(ctx, tx, w); err != nil {
 			return err
 		}
@@ -188,9 +194,24 @@ func (s *Service) persistRefundResult(ctx context.Context, w workItem, r refundW
 	if currentPI != r.PaymentIntent || (providerID != "" && providerID != x.ID) {
 		return ErrDenied
 	}
-	next := reconciledRefundStatus(currentStatus, x.Status)
-	changed := currentStatus != next || (providerID == "" && x.ID != "")
-	if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status=$2,provider_refund_id=coalesce(provider_refund_id,$3),safe_error_code=CASE WHEN $2='FAILED' THEN 'PROVIDER_REFUND_FAILED' ELSE NULL END,updated_at=clock_timestamp() WHERE refund_id=$1`, r.RefundID, next, x.ID); err != nil {
+	if !retrieved {
+		_, err = tx.Exec(ctx, `UPDATE operation_refunds SET provider_refund_id=coalesce(provider_refund_id,$2),updated_at=clock_timestamp() WHERE refund_id=$1`, r.RefundID, x.ID)
+		if err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	// A concurrent retrieval has already committed since this observation began.
+	// Discard the stale snapshot, regardless of status, and retrieve again.
+	if observationVersion != r.ObservationVersion {
+		if err = requeueLeasedRefund(ctx, tx, w, "REFUND_PROCESSING"); err != nil {
+			return err
+		}
+		return tx.Commit(ctx)
+	}
+	next, code := projectedRefundStatus(x.Status)
+	changed := currentStatus != next || providerID == "" || currentCode != code
+	if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status=$2,provider_refund_id=coalesce(provider_refund_id,$3),safe_error_code=nullif($4,''),observation_version=observation_version+1,updated_at=clock_timestamp() WHERE refund_id=$1`, r.RefundID, next, x.ID, code); err != nil {
 		return err
 	}
 	if changed {
@@ -199,25 +220,38 @@ func (s *Service) persistRefundResult(ctx context.Context, w workItem, r refundW
 		}
 	}
 	if next == "PROCESSING" {
-		if err = requeueLeasedRefund(ctx, tx, w, "REFUND_PROCESSING"); err != nil {
+		if code == "" {
+			code = "REFUND_PROCESSING"
+		}
+		if err = requeueLeasedRefund(ctx, tx, w, code); err != nil {
 			return err
 		}
-	} else if err = s.completeLeased(ctx, tx, w); err != nil {
-		return err
+	} else {
+		if w.RefundEventID != nil {
+			if _, err = tx.Exec(ctx, `UPDATE stripe_refund_webhook_events SET processed_at=clock_timestamp(),safe_error_code=NULL WHERE event_row_id=$1`, *w.RefundEventID); err != nil {
+				return err
+			}
+		}
+		if err = s.completeLeased(ctx, tx, w); err != nil {
+			return err
+		}
 	}
 	return tx.Commit(ctx)
 }
 
-// A retrieved failure may supersede success on the same provider object. Failure
-// is final within a generation: an in-flight stale success cannot resurrect it.
-func reconciledRefundStatus(current, providerStatus string) string {
-	if current == "FAILED" || providerStatus == "failed" || providerStatus == "canceled" {
-		return "FAILED"
+// Local state projects the retrieved Stripe object, never the prior local state
+// or webhook payload. Enum: stripe-go/v87 v87.0.0, API 2026-09-30.endive.
+func projectedRefundStatus(providerStatus string) (status, safeCode string) {
+	switch providerStatus {
+	case "pending", "requires_action":
+		return "PROCESSING", ""
+	case "succeeded":
+		return "SUCCEEDED", ""
+	case "failed", "canceled":
+		return "FAILED", "PROVIDER_REFUND_FAILED"
+	default:
+		return "PROCESSING", "HOLD_RECONCILIATION_NEEDED"
 	}
-	if current == "SUCCEEDED" || providerStatus == "succeeded" {
-		return "SUCCEEDED"
-	}
-	return "PROCESSING"
 }
 
 func requeueLeasedRefund(ctx context.Context, tx pgx.Tx, w workItem, code string) error {
@@ -273,60 +307,7 @@ func (s *Service) processRefundWebhook(ctx context.Context, w workItem) error {
 }
 
 func (s *Service) persistRefundWebhookResult(ctx context.Context, w workItem, r refundWorkRow, x stripeprovider.RefundResult) error {
-	tx, err := s.db.Begin(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback(ctx)
-	if err = lockPaymentSessionAny(ctx, tx, r.OrderID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM stripe_payment_attempts WHERE order_id=$1 FOR UPDATE`, r.OrderID); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, r.OrderID); err != nil {
-		return err
-	}
-	var current, currentProviderID string
-	var currentGeneration int64
-	if err = tx.QueryRow(ctx, `SELECT status,coalesce(provider_refund_id,''),generation FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, r.RefundID).Scan(&current, &currentProviderID, &currentGeneration); err != nil {
-		return err
-	}
-	if _, err = tx.Exec(ctx, `SELECT 1 FROM stripe_payment_work WHERE work_id=$1 FOR UPDATE`, w.ID); err != nil {
-		return err
-	}
-	if currentGeneration != r.Generation || w.RefundGeneration == nil || currentGeneration != *w.RefundGeneration {
-		if err = s.completeLeased(ctx, tx, w); err != nil {
-			return err
-		}
-		return tx.Commit(ctx)
-	}
-	if currentProviderID != "" && currentProviderID != x.ID {
-		return ErrDenied
-	}
-	if next := reconciledRefundStatus(current, x.Status); current != next || currentProviderID == "" {
-		if current == "REQUESTED" {
-			if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status='PROCESSING',provider_refund_id=coalesce(provider_refund_id,$2),updated_at=clock_timestamp() WHERE refund_id=$1`, r.RefundID, x.ID); err != nil {
-				return err
-			}
-			if err = bumpRefundOperationVersion(ctx, tx, r.OrderID, r.RefundID, "REQUESTED", "PROCESSING", r.Generation, x.ID); err != nil {
-				return err
-			}
-		}
-		if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status=$2,provider_refund_id=coalesce(provider_refund_id,$3),safe_error_code=CASE WHEN $2='FAILED' THEN 'PROVIDER_REFUND_FAILED' ELSE NULL END,updated_at=clock_timestamp() WHERE refund_id=$1`, r.RefundID, next, x.ID); err != nil {
-			return err
-		}
-		if err = bumpRefundOperationVersion(ctx, tx, r.OrderID, r.RefundID, current, next, r.Generation, x.ID); err != nil {
-			return err
-		}
-	}
-	if _, err = tx.Exec(ctx, `UPDATE stripe_refund_webhook_events SET processed_at=clock_timestamp(),safe_error_code=NULL WHERE event_row_id=$1`, *w.RefundEventID); err != nil {
-		return err
-	}
-	if err = s.completeLeased(ctx, tx, w); err != nil {
-		return err
-	}
-	return tx.Commit(ctx)
+	return s.persistRefundObservation(ctx, w, r, x, true)
 }
 
 func (s *Service) finishStaleRefundWebhook(ctx context.Context, w workItem) error {

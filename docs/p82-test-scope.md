@@ -315,8 +315,8 @@ explicit hand-back confirmation and records a separate SUCCEEDED refund with
 actor plus cashier ledger entry against the original receipt. Stripe refunds
 use the original attempt's PaymentIntent/account/request profile. Manager writes
 enqueue existing durable payment work; provider calls occur outside database
-transactions. State is REQUESTED → PROCESSING → SUCCEEDED or FAILED, and only
-provider confirmation can record success. Pending/unknown outcomes remain
+transactions. REQUESTED enters PROCESSING at dispatch; subsequent local state is
+a projection of the retrieved provider refund object. Pending/unknown outcomes remain
 unresolved; bound refunds are retrieved. Unbound unknown creates reuse the
 same provider key within a 20-hour retry horizon anchored immediately before the
 first provider dispatch, after configuration validation. Waiting for workers or
@@ -333,12 +333,35 @@ logic, and no whole-table automatic refund exists.
 **Payment-status decision:** partial refunds keep operation `payment_status=PAID`
 and carry their independent refund records. Whole-order Stripe cancellation is
 REFUND_PENDING until every refund is provider-confirmed SUCCEEDED, then REFUNDED.
-A retrieved, same-generation/object failure after SUCCEEDED reconciles to FAILED
-through both worker and webhook persistence, with a `REFUND_STATUS_CHANGED` audit.
-It restores a cancelled full order to REFUND_PENDING; partial refunds keep PAID.
-Close is blocked again and FAILED becomes reachable for manager retry. Webhook
-payload status never overrides retrieval; FAILED cannot return to SUCCEEDED in
-the same generation, and old generations cannot change the retried refund.
+Every retrieved status for the same generation/object replaces the local projection
+through the shared worker/webhook persistence rule, including transitions out of
+SUCCEEDED and FAILED. State changes write a `REFUND_STATUS_CHANGED` audit.
+Any non-success restores a cancelled full order to REFUND_PENDING; partial refunds
+keep PAID. Close blocks again; FAILED remains reachable for explicit manager retry.
+Webhook payloads only trigger retrieval. Create responses establish the immutable
+object binding, then retrieval determines state; the binding survives retrieval
+errors. Old generations/objects cannot alter a retried refund. An observation-version
+CAS discards overlapping results after another retrieval commits (even an unchanged
+status) and requeues retrieval. PROCESSING retains durable work with backoff.
+
+The pinned `stripe-go/v87 v87.0.0` / API `2026-09-30.endive` RefundStatus enum
+contains exactly the five named statuses below. Stripe documents
+[succeeded → requires_action when the receiving bank returns funds](https://docs.stripe.com/refunds#refunds-that-require-action).
+The table applies from every local state: REQUESTED, PROCESSING, SUCCEEDED, FAILED.
+
+| Retrieved Stripe status | Local refund state | Full cancelled order | Partial refund | Close refund gate |
+| --- | --- | --- | --- | --- |
+| pending | PROCESSING | REFUND_PENDING | PAID | blocked |
+| requires_action | PROCESSING | REFUND_PENDING | PAID | blocked |
+| succeeded | SUCCEEDED | REFUNDED only when all refunds succeed | PAID | cleared when all refunds succeed |
+| failed | FAILED | REFUND_PENDING | PAID | blocked |
+| canceled | FAILED | REFUND_PENDING | PAID | blocked |
+| unknown / empty | PROCESSING | REFUND_PENDING | PAID | blocked |
+
+Unknown statuses retain the staff-visible safe code `HOLD_RECONCILIATION_NEEDED`
+(existing JA/zh-Hant reconciliation-needed labels); raw provider status text is
+not exposed. A fresh known observation clears that code. Both SQL guards allow
+these projections while preserving immutable provider bindings and generation rules.
 A completed full CASH refund is REFUNDED immediately. REQUESTED, PROCESSING and
 FAILED refunds all block close, as does unresolved review. Cancelled unpaid CASH
 and fully refunded cancelled orders may close once every other order is resolved.
@@ -421,7 +444,7 @@ review of the resulting commit is still required.
 初回送信前に期限を消費する点で BLOCKED となった。同じ世代・返金 ID の取得結果で
 成功後の失敗を確認すると FAILED と監査イベントを記録する。全額取消は REFUND_PENDING
 に戻し、部分返金は PAID を維持する。閉卓を再び止め、要確認一覧から店長が再試行できる。
-古い通知の状態は採用せず取得結果で判断し、FAILED は同世代で成功に戻さず旧世代も無視する。
+古い通知の状態は採用せず取得結果で判断する。旧世代は無視し、同世代の全状態は下記の再レビュー対応表に従う。
 20 時間の期限は設定検証後の初回送信直前に一度だけ確定する。設定が利用できない間は
 REFUND_DISPATCH_PENDING とバックオフで待機する。結果不明で期限を過ぎても DONE にせず
 HOLD_RECONCILIATION_NEEDED として照合を待ち、新しいキーで送信しない。両経路の遅延失敗、
@@ -432,9 +455,72 @@ HOLD_RECONCILIATION_NEEDED として照合を待ち、新しいキーで送信�
 繁體中文：本次獨立審查將舊提交 d528126 判為 BLOCKED，原因是忽略成功後的退款失敗，
 且初次送出前便消耗期限。取得同一世代與退款 ID 的服務商物件並確認後續失敗時，記錄 FAILED
 及稽核事件；全額取消恢復 REFUND_PENDING，部分退款維持 PAID。再次阻止關桌，主管可從
-待審核佇列重試。通知中的舊狀態以取得的物件為準，同世代 FAILED 不回到成功，舊世代無效。
+待審核佇列重試。通知中的舊狀態以取得的物件為準，舊世代無效；同世代全部狀態依下方第二輪修正表投影。
 20 小時期限僅於設定驗證後、首次送出前固定一次。設定不可用時以 REFUND_DISPATCH_PENDING
 及退避維持待處理；結果不明且期限已過仍不標記 DONE，保留 HOLD_RECONCILIATION_NEEDED
 等待核對，不以新鍵重新送出。測試涵蓋兩種處理路徑的後續失敗、關桌、重試、稽核、超過
 20 小時的首次送出延遲、相同鍵復原及不可延長的期限。指定 Go race、遷移、格式、vet、build、Web lint、型別檢查及 137 項 Web 測試通過。
 修正提交仍需新的獨立最終審查。
+
+
+C1 round-2 repair (2026-10-18): `bce0750` was BLOCKED because retrieved
+requires_action could not supersede SUCCEEDED. The general projection above
+supersedes the earlier sticky-failure rule. PostgreSQL table-driven coverage
+exercises all five pinned statuses plus unknown/empty from every local state,
+through both persistence paths, with payment projection, audit and close checks.
+The full/partial succeeded → requires_action → succeeded regression interleaves
+an older retrieved success and checks that it cannot overwrite PROCESSING.
+Existing old-generation/object and manual-retry regressions remain in scope.
+Adapter tests transport every pinned enum value plus unknown/empty through
+retrieval and verified webhooks. Local verification is separate from a fresh
+independent Oracle/Ego-lite verdict.
+
+日本語：第 2 回修正では、同一世代・同一返金 ID の取得結果をローカル状態へ投影する。
+以前の SUCCEEDED / FAILED 固定規則は廃止する。API 2026-09-30.endive、
+stripe-go/v87 v87.0.0 の全列挙値と未知値を、全ローカル状態から次の表で処理する。
+
+| 取得した Stripe 状態 | 返金状態 | 全額取消の支払状態 | 部分返金 | 返金による閉卓制限 |
+| --- | --- | --- | --- | --- |
+| pending | PROCESSING | REFUND_PENDING | PAID | 閉卓不可 |
+| requires_action | PROCESSING | REFUND_PENDING | PAID | 閉卓不可 |
+| succeeded | SUCCEEDED | 全返金成功時のみ REFUNDED | PAID | 全返金成功時に解除 |
+| failed | FAILED | REFUND_PENDING | PAID | 閉卓不可 |
+| canceled | FAILED | REFUND_PENDING | PAID | 閉卓不可 |
+| 未知 / 空 | PROCESSING | REFUND_PENDING | PAID | 閉卓不可 |
+
+成功後に銀行が資金を戻して requires_action となった場合も PROCESSING に戻し、
+全額取消は REFUND_PENDING と監査イベントを記録する。未知値は既存の安全コード
+HOLD_RECONCILIATION_NEEDED（返金状況の確認が必要）をスタッフに表示して照合を継続する。
+Webhook は取得の契機のみとし、作成応答は ID を固定した後、必ず取得で状態を確認する。
+古い世代・別返金 ID は状態を変更できない。同時取得は観測バージョンの CAS で古い結果を
+破棄して再取得する。両永続化経路と SQL の両ガードで同じ規則を使用する。
+全状態の表形式テスト、全額・部分返金の成功→要対応→成功と古い成功結果の割込みを検証する。
+
+繁體中文：第二輪修正將同一世代、同一退款 ID 的取得結果投影為本地狀態，取代先前
+固定 SUCCEEDED / FAILED 的規則。API 2026-09-30.endive、stripe-go/v87 v87.0.0
+的全部列舉值及未知值，皆從任一本地狀態依下表處理。
+
+| 取得的 Stripe 狀態 | 本地退款狀態 | 全額取消的付款狀態 | 部分退款 | 退款關桌限制 |
+| --- | --- | --- | --- | --- |
+| pending | PROCESSING | REFUND_PENDING | PAID | 阻止關桌 |
+| requires_action | PROCESSING | REFUND_PENDING | PAID | 阻止關桌 |
+| succeeded | SUCCEEDED | 全部退款成功才為 REFUNDED | PAID | 全部退款成功才解除 |
+| failed | FAILED | REFUND_PENDING | PAID | 阻止關桌 |
+| canceled | FAILED | REFUND_PENDING | PAID | 阻止關桌 |
+| 未知 / 空值 | PROCESSING | REFUND_PENDING | PAID | 阻止關桌 |
+
+成功後銀行退回款項而成為 requires_action 時，恢復 PROCESSING，全額取消恢復
+REFUND_PENDING 並留下稽核。未知值保留既有安全代碼 HOLD_RECONCILIATION_NEEDED
+（需要確認退款狀態），持續核對。Webhook 僅觸發取得；建立回應只固定退款 ID，狀態必須
+再次取得確認。舊世代或不同退款 ID 無法更改投影；同時取得使用觀測版本 CAS，丟棄過期結果
+並重新取得。兩條持久化路徑及兩個 SQL 轉換限制使用相同規則。表格測試涵蓋全部狀態，
+另驗證全額／部分退款成功→需處理→成功，並穿插過期成功結果。獨立最終審查仍屬另一道關卡。
+
+Round-2 local verification: all commands in the C1 verification block above
+passed with the supplied TEST_DATABASE_URL. The race-enabled internal/migration
+suite passed (payments: 71.446s), as did fmt-check, vet, build, migration-smoke,
+web lint and TypeScript checking. Web Vitest: 9 files, 137 tests passed.
+日本語：第 2 回修正の指定コマンドはすべて成功。Go race と PostgreSQL 遷移、整形、
+vet、build、migration-smoke、Web lint・型検査、Web 9 ファイル・137 テストが成功した。
+繁體中文：第二輪修正的指定指令全部通過，包含 Go race 與 PostgreSQL 遷移、格式、
+vet、build、migration-smoke、Web lint、型別檢查，以及 Web 9 個檔案、137 項測試。

@@ -487,7 +487,6 @@ func (s *Service) enqueueRefundWebhook(ctx context.Context, event stripeprovider
 		}
 		if x.AccountID != event.AccountID || x.ID == "" || refundID == "" || x.AmountJPY <= 0 || x.Currency != stripeprovider.CurrencyJPY || x.LiveMode || x.PaymentIntentID == "" ||
 			x.Metadata["tenant_id"] == "" || x.Metadata["store_id"] == "" || x.Metadata["order_id"] == "" ||
-			!(x.Status == "pending" || x.Status == "requires_action" || x.Status == "succeeded" || x.Status == "failed" || x.Status == "canceled") ||
 			!(event.Type == "charge.refunded" || event.Type == "refund.updated" || event.Type == "refund.failed") {
 			return false, stripeprovider.ErrWebhook
 		}

@@ -511,3 +511,36 @@ func TestReadWebhookBodyBoundsAllocation(t *testing.T) {
 		t.Fatalf("nil reader err=%v", err)
 	}
 }
+
+func TestRefundStatusTransportIncludesPinnedEnumAndUnknown(t *testing.T) {
+	// These are all RefundStatus constants in stripe-go/v87 v87.0.0. Preserve
+	// unknown/empty values too: only retrieved status projection decides outcome.
+	for _, status := range []string{string(stripe.RefundStatusPending), string(stripe.RefundStatusRequiresAction), string(stripe.RefundStatusSucceeded), string(stripe.RefundStatusFailed), string(stripe.RefundStatusCanceled), "future_status", ""} {
+		t.Run(status, func(t *testing.T) {
+			object := fmt.Sprintf(`{"id":"re_test123","object":"refund","amount":500,"currency":"jpy","status":%q,"payment_intent":"pi_test123","metadata":{"tenant_id":"t","store_id":"s","order_id":"o","refund_id":"r"}}`, status)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet || r.URL.Path != "/v1/refunds/re_test123" || r.Header.Get("Stripe-Version") != APIVersion {
+					t.Errorf("unexpected retrieval %s %s version=%s", r.Method, r.URL.Path, r.Header.Get("Stripe-Version"))
+				}
+				w.Header().Set("Content-Type", "application/json")
+				io.WriteString(w, object)
+			}))
+			defer ts.Close()
+			p, err := New(testConfig(&http.Client{Timeout: 2 * time.Second, Transport: redirectTransport{target: ts.URL}}))
+			if err != nil {
+				t.Fatal(err)
+			}
+			result, err := p.RetrieveRefund(context.Background(), AccountContext{Mode: ModeConnectedDirectFixture, StripeAccountID: testAccount}, "re_test123")
+			if err != nil || result.Status != status {
+				t.Fatalf("status=%q result=%+v err=%v", status, result, err)
+			}
+			now := time.Now()
+			body, _ := json.Marshal(map[string]any{"id": "evt_status", "object": "event", "type": "refund.updated", "account": testAccount, "api_version": APIVersion, "created": now.Unix(), "livemode": false, "data": map[string]any{"object": json.RawMessage(object)}})
+			signature := stripe.ComputeSignature(now, body, "whsec_status")
+			event, err := VerifyWebhook(body, fmt.Sprintf("t=%d,v1=%x", now.Unix(), signature), []string{"whsec_status"}, now)
+			if err != nil || event.Refund == nil || event.Refund.Status != status {
+				t.Fatalf("webhook=%+v err=%v", event, err)
+			}
+		})
+	}
+}
