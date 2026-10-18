@@ -225,7 +225,13 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	if err = s.appendAttemptEvent(ctx, tx, a.order, "CREATE_RESULT:"+x.SessionID, state, string(newState), "provider"); err != nil {
 		return err
 	}
-	if !companyHold && newState == StateUnknown && x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid {
+	// A preserved terminal attempt cannot offer continuation, even while its
+	// table session remains active. Expiry follows the observed payable Checkout
+	// and availability, independently of the resulting attempt state. Company
+	// holds already own retained EXPIRE work; keep the legacy key otherwise.
+	needsExpire := x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid &&
+		(hold || review || companyHold || !sessionActive || !now.Before(x.ExpiresAt) || state == string(StateFailed) || state == string(StateExpired))
+	if needsExpire && !companyHold {
 		if err = s.enqueueWork(ctx, tx, "EXPIRE", a.order, nil, "expire:"+a.attempt+":"+x.SessionID); err != nil {
 			return err
 		}

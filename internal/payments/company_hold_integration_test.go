@@ -901,6 +901,113 @@ func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
 	}
 }
 
+type createResultHookProvider struct {
+	Provider
+	afterCreate func()
+}
+
+func (p createResultHookProvider) CreateCheckout(ctx context.Context, req stripeprovider.CreateCheckoutRequest) (stripeprovider.CheckoutResult, error) {
+	x, err := p.Provider.CreateCheckout(ctx, req)
+	if err == nil {
+		p.afterCreate()
+	}
+	return x, err
+}
+
+func TestPostgresP82UnboundFailedCreateRecoveryWithoutHoldExpiresCheckout(t *testing.T) {
+	for _, expireSession := range []bool{true, false} {
+		t.Run(fmt.Sprintf("session-expires-%v", expireSession), func(t *testing.T) {
+			h := newHoldFixture(t)
+			order, proof := h.commit(h.Locator, "teishoku", ordering.Stripe)
+			var x stripeprovider.CheckoutResult
+			h.provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) { x = result })
+			h.provider.LoseNextCreateResponse()
+			h.work()
+			if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp()+interval '1 hour' WHERE work_type='CREATE'`); err != nil {
+				t.Fatal(err)
+			}
+			intent, err := h.provider.RetrievePaymentIntent(h.ctx, stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: x.AccountID}, x.PaymentIntentID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			accepted, err := h.service.EnqueueVerifiedWebhook(h.ctx, stripeprovider.VerifiedEvent{ID: "decline-before-binding", Type: "payment_intent.payment_failed", AccountID: x.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now(), ObjectID: intent.ID, PaymentIntent: &intent})
+			if err != nil || !accepted {
+				t.Fatalf("decline webhook: %v %v", accepted, err)
+			}
+			h.work()
+			h.assertState(order.Order.ID, StateFailed, false, false)
+			var unbound bool
+			if err = h.Pool.QueryRow(h.ctx, `SELECT checkout_session_id IS NULL AND payment_intent_id=$2 FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID, intent.ID).Scan(&unbound); err != nil || !unbound {
+				t.Fatalf("failed before binding: unbound=%v err=%v", unbound, err)
+			}
+
+			// Run after same-key recovery passes admission and returns the original
+			// provider Checkout, but before persistCheckout can observe the session.
+			resolver := h.service.resolver.(testResolver)
+			resolved := resolver["fixture:hold"]
+			hookCalled := false
+			resolved.Provider = createResultHookProvider{Provider: h.provider, afterCreate: func() {
+				hookCalled = true
+				var active bool
+				if err := h.Pool.QueryRow(h.ctx, `SELECT status='OPEN' AND expires_at>clock_timestamp() FROM table_sessions WHERE session_id=$1`, order.Order.SessionID).Scan(&active); err != nil || !active {
+					t.Fatalf("recovery must start with active session: active=%v err=%v", active, err)
+				}
+				if expireSession {
+					// Backdate only this isolated fixture's immutable snapshot,
+					// matching the existing session-expiry tests without sleeps.
+					if _, err := h.Pool.Exec(h.ctx, `ALTER TABLE table_sessions DISABLE TRIGGER table_session_snapshot_immutable`); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := h.Pool.Exec(h.ctx, `UPDATE table_sessions SET expires_at=clock_timestamp()-interval '1 second' WHERE session_id=$1`, order.Order.SessionID); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := h.Pool.Exec(h.ctx, `ALTER TABLE table_sessions ENABLE TRIGGER table_session_snapshot_immutable`); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}}
+			resolver["fixture:hold"] = resolved
+			h.ready()
+			h.work()
+			if !hookCalled {
+				t.Fatal("same-key CREATE recovery did not reach provider")
+			}
+			h.assertState(order.Order.ID, StateFailed, false, false)
+			var bound, noHold, createDone, active bool
+			var expiryCount, readyLegacyCount int
+			if err = h.Pool.QueryRow(h.ctx, `SELECT a.checkout_session_id=$2 AND a.checkout_status='open' AND a.provider_payment_status='unpaid',
+				a.company_hold_expire_requested_at IS NULL AND NOT os.operational_hold AND NOT os.payment_review_required,
+				ts.status='OPEN' AND ts.expires_at>clock_timestamp(),
+				(SELECT status='DONE' FROM stripe_payment_work WHERE order_id=a.order_id AND work_type='CREATE'),
+				(SELECT count(*) FROM stripe_payment_work WHERE order_id=a.order_id AND work_type='EXPIRE'),
+				(SELECT count(*) FROM stripe_payment_work WHERE order_id=a.order_id AND work_type='EXPIRE' AND status='READY' AND dedupe_key='expire:'||a.attempt_id||':'||a.checkout_session_id)
+				FROM stripe_payment_attempts a JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id WHERE a.order_id=$1`, order.Order.ID, x.SessionID).Scan(&bound, &noHold, &active, &createDone, &expiryCount, &readyLegacyCount); err != nil || !bound || !noHold || active == expireSession || !createDone || expiryCount != 1 || readyLegacyCount != 1 {
+				t.Fatalf("recovery: bound=%v noHold=%v active=%v createDone=%v expiry=%d legacyReady=%d err=%v", bound, noHold, active, createDone, expiryCount, readyLegacyCount, err)
+			}
+			if ok, err := h.service.CanResume(h.ctx, order.Order.SessionID, order.Order.ID, proof); err != nil || ok {
+				t.Fatalf("FAILED must not offer Checkout, even with active session: %v %v", ok, err)
+			}
+			r0, e0 := h.provider.CheckoutOperationCounts()
+			h.work()
+			r1, e1 := h.provider.CheckoutOperationCounts()
+			if r1-r0 != 1 || e1-e0 != 1 {
+				t.Fatalf("worker must retrieve then expire: retrieve=%d expire=%d", r1-r0, e1-e0)
+			}
+			h.assertState(order.Order.ID, StateExpired, false, false)
+			if got := h.checkout(order.Order.ID); got.Status != stripeprovider.CheckoutExpired {
+				t.Fatalf("provider Checkout remains payable: %+v", got)
+			}
+			var done bool
+			if err = h.Pool.QueryRow(h.ctx, `SELECT status='DONE' FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID).Scan(&done); err != nil || !done {
+				t.Fatalf("expiry completion: done=%v err=%v", done, err)
+			}
+			if creates, sessions := h.provider.Counts(); creates != 2 || sessions != 1 {
+				t.Fatalf("same-key recovery: creates=%d sessions=%d", creates, sessions)
+			}
+		})
+	}
+}
+
 func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
 	for _, outcome := range []string{"complete-unpaid-then-paid", "still-open"} {
 		t.Run(outcome, func(t *testing.T) {

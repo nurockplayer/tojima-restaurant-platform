@@ -37,6 +37,17 @@ then a 5-minute cap. Beyond the CREATE deadline, pending work records
 it as `safe_error_code`. Guest checkout status omits this field entirely. Recovery
 completes the work and removes that active error projection, without clearing the
 hold marker or continuation revocation.
+Late CREATE persistence determines the EXPIRE obligation from the observed
+open/unpaid Checkout and hold/review/session availability, including preserved
+FAILED/EXPIRED attempts, independently of the resulting attempt state. Without
+a company hold it uses the legacy dedupe key; company holds use their existing
+retained work without a second enqueue. Regression coverage includes lost CREATE
+response → payment_failed before binding → same-key recovery → table session
+expiry before persistence → EXPIRE queued and executed. The active-session
+variant deliberately expires the recovered Checkout too: FAILED is preserved
+at CREATE persistence and cannot offer original-browser continuation, so its
+Checkout must not remain silently payable. Confirmed provider expiry then
+reconciles the attempt to EXPIRED under the existing worker rules.
 Eligible CREATE/webhook work takes priority until EXPIRE is 30 seconds overdue
 relative to available_at. Aged EXPIRE then competes at equal priority in timestamp
 order, so newer arrivals cannot keep overtaking it. Retry backoff resets that age;
