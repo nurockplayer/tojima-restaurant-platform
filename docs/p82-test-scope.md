@@ -87,6 +87,16 @@ TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disab
 make fmt-check vet build migration-smoke
 ```
 
+Deployment precondition: apply migration 008 with application writers stopped
+(no rolling upgrade across 008). Its backfill marks Checkouts covered by holds
+already active at upgrade time; a pre-008 binary activating a hold during or
+after the migration would not mark its Checkouts. A database-trigger variant
+that covered old binaries was evaluated and rejected because it introduced
+deadlocks with order admission and hold activation; no production deployment
+exists yet, so the precondition is part of the first deployment runbook.
+日本語：008 は全アプリ書込を停止して適用する（008 をまたぐローリング更新は不可）。
+繁中：008 須在停止所有應用寫入時套用，不可跨 008 進行滾動升級。
+
 Manager approval, cancellation, refunds and review resolution belong to lanes
 B/C and are not implemented. No frontend changes, real Stripe calls, live keys,
 production deployment or independent final-review acceptance are claimed.
