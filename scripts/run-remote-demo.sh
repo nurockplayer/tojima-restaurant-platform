@@ -141,7 +141,8 @@ run_transient() {
 }
 
 printf '%s\n' "Building the demo web app and isolated Go runtimes..."
-if ! run_transient pnpm --dir web build; then fail "web build failed"; fi
+if ! run_transient env VITE_API_BASE_URL='' pnpm --dir web build --mode remote-demo; then fail "web build failed"; fi
+if ! run_transient node scripts/check-remote-demo-bundle.mjs web/dist; then fail "web bundle contains an unexpected URL or is missing"; fi
 if ! run_transient go build -o "$tmpdir/operationstest" ./cmd/operationstest; then fail "operationstest build failed"; fi
 if ! run_transient go build -o "$tmpdir/demogateway" ./cmd/demogateway; then fail "demo gateway build failed"; fi
 
