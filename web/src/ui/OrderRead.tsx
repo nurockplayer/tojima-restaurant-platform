@@ -32,16 +32,18 @@ export function orderPollInterval(value = 30_000): number {
   return Number.isFinite(value) ? Math.min(30_000, Math.max(15_000, value)) : 30_000;
 }
 
-export function OrderStatusView(props: { grant: OrderReadGrant; locale: Locale; pollMs?: number }) {
+type OrderStatusProps = { grant: OrderReadGrant; locale: Locale; pollMs?: number; onRead?: (grant: OrderReadGrant) => void };
+export function OrderStatusView(props: OrderStatusProps) {
   // A new capability gets a fresh client and no previous capability's cache.
   return <Status key={`${props.grant.order_id}:${props.grant.order_read_token}`} {...props} />;
 }
-function Status({ grant, locale, pollMs }: { grant: OrderReadGrant; locale: Locale; pollMs?: number }) {
+function Status({ grant, locale, pollMs, onRead }: OrderStatusProps) {
   const t = copy[locale];
   const [client] = useState(() => new QueryClient());
   const [visible, setVisible] = useState(document.visibilityState === 'visible');
   const [shared, setShared] = useState(false);
   const [copied, setCopied] = useState(false);
+  const confirmed = useRef(false);
   // Track the underlying request too: even a transport that settles late after
   // abort cannot overlap a resumed request or replace the new query's result.
   const flight = useRef<Promise<OrderReadStatus> | null>(null);
@@ -61,6 +63,14 @@ function Status({ grant, locale, pollMs }: { grant: OrderReadGrant; locale: Loca
     refetchInterval: (q) => visible && !q.state.data?.is_terminal ? orderPollInterval(pollMs) : false,
     refetchIntervalInBackground: false,
   }, client);
+  useEffect(() => {
+    // Save a fragment only after the server has accepted this capability, once
+    // per view so later polling cannot overwrite a newer saved link.
+    if (query.isSuccess && !confirmed.current) {
+      confirmed.current = true;
+      onRead?.(grant);
+    }
+  }, [query.isSuccess, grant, onRead]);
   useEffect(() => {
     const changed = () => {
       const next = document.visibilityState === 'visible';
@@ -127,9 +137,8 @@ export function OrderPage() {
     return () => window.removeEventListener('hashchange', changed);
   }, []);
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
-  useEffect(() => { if (grant) rememberOrderGrant(grant); }, [grant]);
   return <main><meta name="referrer" content="no-referrer" /><button type="button" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button>
-    {grant ? <OrderStatusView grant={grant} locale={locale} /> : <p role="alert">{copy[locale].invalid}</p>}
+    {grant ? <OrderStatusView grant={grant} locale={locale} onRead={rememberOrderGrant} /> : <p role="alert">{copy[locale].invalid}</p>}
     <MyOrders locale={locale} />
   </main>;
 }
