@@ -149,7 +149,7 @@ func validRefundResult(x stripeprovider.RefundResult, r refundWorkRow) bool {
 }
 
 func (s *Service) retryRefund(ctx context.Context, w workItem, code string) error {
-	return s.finishWork(ctx, w, true, 5*time.Second, code)
+	return s.finishWork(ctx, w, true, holdExpireBackoff(w.Attempts), code)
 }
 
 // Both work sources share binding, staleness, projection, audit and retry rules.
@@ -255,7 +255,7 @@ func projectedRefundStatus(providerStatus string) (status, safeCode string) {
 }
 
 func requeueLeasedRefund(ctx context.Context, tx pgx.Tx, w workItem, code string) error {
-	cmd, err := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,available_at=clock_timestamp()+interval '5 seconds',safe_error_code=$3,updated_at=clock_timestamp() WHERE work_id=$1 AND status='LEASED' AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease, code)
+	cmd, err := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,available_at=clock_timestamp()+$4::interval,safe_error_code=$3,updated_at=clock_timestamp() WHERE work_id=$1 AND status='LEASED' AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease, code, intervalString(holdExpireBackoff(w.Attempts)))
 	if err != nil {
 		return err
 	}

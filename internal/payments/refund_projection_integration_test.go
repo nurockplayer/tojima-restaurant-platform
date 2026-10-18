@@ -231,6 +231,152 @@ func TestPostgresP82RefundCreateStatusNeverOverridesRetrieval(t *testing.T) {
 	assertRefundProjection(t, h, o, "FAILED", "", false)
 }
 
+func TestPostgresP82RefundRetryUsesDurableAttemptBackoff(t *testing.T) {
+	for _, webhook := range []bool{false, true} {
+		for _, providerStatus := range []string{"pending", "requires_action", "future_status"} {
+			t.Run(fmt.Sprintf("webhook-%v/%s", webhook, providerStatus), func(t *testing.T) {
+				h, o, x := newRefundProjectionFixture(t, false)
+				if _, err := h.provider.SetRefundOutcome(x.ID, providerStatus); err != nil {
+					t.Fatal(err)
+				}
+				var workID, kind string
+				if webhook {
+					// A single webhook's retries must retain their durable count.
+					accepted, err := h.service.EnqueueVerifiedWebhook(h.ctx, stripeprovider.VerifiedEvent{ID: "pending-refund-event", Type: "refund.updated", AccountID: x.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now(), ObjectID: x.ID, Refund: &x})
+					if err != nil || !accepted {
+						t.Fatalf("enqueue=%v %v", accepted, err)
+					}
+					kind = "REFUND_WEBHOOK"
+				} else {
+					kind = "REFUND"
+				}
+				if err := h.Pool.QueryRow(h.ctx, `SELECT work_id FROM stripe_payment_work WHERE refund_id=$1 AND work_type=$2`, o.Refunds[0].ID, kind).Scan(&workID); err != nil {
+					t.Fatal(err)
+				}
+				workCode, projectionCode := "REFUND_PROCESSING", ""
+				if providerStatus == "future_status" {
+					workCode, projectionCode = "HOLD_RECONCILIATION_NEEDED", "HOLD_RECONCILIATION_NEEDED"
+				}
+				for i, seconds := range []int{5, 10, 20, 40, 80, 160, 300, 300} {
+					h.readyOnly(o.ID, kind)
+					h.workWithRetryClock()
+					assertRefundRetrySchedule(t, h, workID, i+1, time.Duration(seconds)*time.Second, workCode)
+					assertRefundProjection(t, h, o, "PROCESSING", projectionCode, false)
+					// Prove scheduler exclusion independently of the short delay.
+					if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE order_id=$1 AND status='READY'`, o.ID); err != nil {
+						t.Fatal(err)
+					}
+					_, retrieves := h.provider.RefundOperationCounts()
+					if worked, err := h.service.ProcessNext(h.ctx); err != nil || worked {
+						t.Fatalf("retry ran before available_at: %v %v", worked, err)
+					}
+					if _, after := h.provider.RefundOperationCounts(); after != retrieves {
+						t.Fatal("provider retrieved before available_at")
+					}
+				}
+				// A much higher persisted count must still use the cap.
+				if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET attempts=59 WHERE work_id=$1`, workID); err != nil {
+					t.Fatal(err)
+				}
+				h.readyOnly(o.ID, kind)
+				h.workWithRetryClock()
+				assertRefundRetrySchedule(t, h, workID, 60, 300*time.Second, workCode)
+			})
+		}
+	}
+}
+
+func TestPostgresP82RefundDispatchRetryUsesDurableAttemptBackoff(t *testing.T) {
+	h, o, _ := newRefundProjectionFixture(t, false)
+	h.service.resolver = nil
+	var workID string
+	if err := h.Pool.QueryRow(h.ctx, `SELECT work_id FROM stripe_payment_work WHERE refund_id=$1 AND work_type='REFUND'`, o.Refunds[0].ID).Scan(&workID); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		previousAttempts int
+		seconds          int
+	}{{0, 5}, {1, 10}, {2, 20}, {59, 300}} {
+		if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET attempts=$2 WHERE work_id=$1`, workID, tc.previousAttempts); err != nil {
+			t.Fatal(err)
+		}
+		h.readyOnly(o.ID, "REFUND")
+		h.workWithRetryClock()
+		assertRefundRetrySchedule(t, h, workID, tc.previousAttempts+1, time.Duration(tc.seconds)*time.Second, "REFUND_DISPATCH_PENDING")
+	}
+	if creates, retrieves := h.provider.RefundOperationCounts(); creates != 1 || retrieves != 0 {
+		t.Fatalf("unconfigured worker called provider: creates=%d retrieves=%d", creates, retrieves)
+	}
+}
+
+func TestPostgresP82FreshRefundWebhookIsImmediatelyEligible(t *testing.T) {
+	h, o, x := newRefundProjectionFixture(t, false)
+	// Put ordinary polling at the cap, then park it independently of wall time.
+	var workID string
+	if err := h.Pool.QueryRow(h.ctx, `UPDATE stripe_payment_work SET attempts=59 WHERE refund_id=$1 AND work_type='REFUND' RETURNING work_id`, o.Refunds[0].ID).Scan(&workID); err != nil {
+		t.Fatal(err)
+	}
+	h.readyOnly(o.ID, "REFUND")
+	h.workWithRetryClock()
+	assertRefundRetrySchedule(t, h, workID, 60, 300*time.Second, "REFUND_PROCESSING")
+	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE work_id=$1`, workID); err != nil {
+		t.Fatal(err)
+	}
+	// The webhook payload claims success, but retrieval still says pending.
+	x.Status = "succeeded"
+	enqueue := func(id string) string {
+		t.Helper()
+		accepted, err := h.service.EnqueueVerifiedWebhook(h.ctx, stripeprovider.VerifiedEvent{ID: id, Type: "refund.updated", AccountID: x.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now(), ObjectID: x.ID, Refund: &x})
+		if err != nil || !accepted {
+			t.Fatalf("enqueue=%v %v", accepted, err)
+		}
+		var idWork string
+		var ready bool
+		if err = h.Pool.QueryRow(h.ctx, `SELECT work_id,status='READY' AND attempts=0 AND available_at<=clock_timestamp() FROM stripe_payment_work WHERE refund_event_row_id=(SELECT event_row_id FROM stripe_refund_webhook_events WHERE stripe_event_id=$1)`, id).Scan(&idWork, &ready); err != nil || !ready {
+			t.Fatalf("fresh webhook was not immediately eligible: %v %v", ready, err)
+		}
+		return idWork
+	}
+	webhookWorkID := enqueue("fresh-refund-event")
+	_, retrieves := h.provider.RefundOperationCounts()
+	h.workWithRetryClock()
+	if _, after := h.provider.RefundOperationCounts(); after != retrieves+1 {
+		t.Fatalf("webhook retrievals=%d; want %d", after, retrieves+1)
+	}
+	assertRefundProjection(t, h, o, "PROCESSING", "", false)
+	assertRefundRetrySchedule(t, h, webhookWorkID, 1, 5*time.Second, "REFUND_PROCESSING")
+	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE work_id=$1`, webhookWorkID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.provider.SetRefundOutcome(x.ID, "succeeded"); err != nil {
+		t.Fatal(err)
+	}
+	enqueue("confirmed-refund-event")
+	h.work()
+	assertRefundProjection(t, h, o, "SUCCEEDED", "", false)
+	var processed bool
+	if err := h.Pool.QueryRow(h.ctx, `SELECT processed_at IS NOT NULL AND safe_error_code IS NULL FROM stripe_refund_webhook_events WHERE stripe_event_id='confirmed-refund-event'`).Scan(&processed); err != nil || !processed {
+		t.Fatalf("confirmed webhook was not reconciled immediately: %v %v", processed, err)
+	}
+	var pollingStillParked bool
+	if err := h.Pool.QueryRow(h.ctx, `SELECT attempts=60 AND available_at='infinity'::timestamptz FROM stripe_payment_work WHERE work_id=$1`, workID).Scan(&pollingStillParked); err != nil || !pollingStillParked {
+		t.Fatalf("webhook changed deferred polling: %v %v", pollingStillParked, err)
+	}
+}
+
+func assertRefundRetrySchedule(t *testing.T, h *holdFixture, workID string, attempts int, delay time.Duration, code string) {
+	t.Helper()
+	var gotAttempts int
+	var gotDelay float64
+	var status, gotCode string
+	if err := h.Pool.QueryRow(h.ctx, `SELECT attempts,extract(epoch FROM available_at-updated_at)::float8,status,coalesce(safe_error_code,'') FROM stripe_payment_work WHERE work_id=$1`, workID).Scan(&gotAttempts, &gotDelay, &status, &gotCode); err != nil {
+		t.Fatal(err)
+	}
+	if gotAttempts != attempts || gotDelay != delay.Seconds() || status != "READY" || gotCode != code {
+		t.Fatalf("retry schedule: attempts=%d delay=%.6f status=%s code=%s; want %d %s READY %s", gotAttempts, gotDelay, status, gotCode, attempts, delay, code)
+	}
+}
+
 func TestPostgresP82GuestRefundPaymentStates(t *testing.T) {
 	for _, partial := range []bool{false, true} {
 		t.Run(fmt.Sprintf("partial-%v", partial), func(t *testing.T) {
