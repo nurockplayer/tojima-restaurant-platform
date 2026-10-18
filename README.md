@@ -90,6 +90,7 @@ only the local flow, not production MOD-08 identity. See the
 [P-79 boundary](docs/p79-test-scope.md) for receipt and acceptance details.
 
 For a temporary, attended P-85 walkthrough, see the [remote demo guide](docs/remote-demo.md).
+Settings and scope decisions accepted by the Owner on 2026-10-19 are in [MVP Owner decisions D1–D11](docs/mvp-owner-decisions.md).
 
 日本語：P-75〜P-79は統合・受入済み。P-80は鍵なしの決済境界を追加する。実Stripe Test Mode・IdP・本番hostingの受入は別であり、既存Flutter/Firebase原価アプリを変更しない。
 
