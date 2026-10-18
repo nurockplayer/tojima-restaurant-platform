@@ -9,7 +9,7 @@ export interface StaffOrder {
   fulfillment_status: 'WAITING' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
   requires_staff_acceptance: boolean; staff_accepted: boolean; cash_mode?: 'PREPAID' | 'PAY_LATER'; version: number;
   total_gross_jpy: string; effective_total_gross_jpy?: string; created_at: string; blocked_reason?: string;
-  order_updated?: boolean; refunds?: Array<{ id: string; amount_jpy: string; status: 'REQUESTED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED'; method: 'CASH' | 'STRIPE' }>;
+  order_updated?: boolean; refunds?: Array<{ id: string; amount_jpy: string; status: 'REQUESTED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED'; method: 'CASH' | 'STRIPE'; safe_error_code?: 'REFUND_DISPATCH_PENDING' | 'HOLD_RECONCILIATION_NEEDED' }>;
   payment_review_required?: boolean; review_reason_codes?: Array<'COMPANY_HOLD' | 'OPERATIONAL_HOLD' | 'SESSION_CLOSED' | 'PAYMENT_REVIEW' | 'REFUND_UNRESOLVED'>;
   review_decision?: 'UNRESOLVED' | 'APPROVED' | 'CANCELLED';
   lines: Array<{ line_index?: number; original_quantity?: number; product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;

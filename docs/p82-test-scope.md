@@ -318,8 +318,13 @@ enqueue existing durable payment work; provider calls occur outside database
 transactions. State is REQUESTED → PROCESSING → SUCCEEDED or FAILED, and only
 provider confirmation can record success. Pending/unknown outcomes remain
 unresolved; bound refunds are retrieved. Unbound unknown creates reuse the
-same provider key within the bounded retry horizon, never a new key after an
-ambiguous timeout. A confirmed FAILED refund can be retried manually with a new
+same provider key within a 20-hour retry horizon anchored immediately before the
+first provider dispatch, after configuration validation. Waiting for workers or
+configuration does not consume that horizon. An unconfigured dispatch remains
+pending with backoff and staff-visible `REFUND_DISPATCH_PENDING`; an expired
+ambiguous create remains pending with `HOLD_RECONCILIATION_NEEDED` and cannot
+create again or obtain a fresh key. Bound refunds can still be retrieved, and
+webhooks can reconcile an unbound ambiguous outcome after the deadline. A confirmed FAILED refund can be retried manually with a new
 provider generation/key; the same staff idempotency key replays the saved result.
 Old provider bindings are retained so stale events/work cannot attach to a new
 retry generation. No refund is initiated by payment, hold, expiry, or table-close
@@ -328,6 +333,12 @@ logic, and no whole-table automatic refund exists.
 **Payment-status decision:** partial refunds keep operation `payment_status=PAID`
 and carry their independent refund records. Whole-order Stripe cancellation is
 REFUND_PENDING until every refund is provider-confirmed SUCCEEDED, then REFUNDED.
+A retrieved, same-generation/object failure after SUCCEEDED reconciles to FAILED
+through both worker and webhook persistence, with a `REFUND_STATUS_CHANGED` audit.
+It restores a cancelled full order to REFUND_PENDING; partial refunds keep PAID.
+Close is blocked again and FAILED becomes reachable for manager retry. Webhook
+payload status never overrides retrieval; FAILED cannot return to SUCCEEDED in
+the same generation, and old generations cannot change the retried refund.
 A completed full CASH refund is REFUNDED immediately. REQUESTED, PROCESSING and
 FAILED refunds all block close, as does unresolved review. Cancelled unpaid CASH
 and fully refunded cancelled orders may close once every other order is resolved.
@@ -343,7 +354,8 @@ A cancelled card with a pending update remains visible until kitchen acknowledge
 
 The JA/zh-Hant staff native dialog is available in session detail and the review
 queue, requires a server preview, displays separate refund amount and status,
-and offers only explicit retry after failure. Identity/input changes invalidate
+and offers only explicit retry after failure. Pending dispatch/reconciliation
+codes have JA/zh-Hant labels in both session detail and the review queue. Identity/input changes invalidate
 previews; stale writes require refresh and confirmation; uncertain writes retain
 the exact body/key for retry. Controls are at least 44px. Safe staff order reads
 include original/effective totals, effective/original quantities, update flag,
@@ -391,20 +403,38 @@ REFUND_PENDING 待服務商確認成功才成為 REFUNDED。未付款現金只�
 備餐中及之後由 C2 處理。取消後尚未完成的退款仍列於待審核佇列，可由主管明確重試。
 不包含自動退款、整桌自動退款、訪客退款畫面、真實 Stripe 金流或正式上線驗收。
 
-C1 local validation (2026-10-18): the commands above passed against the supplied
-loopback database, including the complete race-enabled internal/migration suite
-and 135 web tests. Additional regressions isolate the partial-refund close gate
-after service completion, expired refund-create deadlines without changing
-immutable history, and refund ingress versus manual retry with deterministic
-session-lock barriers. Charge events can contain unrelated refunds and previous
-failed generations; those entries do not create local refunds or prevent current
-local refunds from being reconciled. The project-local `.pnpm-store/` was removed.
-No push, PR, deployment, live credentials, or real-money provider calls were made.
-Independent Oracle/Ego-lite final review is **not claimed**: the installed Oracle
-CLI exposes Chrome/CDP attachment, and a supported Ego-lite route was not found.
-This is a local implementation/test candidate, not an independent review verdict.
+C1 review follow-up (2026-10-18): predecessor
+`d528126d8807a9fafd9557fb5ba6d690de27712b` was BLOCKED by the supplied fresh
+independent review for late refund failure and a deadline consumed before first
+dispatch. The targeted regressions cover full/partial succeeded→failed through
+both worker and webhook paths, stale payloads, duplicate events, old generations,
+audit, close blocking and manager retry; a first dispatch delayed over 20 hours
+with and without unavailable configuration; immutable anchoring; same-key recovery
+of ambiguous calls; and expired ambiguous work remaining pending until webhook
+reconciliation. The fake provider includes `succeeded_then_failed`. The local
+validation commands above passed for this repair: the complete race-enabled
+internal/PostgreSQL migration suite, fmt-check, vet, build, migration smoke,
+web lint, TypeScript build checking, and 137 web tests. A fresh independent
+review of the resulting commit is still required.
 
-日本語：指定の全検証と Web 135 テストは成功。`.pnpm-store/` は削除済み。push・PR・
-本番操作は行わない。Oracle/Ego-lite の独立最終レビューは未実施で、検証成功と区別する。
-繁體中文：指定檢查與 135 項 Web 測試全部通過，已移除 `.pnpm-store/`。未推送、建立 PR
-或操作正式環境。Oracle/Ego-lite 獨立最終審查尚未執行，不將本地測試成功視為審查結論。
+日本語：今回の独立レビューで旧コミット d528126 は、成功後の返金失敗を無視する点と、
+初回送信前に期限を消費する点で BLOCKED となった。同じ世代・返金 ID の取得結果で
+成功後の失敗を確認すると FAILED と監査イベントを記録する。全額取消は REFUND_PENDING
+に戻し、部分返金は PAID を維持する。閉卓を再び止め、要確認一覧から店長が再試行できる。
+古い通知の状態は採用せず取得結果で判断し、FAILED は同世代で成功に戻さず旧世代も無視する。
+20 時間の期限は設定検証後の初回送信直前に一度だけ確定する。設定が利用できない間は
+REFUND_DISPATCH_PENDING とバックオフで待機する。結果不明で期限を過ぎても DONE にせず
+HOLD_RECONCILIATION_NEEDED として照合を待ち、新しいキーで送信しない。両経路の遅延失敗、
+閉卓・再試行・監査、20 時間超の初回送信遅延、同じキーの復旧、期限の不変性を検証する。
+指定の Go race・マイグレーション・整形・vet・build・Web lint・型検査と Web 137 テストは成功。
+修正コミットの独立最終レビューは別途必要。
+
+繁體中文：本次獨立審查將舊提交 d528126 判為 BLOCKED，原因是忽略成功後的退款失敗，
+且初次送出前便消耗期限。取得同一世代與退款 ID 的服務商物件並確認後續失敗時，記錄 FAILED
+及稽核事件；全額取消恢復 REFUND_PENDING，部分退款維持 PAID。再次阻止關桌，主管可從
+待審核佇列重試。通知中的舊狀態以取得的物件為準，同世代 FAILED 不回到成功，舊世代無效。
+20 小時期限僅於設定驗證後、首次送出前固定一次。設定不可用時以 REFUND_DISPATCH_PENDING
+及退避維持待處理；結果不明且期限已過仍不標記 DONE，保留 HOLD_RECONCILIATION_NEEDED
+等待核對，不以新鍵重新送出。測試涵蓋兩種處理路徑的後續失敗、關桌、重試、稽核、超過
+20 小時的首次送出延遲、相同鍵復原及不可延長的期限。指定 Go race、遷移、格式、vet、build、Web lint、型別檢查及 137 項 Web 測試通過。
+修正提交仍需新的獨立最終審查。

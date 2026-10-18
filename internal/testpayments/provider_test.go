@@ -36,3 +36,21 @@ func TestRefundFixtureUnknownRetryAndDelayedFailure(t *testing.T) {
 		t.Fatalf("counts create=%d retrieve=%d", creates, retrieves)
 	}
 }
+
+func TestRefundFixtureSucceededThenFailed(t *testing.T) {
+	p := NewProvider()
+	req := stripeprovider.CreateRefundRequest{
+		Account:  stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: "acct_test123"},
+		TenantID: "tenant-1", StoreID: "store-1", OrderID: "order-1", RefundID: "refund-1",
+		PaymentIntentID: "pi_test123", IdempotencyKey: "refund-key-1", AmountJPY: 500,
+	}
+	p.SetNextRefundOutcome("succeeded_then_failed", false)
+	created, err := p.CreateRefund(context.Background(), req)
+	if err != nil || created.Status != "succeeded" {
+		t.Fatalf("create=%+v %v", created, err)
+	}
+	current, err := p.RetrieveRefund(context.Background(), req.Account, created.ID)
+	if err != nil || current.Status != "failed" || current.ID != created.ID {
+		t.Fatalf("late failure=%+v %v", current, err)
+	}
+}

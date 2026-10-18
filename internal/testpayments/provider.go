@@ -77,6 +77,10 @@ func (p *Provider) CreateRefund(ctx context.Context, req stripeprovider.CreateRe
 	if p.hasNextRefundOutcome {
 		status = p.nextRefundStatus
 	}
+	lateFailure := status == "succeeded_then_failed"
+	if lateFailure {
+		status = "succeeded"
+	}
 	if status == "" {
 		status = "pending"
 	}
@@ -87,6 +91,11 @@ func (p *Provider) CreateRefund(ctx context.Context, req stripeprovider.CreateRe
 	id := "re_fixture" + hex.EncodeToString(nonce[:])
 	r := stripeprovider.RefundResult{AccountID: req.Account.StripeAccountID, ID: id, PaymentIntentID: req.PaymentIntentID, AmountJPY: req.AmountJPY, Currency: stripeprovider.CurrencyJPY, Status: status, Metadata: map[string]string{"tenant_id": req.TenantID, "store_id": req.StoreID, "order_id": req.OrderID, "refund_id": req.RefundID}}
 	p.refunds[id], p.refundKeys[key], p.refundDigests[key] = r, id, digest
+	if lateFailure {
+		failed := r
+		failed.Status = "failed"
+		p.refunds[id] = failed
+	}
 	unknown := p.hasNextRefundOutcome && p.nextRefundUnknown
 	p.hasNextRefundOutcome, p.nextRefundUnknown, p.nextRefundStatus = false, false, ""
 	if unknown {
@@ -110,7 +119,8 @@ func (p *Provider) RetrieveRefund(ctx context.Context, account stripeprovider.Ac
 }
 
 // SetNextRefundOutcome configures the next created fixture as pending (delayed),
-// succeeded, or failed. unknown simulates a lost response after provider write.
+// succeeded, failed, or succeeded_then_failed (success response, later retrieved
+// failure). unknown simulates a lost response after provider write.
 func (p *Provider) SetNextRefundOutcome(status string, unknown bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

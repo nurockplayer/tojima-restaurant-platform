@@ -64,6 +64,25 @@ describe('staff operations', () => {
     expect(host?.textContent).toContain('取消原因（必填）');
   });
 
+  it.each([
+    { code: 'REFUND_DISPATCH_PENDING' as const, ja: '返金の送信待ち（自動再試行）', zh: '退款等待送出（自動重試）' },
+    { code: 'HOLD_RECONCILIATION_NEEDED' as const, ja: '返金状況の確認が必要です', zh: '需要確認退款狀態' },
+  ])('shows $code without offering an unsafe manager retry', async ({ code, ja, zh }) => {
+    const order = staffOrder({ payment_status: 'REFUND_PENDING', fulfillment_status: 'CANCELLED', refunds: [{ id: 'refund-pending', amount_jpy: '500', status: 'PROCESSING', method: 'STRIPE', safe_error_code: code }] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細');
+    expect(host?.textContent).toContain(ja);
+    expect(within(host!).queryByRole('button', { name: '返金を再試行' })).toBeNull();
+    await click(host!, '繁體中文');
+    expect(host?.textContent).toContain(zh);
+    expect(within(host!).queryByRole('button', { name: '重試退款' })).toBeNull();
+  });
+
   it('shows FAILED refund and retries only after an explicit click', async () => {
     const order = staffOrder({ payment_status: 'PAID', refunds: [{ id: 'refund-failed', amount_jpy: '500', status: 'FAILED', method: 'STRIPE' }] });
     let retryCalls = 0; let refundStatus: 'FAILED' | 'PROCESSING' = 'FAILED'; const retryResponse = deferred<Response>();

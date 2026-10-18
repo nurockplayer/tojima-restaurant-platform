@@ -42,10 +42,11 @@ type AdjustmentPreview struct {
 	Tax                    *tax.SnapshotRecord `json:"tax,omitempty"`
 }
 type Refund struct {
-	ID        string `json:"id"`
-	AmountJPY int64  `json:"amount_jpy"`
-	Status    string `json:"status"`
-	Method    string `json:"method"`
+	SafeErrorCode string `json:"safe_error_code,omitempty"`
+	ID            string `json:"id"`
+	AmountJPY     int64  `json:"amount_jpy"`
+	Status        string `json:"status"`
+	Method        string `json:"method"`
 }
 
 type adjustmentState struct {
@@ -443,7 +444,7 @@ func (s *Service) RetryRefund(ctx context.Context, r OrderActionRequest, refundI
 	if _, err = tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,state_version,before_state,after_state) VALUES($1,$2,'REFUND_RETRIED',$3,$4::jsonb,$5::jsonb)`, r.OrderID, r.Actor, a.order.Version+1, string(beforeRetry), string(afterRetry)); err != nil {
 		return OrderState{}, err
 	}
-	if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status='REQUESTED',generation=$2,provider_key=$3,provider_refund_id=NULL,retry_not_after=clock_timestamp()+interval '20 hours',safe_error_code=NULL,updated_at=clock_timestamp() WHERE refund_id=$1`, refundID, generation, fmt.Sprintf("p82-refund:%s:%d", refundID, generation)); err != nil {
+	if _, err = tx.Exec(ctx, `UPDATE operation_refunds SET status='REQUESTED',generation=$2,provider_key=$3,provider_refund_id=NULL,retry_not_after=NULL,safe_error_code=NULL,updated_at=clock_timestamp() WHERE refund_id=$1`, refundID, generation, fmt.Sprintf("p82-refund:%s:%d", refundID, generation)); err != nil {
 		return OrderState{}, err
 	}
 	if _, err = tx.Exec(ctx, `UPDATE operation_order_state SET version=version+1,updated_at=clock_timestamp() WHERE order_id=$1`, r.OrderID); err != nil {
