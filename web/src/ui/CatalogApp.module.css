@@ -55,7 +55,7 @@
 .holdLookup > p {
   margin: 0 0 9px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.5;
 }
 
@@ -114,7 +114,7 @@
 
 .holdFacts dt {
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .holdFacts dd {
@@ -159,7 +159,7 @@
   gap: 10px 22px;
   margin-bottom: 14px;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-summary strong) {
@@ -216,7 +216,7 @@
   min-width: 0;
   gap: 6px;
   color: #53665b;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-edit-heading input),
@@ -303,7 +303,7 @@
 }
 
 .catalogScope :global(.catalog-preview p) {
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -314,7 +314,7 @@
 
 .catalogScope :global(.catalog-preview li) {
   margin: 9px 0;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-preview li p) {
@@ -376,7 +376,7 @@
 .catalogScope :global(.catalog-store-product header p) {
   margin: 5px 0;
   color: var(--muted);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.availability-badge) {
@@ -386,7 +386,7 @@
   border-radius: 20px;
   background: var(--color-warning-bg);
   color: var(--color-warning-ink);
-  font-size: 9px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -420,7 +420,7 @@
   align-content: start;
   gap: 6px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-price-grid strong) {
@@ -442,7 +442,7 @@
 .catalogScope :global(.catalog-store-group h4) {
   margin: 0 0 7px;
   color: #53665b;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-store-option) {
@@ -452,7 +452,7 @@
   gap: 9px;
   padding: 8px 0;
   border-top: 1px solid #edf0eb;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-availability-controls) {
@@ -472,7 +472,7 @@
   display: grid;
   gap: 5px;
   color: var(--muted);
-  font-size: 9px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-detach) {
@@ -483,7 +483,7 @@
 
 .catalogScope :global(.catalog-detach p) {
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -509,7 +509,7 @@
   border-radius: 10px;
   background: #f8faf7;
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .catalogScope :global(.catalog-published-snapshot summary) {
