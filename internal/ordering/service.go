@@ -357,9 +357,13 @@ func (s *Service) Commit(ctx context.Context, input CommitRequest) (CommitResult
 	if err != nil {
 		return CommitResult{}, err
 	}
-	result.OrderReadGrant, err = s.issueOrderReadTx(ctx, tx, session, orderID)
-	if err != nil {
-		return CommitResult{}, err
+	// Legacy Stripe commits have no operation state for the status projection.
+	// Keep them supported without returning an unreadable capability.
+	if s.commitPolicy != nil {
+		result.OrderReadGrant, err = s.issueOrderReadTx(ctx, tx, session, orderID)
+		if err != nil {
+			return CommitResult{}, err
+		}
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return CommitResult{}, err
