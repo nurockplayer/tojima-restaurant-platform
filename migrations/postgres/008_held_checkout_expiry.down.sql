@@ -1,3 +1,6 @@
+DROP TRIGGER company_product_hold_checkout_expiry ON company_product_emergency_holds;
+DROP FUNCTION expire_checkouts_on_company_hold();
+DROP FUNCTION enqueue_company_hold_checkouts(text, text, text);
 DROP TRIGGER stripe_payment_attempt_hold_expiry_retained ON stripe_payment_attempts;
 DROP FUNCTION protect_company_hold_expiry_request();
 DROP INDEX stripe_payment_attempt_hold_candidates_idx;

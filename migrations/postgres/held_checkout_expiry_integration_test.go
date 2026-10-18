@@ -16,6 +16,77 @@ import (
 // This starts from the actual v7 SQL and data shape: the active hold and
 // attempts exist before migration 008 adds its retained marker.
 func TestHeldCheckoutExpiryBackfillsV7ActiveHolds(t *testing.T) {
+	ctx, target, schema := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatalf("migrate v7 to v8: %v", err)
+	}
+	assertBackfilled(t, ctx, target)
+
+	var firstMarker, firstRevocation time.Time
+	if err := target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&firstMarker, &firstRevocation); err != nil {
+		t.Fatal(err)
+	}
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatalf("idempotent up: %v", err)
+	}
+	var repeatedMarker, repeatedRevocation time.Time
+	if err := target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&repeatedMarker, &repeatedRevocation); err != nil {
+		t.Fatal(err)
+	}
+	if !repeatedMarker.Equal(firstMarker) || !repeatedRevocation.Equal(firstRevocation) {
+		t.Fatalf("repeated up changed retained timestamps: marker %s -> %s, revocation %s -> %s", firstMarker, repeatedMarker, firstRevocation, repeatedRevocation)
+	}
+	if _, err := target.Exec(ctx, `DELETE FROM schema_migrations WHERE version=8`); err != nil {
+		t.Fatal(err)
+	}
+	down, err := os.ReadFile("008_held_checkout_expiry.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Exec(ctx, string(down)); err != nil {
+		t.Fatal(err)
+	}
+	var exists bool
+	if err := target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='stripe_payment_attempts' AND column_name='company_hold_expire_requested_at')`, schema).Scan(&exists); err != nil || exists {
+		t.Fatalf("008 down retained its marker column: exists=%v err=%v", exists, err)
+	}
+	var triggerExists, triggerFunctionExists, helperFunctionExists bool
+	if err := target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid='company_product_emergency_holds'::regclass AND tgname='company_product_hold_checkout_expiry' AND NOT tgisinternal),
+		to_regprocedure('expire_checkouts_on_company_hold()') IS NOT NULL,
+		to_regprocedure('enqueue_company_hold_checkouts(text,text,text)') IS NOT NULL`).Scan(&triggerExists, &triggerFunctionExists, &helperFunctionExists); err != nil {
+		t.Fatal(err)
+	}
+	if triggerExists || triggerFunctionExists || helperFunctionExists {
+		t.Fatalf("008 down retained hold expiry objects: trigger=%v trigger function=%v helper function=%v", triggerExists, triggerFunctionExists, helperFunctionExists)
+	}
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatalf("reapply v8: %v", err)
+	}
+	assertBackfilled(t, ctx, target)
+	var marker, revoked time.Time
+	var workCount, eventCount int
+	if err := target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&marker, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	if marker.IsZero() || !revoked.Equal(firstRevocation) {
+		t.Fatalf("reapply did not restore marker or changed retained revocation: marker %s -> %s, revocation %s -> %s", firstMarker, marker, firstRevocation, revoked)
+	}
+	if err := target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_work WHERE dedupe_key='company-hold-expire:00000000000000000000000000000001'`).Scan(&workCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempt_events WHERE event_key='company-hold-expire:00000000000000000000000000000001'`).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if workCount != 1 || eventCount != 1 {
+		t.Fatalf("reapply duplicated retained work/audit: work=%d events=%d", workCount, eventCount)
+	}
+}
+
+// newV7MigrationFixture creates an isolated schema at migration 7. The test
+// must seed the v7 hold/order state before applying migration 8.
+func newV7MigrationFixture(t *testing.T) (context.Context, *pgx.Conn, string) {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL required")
@@ -28,28 +99,36 @@ func TestHeldCheckoutExpiryBackfillsV7ActiveHolds(t *testing.T) {
 		t.Fatal("migration test requires loopback PostgreSQL")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
 	admin, err := pgx.ConnectConfig(ctx, cfg)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	defer admin.Close(ctx)
 	var raw [8]byte
 	if _, err = rand.Read(raw[:]); err != nil {
+		cancel()
 		t.Fatal(err)
 	}
 	schema := "p82_hold_migrate_" + hex.EncodeToString(raw[:])
 	if _, err = admin.Exec(ctx, "CREATE SCHEMA "+pgx.Identifier{schema}.Sanitize()); err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	defer admin.Exec(context.Background(), "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
 	targetConfig := cfg.Copy()
 	targetConfig.RuntimeParams["search_path"] = schema
 	target, err := pgx.ConnectConfig(ctx, targetConfig)
 	if err != nil {
+		cancel()
 		t.Fatal(err)
 	}
-	defer target.Close(ctx)
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cleanupCancel()
+		_ = target.Close(cleanupCtx)
+		_, _ = admin.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		_ = admin.Close(cleanupCtx)
+		cancel()
+	})
 	for version := 1; version <= 7; version++ {
 		migration, readErr := os.ReadFile(fmt.Sprintf("%03d_", version) + migrationName(version) + ".up.sql")
 		if readErr != nil {
@@ -62,61 +141,7 @@ func TestHeldCheckoutExpiryBackfillsV7ActiveHolds(t *testing.T) {
 	if _, err = target.Exec(ctx, `CREATE TABLE schema_migrations(version integer PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now()); INSERT INTO schema_migrations(version) SELECT generate_series(1,7)`); err != nil {
 		t.Fatal(err)
 	}
-	seedV7HoldFixture(t, ctx, target)
-	if err = postgres.Up(ctx, target); err != nil {
-		t.Fatalf("migrate v7 to v8: %v", err)
-	}
-	assertBackfilled(t, ctx, target)
-
-	var firstMarker, firstRevocation time.Time
-	if err = target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&firstMarker, &firstRevocation); err != nil {
-		t.Fatal(err)
-	}
-	if err = postgres.Up(ctx, target); err != nil {
-		t.Fatalf("idempotent up: %v", err)
-	}
-	var repeatedMarker, repeatedRevocation time.Time
-	if err = target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&repeatedMarker, &repeatedRevocation); err != nil {
-		t.Fatal(err)
-	}
-	if !repeatedMarker.Equal(firstMarker) || !repeatedRevocation.Equal(firstRevocation) {
-		t.Fatalf("repeated up changed retained timestamps: marker %s -> %s, revocation %s -> %s", firstMarker, repeatedMarker, firstRevocation, repeatedRevocation)
-	}
-	if _, err = target.Exec(ctx, `DELETE FROM schema_migrations WHERE version=8`); err != nil {
-		t.Fatal(err)
-	}
-	down, err := os.ReadFile("008_held_checkout_expiry.down.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = target.Exec(ctx, string(down)); err != nil {
-		t.Fatal(err)
-	}
-	var exists bool
-	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='stripe_payment_attempts' AND column_name='company_hold_expire_requested_at')`, schema).Scan(&exists); err != nil || exists {
-		t.Fatalf("008 down retained its marker column: exists=%v err=%v", exists, err)
-	}
-	if err = postgres.Up(ctx, target); err != nil {
-		t.Fatalf("reapply v8: %v", err)
-	}
-	assertBackfilled(t, ctx, target)
-	var marker, revoked time.Time
-	var workCount, eventCount int
-	if err = target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000001'`).Scan(&marker, &revoked); err != nil {
-		t.Fatal(err)
-	}
-	if marker.IsZero() || !revoked.Equal(firstRevocation) {
-		t.Fatalf("reapply did not restore marker or changed retained revocation: marker %s -> %s, revocation %s -> %s", firstMarker, marker, firstRevocation, revoked)
-	}
-	if err = target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_work WHERE dedupe_key='company-hold-expire:00000000000000000000000000000001'`).Scan(&workCount); err != nil {
-		t.Fatal(err)
-	}
-	if err = target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempt_events WHERE event_key='company-hold-expire:00000000000000000000000000000001'`).Scan(&eventCount); err != nil {
-		t.Fatal(err)
-	}
-	if workCount != 1 || eventCount != 1 {
-		t.Fatalf("reapply duplicated retained work/audit: work=%d events=%d", workCount, eventCount)
-	}
+	return ctx, target, schema
 }
 
 func migrationName(version int) string {
@@ -152,6 +177,7 @@ func seedV7HoldFixture(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		{id: "00000000000000000000000000000011", tenant: "tenant", product: "inactive-product", method: "STRIPE", state: "OPEN", checkoutStatus: "open", providerStatus: "unpaid"},
 		{id: "00000000000000000000000000000012", tenant: "tenant", product: "held-product", method: "STRIPE", state: "OPEN", checkoutStatus: "open", providerStatus: "unpaid", detached: true},
 		{id: "00000000000000000000000000000013", tenant: "other-tenant", product: "held-product", method: "STRIPE", state: "OPEN", checkoutStatus: "open", providerStatus: "unpaid"},
+		{id: "00000000000000000000000000000014", tenant: "tenant", product: "raw-insert-product", method: "STRIPE", state: "OPEN", checkoutStatus: "open", providerStatus: "unpaid"},
 	}
 	for i, order := range orders {
 		store := fmt.Sprintf("store-%d", i+1)
@@ -216,6 +242,7 @@ func assertBackfilled(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		"00000000000000000000000000000011": false, // inactive hold
 		"00000000000000000000000000000012": false, // detached store binding
 		"00000000000000000000000000000013": false, // same product, other tenant without a hold
+		"00000000000000000000000000000014": false, // only matched by the post-migration raw insert
 	}
 	for orderID, want := range expected {
 		key := "company-hold-expire:" + orderID
@@ -237,5 +264,253 @@ func assertBackfilled(t *testing.T, ctx context.Context, conn *pgx.Conn) {
 		if marked != want || revoked != want || workCount != wantCount || eventCount != wantCount {
 			t.Errorf("order %s expected eligible=%v; marker=%v revoked=%v work=%d events=%d", orderID, want, marked, revoked, workCount, eventCount)
 		}
+	}
+}
+
+func TestHeldCheckoutExpiryMigrationWaitsForLegacyActivation(t *testing.T) {
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	writer := connectFixture(t, target)
+	migrator := connectFixture(t, target)
+	var writerPID, migrationPID int
+	if err := writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := migrator.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&migrationPID); err != nil {
+		t.Fatal(err)
+	}
+	tx, err := writer.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='legacy activation',activated_by='legacy-writer',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='inactive-product'`); err != nil {
+		t.Fatal(err)
+	}
+	finished := make(chan error, 1)
+	go func() { finished <- postgres.Up(ctx, migrator) }()
+	waitForBlockedBy(t, ctx, target, migrationPID, writerPID)
+	var attemptTableLock bool
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=$1 AND relation='stripe_payment_attempts'::regclass AND mode='AccessExclusiveLock')`, migrationPID).Scan(&attemptTableLock); err != nil {
+		t.Fatal(err)
+	}
+	if attemptTableLock {
+		t.Fatal("migration reached AccessExclusiveLock on stripe_payment_attempts before waiting for the company catalog parent")
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-finished; err != nil {
+		t.Fatalf("migration after legacy activation: %v", err)
+	}
+	assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000011", "migration:008_held_checkout_expiry")
+}
+
+func TestHeldCheckoutExpiryTriggerCatchesLegacyActivationAfterBackfill(t *testing.T) {
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	migrationTx, err := target.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationSQL, err := os.ReadFile("008_held_checkout_expiry.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = migrationTx.Exec(ctx, string(migrationSQL)); err != nil {
+		t.Fatal(err)
+	}
+	var migrationPID, writerPID int
+	if err = target.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&migrationPID); err != nil {
+		t.Fatal(err)
+	}
+	writer := connectFixture(t, target)
+	if err = writer.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&writerPID); err != nil {
+		t.Fatal(err)
+	}
+	activationDone := make(chan error, 1)
+	go func() {
+		writerTx, beginErr := writer.Begin(ctx)
+		if beginErr == nil {
+			_, beginErr = writerTx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR UPDATE`)
+		}
+		if beginErr == nil {
+			_, beginErr = writerTx.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='legacy activation after migration',activated_by='legacy-writer-after',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='inactive-product'`)
+		}
+		if beginErr != nil {
+			if writerTx != nil {
+				_ = writerTx.Rollback(ctx)
+			}
+			activationDone <- beginErr
+			return
+		}
+		activationDone <- writerTx.Commit(ctx)
+	}()
+	waitForBlockedBy(t, ctx, target, writerPID, migrationPID)
+	if err = migrationTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-activationDone; err != nil {
+		t.Fatalf("legacy activation after migration: %v", err)
+	}
+	assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000011", "legacy-writer-after")
+}
+
+func TestHeldCheckoutExpiryTriggerCatchesRawSQLInsertAndIsIdempotent(t *testing.T) {
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	orderID := "00000000000000000000000000000014"
+	if _, err := target.Exec(ctx, `INSERT INTO company_product_emergency_holds(tenant_id,company_catalog_id,product_key,active,version,reason,activated_by,activated_at)
+		VALUES('tenant',1,'raw-insert-product',true,1,'raw SQL insert','old-binary-insert',clock_timestamp())`); err != nil {
+		t.Fatal(err)
+	}
+	assertHoldArtifacts(t, ctx, target, orderID, "old-binary-insert")
+	var markerBefore, revokedBefore time.Time
+	if err := target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&markerBefore, &revokedBefore); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Exec(ctx, `UPDATE company_product_emergency_holds SET active=false,version=2,reason='clear raw insert',cleared_by='old-binary-clear',cleared_at=clock_timestamp() WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='raw-insert-product'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='reactivate raw insert',activated_by='old-binary-reactivate',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='raw-insert-product'`); err != nil {
+		t.Fatal(err)
+	}
+	assertHoldArtifacts(t, ctx, target, orderID, "old-binary-insert")
+	var markerAfter, revokedAfter time.Time
+	if err := target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&markerAfter, &revokedAfter); err != nil {
+		t.Fatal(err)
+	}
+	if !markerAfter.Equal(markerBefore) || !revokedAfter.Equal(revokedBefore) {
+		t.Fatalf("off/on cycle replaced retained timestamps: marker %s -> %s; revocation %s -> %s", markerBefore, markerAfter, revokedBefore, revokedAfter)
+	}
+}
+
+func TestHeldCheckoutExpiryTriggerCatchesRawSQLInactiveToActiveUpdate(t *testing.T) {
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := target.Exec(ctx, `UPDATE company_product_emergency_holds SET active=true,version=3,reason='raw SQL transition',activated_by='old-binary-update',activated_at=clock_timestamp(),cleared_by=NULL,cleared_at=NULL WHERE tenant_id='tenant' AND company_catalog_id=1 AND product_key='inactive-product'`); err != nil {
+		t.Fatal(err)
+	}
+	assertHoldArtifacts(t, ctx, target, "00000000000000000000000000000011", "old-binary-update")
+}
+
+func TestHeldCheckoutExpiryTriggerRechecksAfterPaidWriter(t *testing.T) {
+	ctx, target, _ := newV7MigrationFixture(t)
+	seedV7HoldFixture(t, ctx, target)
+	if err := postgres.Up(ctx, target); err != nil {
+		t.Fatal(err)
+	}
+	paidWriter := connectFixture(t, target)
+	oldWriter := connectFixture(t, target)
+	var paidPID, oldPID int
+	if err := paidWriter.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&paidPID); err != nil {
+		t.Fatal(err)
+	}
+	if err := oldWriter.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&oldPID); err != nil {
+		t.Fatal(err)
+	}
+	paidTx, err := paidWriter.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = paidTx.Exec(ctx, `SELECT catalog_id FROM menu_catalogs WHERE catalog_id=1 FOR SHARE`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = paidTx.Exec(ctx, `SELECT session_id FROM table_sessions WHERE session_id='session-14' FOR UPDATE`); err != nil {
+		t.Fatal(err)
+	}
+	activationDone := make(chan error, 1)
+	go func() {
+		activationTx, activationErr := oldWriter.Begin(ctx)
+		if activationErr == nil {
+			_, activationErr = activationTx.Exec(ctx, `INSERT INTO company_product_emergency_holds(tenant_id,company_catalog_id,product_key,active,version,reason,activated_by,activated_at)
+				VALUES('tenant',1,'raw-insert-product',true,1,'racing raw SQL hold','old-binary-race',clock_timestamp())`)
+		}
+		if activationErr != nil {
+			if activationTx != nil {
+				_ = activationTx.Rollback(ctx)
+			}
+			activationDone <- activationErr
+			return
+		}
+		activationDone <- activationTx.Commit(ctx)
+	}()
+	waitForBlockedBy(t, ctx, target, oldPID, paidPID)
+	if _, err = paidTx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='PAID',provider_payment_status='paid',checkout_status='complete',updated_at=clock_timestamp() WHERE order_id='00000000000000000000000000000014'`); err != nil {
+		t.Fatal(err)
+	}
+	if err = paidTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-activationDone; err != nil {
+		t.Fatalf("raw SQL activation after payment: %v", err)
+	}
+	var marker, revoked *time.Time
+	if err = target.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id='00000000000000000000000000000014'`).Scan(&marker, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	var workCount, eventCount int
+	if err = target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_work WHERE order_id='00000000000000000000000000000014' AND work_type='EXPIRE'`).Scan(&workCount); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempt_events WHERE order_id='00000000000000000000000000000014' AND event_key='company-hold-expire:00000000000000000000000000000014'`).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if marker != nil || revoked != nil || workCount != 0 || eventCount != 0 {
+		t.Fatalf("paid attempt was marked for expiry: marker=%v revoked=%v work=%d events=%d", marker, revoked, workCount, eventCount)
+	}
+}
+
+func connectFixture(t *testing.T, source *pgx.Conn) *pgx.Conn {
+	t.Helper()
+	conn, err := pgx.ConnectConfig(context.Background(), source.Config().Copy())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	return conn
+}
+
+func waitForBlockedBy(t *testing.T, ctx context.Context, observer *pgx.Conn, blockedPID, blockerPID int) {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		var blocked bool
+		err := observer.QueryRow(ctx, `SELECT $2=ANY(pg_blocking_pids($1))`, blockedPID, blockerPID).Scan(&blocked)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatalf("backend %d never became blocked by backend %d", blockedPID, blockerPID)
+}
+
+func assertHoldArtifacts(t *testing.T, ctx context.Context, conn *pgx.Conn, orderID, actor string) {
+	t.Helper()
+	var marker, revoked time.Time
+	if err := conn.QueryRow(ctx, `SELECT company_hold_expire_requested_at,continuation_revoked_at FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&marker, &revoked); err != nil {
+		t.Fatal(err)
+	}
+	var workCount, eventCount int
+	key := "company-hold-expire:" + orderID
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE' AND dedupe_key=$2`, orderID, key).Scan(&workCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempt_events WHERE order_id=$1 AND event_key=$2 AND actor_id=$3`, orderID, key, actor).Scan(&eventCount); err != nil {
+		t.Fatal(err)
+	}
+	if marker.IsZero() || revoked.IsZero() || workCount != 1 || eventCount != 1 {
+		t.Fatalf("order %s expected retained marker, revocation, one EXPIRE work item, and one %q audit; marker=%s revoked=%s work=%d events=%d", orderID, actor, marker, revoked, workCount, eventCount)
 	}
 }
