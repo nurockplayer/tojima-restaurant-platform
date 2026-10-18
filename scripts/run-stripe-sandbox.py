@@ -129,23 +129,35 @@ def run(args):
         raise ValueError("invalid loopback port")
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", args.port))
-    # Never persist Stripe CLI login or put the key in argv. Capture the CLI's
-    # signing-secret output into memory; do not relay stdout/stderr on errors.
-    cli_env = dict(env)
-    cli_env["STRIPE_API_KEY"] = env["TOJIMA_STRIPE_TEST_SECRET_KEY"]
-    cli_env["STRIPE_DEVICE_NAME"] = "tojima-isolated-sandbox"
-    version = subprocess.run([cli, "version"], env=cli_env,
+    # Admit the CLI version without credentials or inherited Stripe settings.
+    base_env = {name: env[name] for name in (
+        "PATH", "HOME", "TMPDIR", "TMP", "TEMP", "LANG", "LC_ALL",
+        "SSL_CERT_FILE", "SSL_CERT_DIR",
+    ) if name in env}
+    version = subprocess.run([cli, "version"], env=base_env,
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, timeout=5, check=False)
     if version.returncode != 0 or version.stdout.strip() != b"stripe version 1.54.0":
         raise ValueError("official pinned Stripe CLI 1.54.0 is required")
+    # Never persist Stripe CLI login or put the key in argv. Capture the CLI's
+    # signing-secret output into memory; do not relay stdout/stderr on errors.
+    cli_env = dict(base_env, STRIPE_API_KEY=env["TOJIMA_STRIPE_TEST_SECRET_KEY"],
+                   STRIPE_DEVICE_NAME="tojima-isolated-sandbox")
     result = subprocess.run([cli, "listen", "--print-secret"], env=cli_env,
                             stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                             stderr=subprocess.DEVNULL, timeout=30, check=False)
     secret = result.stdout.decode("ascii").rstrip("\r\n")
     if result.returncode != 0 or len(result.stdout) > 4096 or not re.fullmatch(r"whsec_[A-Za-z0-9]{8,}", secret):
         raise ValueError("Stripe CLI could not prepare its local signing secret")
-    env["TOJIMA_STRIPE_TEST_WEBHOOK_SECRET"] = secret
+    runtime_env = dict(base_env)
+    for name in (
+        "TEST_DATABASE_URL", "TOJIMA_STRIPE_MODE", "TOJIMA_STRIPE_API_VERSION",
+        "TOJIMA_STRIPE_TEST_SECRET_KEY", "TOJIMA_STRIPE_TEST_ACCOUNT_A",
+        "TOJIMA_STRIPE_TEST_ACCOUNT_B", "TOJIMA_STRIPE_TEST_ACCOUNT_C",
+        "TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY",
+    ):
+        runtime_env[name] = env[name]
+    runtime_env["TOJIMA_STRIPE_TEST_WEBHOOK_SECRET"] = secret
     # The normal credential document contains local staff fixtures only.
     # Go's configuration deliberately keeps the Stripe key/secret out of it.
     endpoint = f"http://127.0.0.1:{args.port}/v1/payments/stripe/webhook"
@@ -162,7 +174,7 @@ def run(args):
         runtime = subprocess.Popen(
             command + ["-stripe-sandbox", "-stripe-tenant", args.tenant,
              "-port", str(args.port), "-credentials", str(Path(args.credentials).resolve())],
-            cwd=root, env=env, stdin=subprocess.DEVNULL, start_new_session=True)
+            cwd=root, env=runtime_env, stdin=subprocess.DEVNULL, start_new_session=True)
         print("Isolated Sandbox runtime starting; Stripe CLI output is suppressed", flush=True)
         startup_check(runtime, listener, args.credentials, args.tenant, args.port)
         if args.startup_check:
@@ -174,8 +186,16 @@ def run(args):
         print("Stripe CLI listener stopped; stopping the isolated runtime", file=sys.stderr)
         return 1
     finally:
-        stop(runtime)
-        stop(listener)
+        # Defer repeated termination signals until both bounded group stops
+        # finish. Restore the caller's mask, delivering any pending signal.
+        previous_mask = signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGINT, signal.SIGTERM})
+        try:
+            try:
+                stop(runtime)
+            finally:
+                stop(listener)
+        finally:
+            signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
 
 def main():
