@@ -151,6 +151,24 @@ func TestCompanyProductEmergencyHoldHTTPIntegration(t *testing.T) {
 	}
 
 	onBody := `{"active":true,"reason":"emergency-incident-reason","expected_version":0,"idempotency_key":"hold-on-1"}`
+	for _, character := range []string{"a", "界"} {
+		longActor := NewMenuHandler(service, httpTestIdentity{authz.Actor{SubjectID: strings.Repeat(character, 201), MFA: true}}, authz.PolicyAuthorizer{Directory: ownerMemberships})
+		response := requestJSON(t, longActor, http.MethodPut, holdPath, onBody, "")
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"invalid_menu"`) {
+			t.Fatalf("oversized actor returned %d %s; want 400 invalid_menu", response.Code, response.Body.String())
+		}
+		var holds, audits, work, events int
+		if err = pool.QueryRow(ctx, `SELECT
+			(SELECT count(*) FROM company_product_emergency_holds),
+			(SELECT count(*) FROM menu_admin_audit WHERE operation IN ('HQ_HOLD_ON','HQ_HOLD_OFF')),
+			(SELECT count(*) FROM stripe_payment_work),
+			(SELECT count(*) FROM stripe_payment_attempt_events)`).Scan(&holds, &audits, &work, &events); err != nil {
+			t.Fatal(err)
+		}
+		if holds != 0 || audits != 0 || work != 0 || events != 0 {
+			t.Fatalf("rejected HTTP actor left rows: holds=%d audits=%d work=%d events=%d", holds, audits, work, events)
+		}
+	}
 	on := requestJSON(t, owner, http.MethodPut, holdPath, onBody, "")
 	if on.Code != http.StatusOK || on.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("activate emergency hold: %d %s", on.Code, on.Body.String())
