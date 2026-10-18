@@ -251,6 +251,8 @@ if command -v caffeinate >/dev/null 2>&1; then
   caffeinate_pid=$!
 fi
 
+# Explicitly bypass user/system tunnel config, which can disable Quick Tunnels.
+: >"$tmpdir/cloudflared-empty.yaml" || fail "cannot create an empty tunnel config"
 (
   env_names=$(/usr/bin/env | /usr/bin/sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p')
   for env_name in $env_names; do
@@ -260,7 +262,7 @@ fi
     HOME=$saved_home
     export HOME
   fi
-  exec "$cloudflared_path" tunnel --no-autoupdate --url http://127.0.0.1:8090
+  exec "$cloudflared_path" tunnel --config "$tmpdir/cloudflared-empty.yaml" --no-autoupdate --url http://127.0.0.1:8090
 ) >"$tmpdir/cloudflared.log" 2>&1 &
 cloudflared_pid=$!
 tunnel_origin=

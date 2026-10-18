@@ -5,7 +5,8 @@ const CSP = "default-src 'none'; form-action 'self'; base-uri 'none'; frame-ance
 const DEMO_LABEL = "DEMO / 参考価格 / 現行店内価格未確認";
 
 function configured(env) {
-  return typeof env.DEMO_PASSCODE === "string" && env.DEMO_PASSCODE.length > 0 &&
+  return typeof env.DEMO_PASSCODE === "string" && env.DEMO_PASSCODE.length >= 12 &&
+    [/[a-z]/, /[A-Z]/, /[0-9]/, /[^a-zA-Z0-9]/].filter((pattern) => pattern.test(env.DEMO_PASSCODE)).length >= 2 &&
     typeof env.DEMO_COOKIE_KEY === "string" && env.DEMO_COOKIE_KEY.length >= 32 &&
     typeof env.DEMO_GATE_SECRET === "string" && new TextEncoder().encode(env.DEMO_GATE_SECRET).length >= 32 && /^[\x20-\x7e]+$/.test(env.DEMO_GATE_SECRET) &&
     typeof env.DEMO_ORIGIN === "string" && /^https:\/\/[a-z0-9-]+\.trycloudflare\.com$/.test(env.DEMO_ORIGIN);

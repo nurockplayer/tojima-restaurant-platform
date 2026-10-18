@@ -19,15 +19,15 @@ async function withFetch(stub, fn) {
   try { return await fn(); } finally { globalThis.fetch = originalFetch; }
 }
 
-async function login() {
-  const get = await run("/__demo/login");
+async function login(loginEnv = env) {
+  const get = await run("/__demo/login", {}, loginEnv);
   const csrfCookie = get.headers.getSetCookie().find((value) => value.startsWith("__Host-tojima_demo_csrf="));
   const csrf = csrfCookie.match(/^[^=]+=([^;]+)/)[1];
   const response = await run("/__demo/login", {
     method: "POST",
     headers: { origin: base, cookie: `__Host-tojima_demo_csrf=${csrf}`, "content-type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ csrf, passcode: env.DEMO_PASSCODE }),
-  });
+    body: new URLSearchParams({ csrf, passcode: loginEnv.DEMO_PASSCODE }),
+  }, loginEnv);
   const cookie = response.headers.getSetCookie().find((value) => value.startsWith("__Host-tojima_demo="));
   return { response, cookie: cookie.match(/^[^=]+=([^;]+)/)[1] };
 }
@@ -61,6 +61,48 @@ test("missing variables and invalid origins return bilingual offline 503 without
     }
   });
   assert.equal(fetchCount, 0);
+});
+
+test("weak configured passcodes fail closed for login, guide, and authenticated proxy requests", async () => {
+  const weakPasscodes = [null, 123456789012, "", "x", "Abcdefghi12", "123456789012", "abcdefghijkl", "ABCDEFGHIJKL", "!@#$%^&*()_-", " ".repeat(12)];
+  const session = signedCookie(Math.floor(Date.now() / 1000) + 60);
+  let fetchCount = 0;
+  await withFetch(async () => { fetchCount++; return new Response("unexpected proxy"); }, async () => {
+    for (const passcode of weakPasscodes) {
+      const override = { ...env, DEMO_PASSCODE: passcode };
+      for (const [path, init] of [
+        ["/__demo/login", {}],
+        ["/__demo/login", { method: "POST", headers: { origin: base, cookie: "__Host-tojima_demo_csrf=test-csrf" }, body: new URLSearchParams({ csrf: "test-csrf", passcode: String(passcode) }) }],
+        ["/__demo/guide", { headers: { cookie: `__Host-tojima_demo=${session}` } }],
+        ["/staff", { headers: { cookie: `__Host-tojima_demo=${session}` } }],
+      ]) {
+        const response = await run(path, init, override);
+        assert.equal(response.status, 503, `${path}: ${JSON.stringify(passcode)}`);
+        const body = await response.text();
+        assert.match(body, /オフライン/);
+        assert.match(body, /離線/);
+        assert.equal(response.headers.get("cache-control"), "no-store");
+        assert.equal(response.headers.get("location"), null);
+        assert.deepEqual(response.headers.getSetCookie(), []);
+      }
+    }
+  });
+  assert.equal(fetchCount, 0);
+});
+
+test("12-character passcodes from any two classes allow login and authenticated proxying", async () => {
+  for (const passcode of ["abcdefghijkL", "abcdefghijk1", "abcdefghijk!", "ABCDEFGHIJK1", "ABCDEFGHIJK!", "12345678901!"]) {
+    const override = { ...env, DEMO_PASSCODE: passcode };
+    const { response, cookie } = await login(override);
+    assert.equal(response.status, 303);
+    let fetchCount = 0;
+    await withFetch(async () => { fetchCount++; return new Response("demo app"); }, async () => {
+      const proxy = await run("/staff", { headers: { cookie: `__Host-tojima_demo=${cookie}` } }, override);
+      assert.equal(proxy.status, 200);
+      assert.equal(await proxy.text(), "demo app");
+    });
+    assert.equal(fetchCount, 1);
+  }
 });
 
 test("unreachable proxy is a sanitized offline 503", async () => {
