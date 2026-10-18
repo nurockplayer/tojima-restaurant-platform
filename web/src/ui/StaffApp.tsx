@@ -5,6 +5,7 @@ import type { Capabilities, CashPreview, CashSettings, OpenedSession, Receipt, S
 import { checkoutClient } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation } from './cart-state';
+import { StaffDialog } from './StaffDialog';
 import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
@@ -13,6 +14,8 @@ type View = 'tables' | 'kds';
 type Dialog = 'cash' | 'close' | null;
 const CONTEXT_KEY = 'tojima.staff.context';
 const TOKEN_KEY = 'tojima.staff.access-token';
+// The HTTP client has no timeout, so a hung KDS poll is aborted (and the board marked stale) after this.
+const KDS_POLL_TIMEOUT_MS = 10000;
 
 const copy = {
   ja: {
@@ -28,6 +31,7 @@ const copy = {
     cashSettings: '現金受付設定', enabled: '現金を受け付ける', prepaid: '先払い', payLater: '後払い', save: '設定を保存',
     noCashOrders: '精算対象の現金注文はありません。', closeBlocked: '未提供または未精算の注文があるため閉卓できません。',
     paymentCheck: '支払い状況を確認', paymentReconcile: '最新の支払い状況を確認', paymentError: '支払い状況を確認できません。時間をおいてお試しください。', paymentReview: '支払い状況を店舗で確認する必要があります。', lastPaymentCheck: '最終確認',
+    kdsStale: '厨房看板の接続が切れています。表示が最新ではない可能性があります。自動で再接続しています。', kdsLastSync: '最終同期',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     retry: '同じ操作を確認して再試行', network: '処理結果を確認できません。再試行は同じ操作を照合します。', stale: '最新情報を読み直しました。内容を確認してから操作してください。',
     error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。',
@@ -46,6 +50,7 @@ const copy = {
     cashSettings: '現金收款設定', enabled: '接受現金付款', prepaid: '先付款', payLater: '後付款', save: '儲存設定',
     noCashOrders: '目前沒有待收現金訂單。', closeBlocked: '尚有未送達或未結清的訂單，無法關桌。',
     paymentCheck: '確認付款狀態', paymentReconcile: '更新付款狀態', paymentError: '目前無法確認付款狀態，請稍後再試。', paymentReview: '需要由門店確認付款狀態。', lastPaymentCheck: '最後確認',
+    kdsStale: '廚房看板連線中斷，畫面可能不是最新狀態，系統正在自動重新連線。', kdsLastSync: '最後同步',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     retry: '以相同操作確認並重試', network: '目前無法確認操作結果。重試會比對同一筆操作。', stale: '已更新最新狀態，請確認內容後再操作。',
     error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。',
@@ -66,6 +71,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const [view, setView] = useState<View>(initialView);
   const [tables, setTables] = useState<StaffTable[]>([]);
   const [kdsOrders, setKdsOrders] = useState<StaffOrder[]>([]);
+  const [kdsStale, setKdsStale] = useState(false);
+  const [kdsSyncedAt, setKdsSyncedAt] = useState<Date | null>(null);
   const [settings, setSettings] = useState<CashSettings | null>(null);
   const [selectedTableID, setSelectedTableID] = useState('');
   const [detail, setDetail] = useState<SessionOperations | null>(null);
@@ -83,6 +90,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const kdsPoll = useRef<Promise<StaffOrder[] | null> | null>(null);
   const pendingWrite = useRef<PendingWrite | null>(null);
   const epoch = useRef(0);
   const active = useRef<ActiveStaffContext | null>(null);
@@ -93,6 +102,14 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const detailRequest = useRef(0);
   const paymentRequest = useRef(0);
   const hasTables = !!capabilities && (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage);
+
+  useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
+  useEffect(() => {
+    if (dialog !== null || busy || !openerRef.current) return;
+    const opener = openerRef.current;
+    openerRef.current = null;
+    if (opener.isConnected && !opener.disabled) opener.focus();
+  }, [busy, dialog]);
 
   const isCurrent = useCallback((requestEpoch: number, ctx: StaffContext, bearer: string) => {
     const current = active.current;
@@ -124,17 +141,33 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     setTables(result.tables);
     return result.tables;
   }, [currentEpoch, isCurrent]);
-  const loadKds = useCallback(async (ctx: StaffContext, bearer: string) => {
+  const loadKds = useCallback(async (ctx: StaffContext, bearer: string, signal?: AbortSignal) => {
     const requestEpoch = currentEpoch(ctx, bearer);
     if (requestEpoch === null) return null;
     const requestID = ++kdsRequest.current;
     let result;
-    try { result = await operationsClient.kds(ctx, bearer); }
+    try { result = await operationsClient.kds(ctx, bearer, signal); }
     catch (cause) { if (!isCurrent(requestEpoch, ctx, bearer) || requestID !== kdsRequest.current) return null; throw cause; }
     if (!isCurrent(requestEpoch, ctx, bearer) || requestID !== kdsRequest.current) return null;
     setKdsOrders(result.orders);
+    setKdsStale(false); setKdsSyncedAt(new Date());
     return result.orders;
   }, [currentEpoch, isCurrent]);
+  // Every KDS load goes through one in-flight request with an abort watchdog, so polls, refreshes and post-write
+  // reloads never overlap or supersede each other. `fresh` waits for an in-flight load and then starts a new one.
+  const guardedKds = useCallback(async (ctx: StaffContext, bearer: string, fresh = false): Promise<StaffOrder[] | null> => {
+    if (kdsPoll.current) {
+      if (!fresh) return kdsPoll.current;
+      await kdsPoll.current.catch(() => null);
+      if (kdsPoll.current) return kdsPoll.current;
+    }
+    // Abort rather than race, so the guard is only released once the request itself has settled.
+    const controller = new AbortController();
+    const watchdog = window.setTimeout(() => controller.abort(), KDS_POLL_TIMEOUT_MS);
+    const load = loadKds(ctx, bearer, controller.signal).finally(() => { window.clearTimeout(watchdog); if (kdsPoll.current === load) kdsPoll.current = null; });
+    kdsPoll.current = load;
+    return load;
+  }, [loadKds]);
   const loadSettings = useCallback(async (ctx: StaffContext, bearer: string) => {
     const requestEpoch = currentEpoch(ctx, bearer);
     if (requestEpoch === null) return null;
@@ -192,7 +225,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     setContext(cleanContext);
     setToken(cleanBearer);
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
-    setCapabilities(null); setTables([]); setKdsOrders([]); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
+    openerRef.current = null; kdsPoll.current = null;
+    setCapabilities(null); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
     pendingWrite.current = null; setBusy(false); setUncertain(false);
     setLoading(true); setError(''); setNotice('');
     try {
@@ -202,7 +236,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       setCapabilities(current); setConnected(true);
       const tasks: Promise<unknown>[] = [];
       if (current.can_cash || current.can_serve || current.can_manage) tasks.push(loadTables(cleanContext, cleanBearer));
-      if (current.can_kitchen) tasks.push(loadKds(cleanContext, cleanBearer));
+      if (current.can_kitchen) tasks.push(guardedKds(cleanContext, cleanBearer));
       if (current.can_manage) tasks.push(loadSettings(cleanContext, cleanBearer));
       const results = await Promise.allSettled(tasks);
       if (!isCurrent(requestEpoch, cleanContext, cleanBearer)) return;
@@ -211,7 +245,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     } catch (cause) {
       if (active.current?.epoch === requestEpoch) { active.current = null; setConnected(false); setCapabilities(null); sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY); setError(cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? t.accessError : explain(cause, locale)); }
     } finally { if (epoch.current === requestEpoch) setLoading(false); }
-  }, [initialView, isCurrent, loadKds, loadSettings, loadTables, locale, t.accessError, t.error]);
+  }, [guardedKds, initialView, isCurrent, loadSettings, loadTables, locale, t.accessError, t.error]);
 
   useEffect(() => {
     if (restored.current) return;
@@ -232,7 +266,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     try {
       const tasks: Promise<unknown>[] = [];
       if (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage) tasks.push(loadTables(context, token));
-      if (capabilities.can_kitchen) tasks.push(loadKds(context, token));
+      if (capabilities.can_kitchen) tasks.push(guardedKds(context, token, true));
       if (capabilities.can_manage) tasks.push(loadSettings(context, token));
       const results = await Promise.all(tasks);
       if (!isCurrent(requestEpoch, context, token)) return;
@@ -243,18 +277,22 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       }
     } catch (cause) { if (isCurrent(requestEpoch, context, token)) setError(explain(cause, locale)); }
     finally { if (isCurrent(requestEpoch, context, token)) setLoading(false); }
-  }, [capabilities, connected, context, currentEpoch, isCurrent, loadDetail, loadKds, loadSettings, loadTables, locale, selectedTableID, tables, token]);
+  }, [capabilities, connected, context, currentEpoch, guardedKds, isCurrent, loadDetail, loadSettings, loadTables, locale, selectedTableID, tables, token]);
 
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;
     let timer: number | undefined;
     const schedule = () => {
       if (timer !== undefined) window.clearInterval(timer);
-      if (document.visibilityState === 'visible') timer = window.setInterval(() => { void loadKds(context, token).catch(() => undefined); }, 2500);
+      if (document.visibilityState === 'visible') timer = window.setInterval(() => {
+        if (kdsPoll.current) return;
+        // loadKds only rethrows for the current connection, so a failure inherited across a KDS remount still marks the board stale.
+        void guardedKds(context, token).catch(() => setKdsStale(true));
+      }, 2500);
     };
     schedule(); document.addEventListener('visibilitychange', schedule);
     return () => { document.removeEventListener('visibilitychange', schedule); if (timer !== undefined) window.clearInterval(timer); };
-  }, [capabilities?.can_kitchen, connected, context, loadKds, token, view]);
+  }, [capabilities?.can_kitchen, connected, context, guardedKds, token, view]);
 
   const refreshDetail = useCallback(async () => {
     const requestEpoch = currentEpoch(context, token);
@@ -376,7 +414,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
 
   const advanceOrder = (order: StaffOrder, target: 'PREPARING' | 'READY' | 'SERVED') => {
     const body = { expected_version: order.version, target };
-    const success = async () => { await refreshDetail(); await loadTables(context, token); if (capabilities?.can_kitchen) await loadKds(context, token); };
+    const success = async () => { await refreshDetail(); await loadTables(context, token); if (capabilities?.can_kitchen) await guardedKds(context, token, true); };
     const conflict = async () => { await success(); };
     startWrite(body, (payload, key) => {
       return operationsClient.advanceOrder(context, token, order.table_id, order.session_id, order.id, target, payload.expected_version, key);
@@ -389,7 +427,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     active.current = null;
     tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1;
     sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
-    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; setUncertain(false);
+    openerRef.current = null; kdsPoll.current = null;
+    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; setUncertain(false);
   };
 
   const noOperations = !!capabilities && !hasTables && !capabilities.can_kitchen;
@@ -437,21 +476,22 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
           </section>}
           {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
-            <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={() => void openCashPreview()}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
+            <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; void openCashPreview(); }}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
             {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
             <div className="staff-section-title"><h3>{t.receipts}</h3></div>
             {detail.receipts.map((item) => <ReceiptCard key={item.id} receipt={item} t={t} demo={demo} locale={locale} />)}
-            {capabilities.can_serve && <button className="button quiet wide close-table" disabled={busy || uncertain} onClick={() => setDialog('close')}>{t.close}</button>}
+            {capabilities.can_serve && <button className="button quiet wide close-table" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; setDialog('close'); }}>{t.close}</button>}
           </section>}
         </>}
         {view === 'kds' && capabilities?.can_kitchen && <section className="kds-view"><div className="section-heading"><div><div className="eyebrow">{t.subtitle}</div><h2>{t.kds}</h2></div></div>
+          {kdsStale && <p className="error kds-stale" role="status">{t.kdsStale}{kdsSyncedAt && <> · {t.kdsLastSync}: {kdsSyncedAt.toLocaleTimeString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</>}</p>}
           <div className="kds-columns">{(['ACCEPTED', 'PREPARING', 'READY'] as const).map((status) => <section className="kds-column" key={status}><h3>{statusLabel(status, t)}<span>{boardOrders.filter((order) => order.fulfillment_status === status).length}</span></h3>
             {boardOrders.filter((order) => order.fulfillment_status === status).map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} canServe={false} busy={busy || uncertain} compact onStart={() => advanceOrder(order, 'PREPARING')} onReady={() => advanceOrder(order, 'READY')} />)}
           </section>)}</div>
         </section>}
       </>}
     </div>
-    {dialog === 'cash' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="cash-title"><div className="eyebrow">{demo ? t.demoCashTitle : t.cashTitle}</div><h2 id="cash-title">{receipt ? t.receipt : demo ? t.demoCashTitle : t.cashTitle}</h2>
+    {dialog === 'cash' && <StaffDialog labelledBy="cash-title" dismissible={!busy && !uncertain} onDismiss={() => { setDialog(null); setReceipt(null); setCashPreview(null); }}><div className="eyebrow">{demo ? t.demoCashTitle : t.cashTitle}</div><h2 id="cash-title">{receipt ? t.receipt : demo ? t.demoCashTitle : t.cashTitle}</h2>
       {demo && <DemoBanner demo locale={locale} />}
       {receipt ? <ReceiptCard receipt={receipt} t={t} demo={demo} locale={locale} /> : <>
         {!cashPreview ? <p className="muted">{t.loading}</p> : <><p>{t.due} <strong>{amountJPY(cashPreview.due_jpy)}</strong></p><p className="tax-row"><span>{t.tax}</span><span>{amountJPY(cashPreview.tax.tax_jpy)}</span></p><ul className="cash-order-list">{cashPreview.order_ids.map((orderID) => { const order = detail?.orders.find((item) => item.id === orderID); return <li key={orderID}>{order ? `${order.table_name} · #${order.generation} · ${amountJPY(order.total_gross_jpy)}` : orderID}</li>; })}</ul>
@@ -464,14 +504,14 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       <button className="button quiet wide" disabled={busy} onClick={() => { setDialog(null); setReceipt(null); setCashPreview(null); }}>{t.closeDialog}</button>
       {uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}
       {error && <p className="error" role="alert">{error}</p>}
-    </section></div>}
-    {dialog === 'close' && <div className="dialog-backdrop"><section className="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="close-title"><div className="eyebrow">{demo ? t.demoClose : t.close}</div><h2 id="close-title">{t.closeTitle}</h2>{demo && <DemoBanner demo locale={locale} />}
+    </StaffDialog>}
+    {dialog === 'close' && <StaffDialog labelledBy="close-title" dismissible={!busy && !uncertain} onDismiss={() => setDialog(null)}><div className="eyebrow">{demo ? t.demoClose : t.close}</div><h2 id="close-title">{t.closeTitle}</h2>{demo && <DemoBanner demo locale={locale} />}
       {blockers.length > 0 ? <><p className="error">{t.blockers}</p><ul className="blocker-list">{blockers.map((blocker, index) => <li key={`${blocker}-${index}`}>{blockerLabel(blocker, locale)}</li>)}</ul></> : <p className="notice">{t.noBlockers}</p>}
       <button className="button primary wide" disabled={busy || uncertain || blockers.length > 0} onClick={closeTable}>{t.closeConfirm}</button>
       <button className="button quiet wide" disabled={busy} onClick={() => setDialog(null)}>{t.closeDialog}</button>
       {uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}
       {error && <p className="error" role="alert">{error}</p>}
-    </section></div>}
+    </StaffDialog>}
   </StaffShell>;
 }
 
