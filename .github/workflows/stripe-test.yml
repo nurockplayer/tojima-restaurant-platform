@@ -1,0 +1,127 @@
+name: Stripe Sandbox runtime smoke
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_sha:
+        description: Exact independently reviewed main commit
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stripe-test-sandbox
+  cancel-in-progress: false
+
+jobs:
+  keyless:
+    if: github.ref == 'refs/heads/main' && inputs.reviewed_sha == github.sha
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: tojima_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d tojima_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - name: Verify exact trusted SHA
+        env:
+          REVIEWED_SHA: ${{ inputs.reviewed_sha }}
+          TRIGGER_SHA: ${{ github.sha }}
+        run: |
+          test "$REVIEWED_SHA" = "$TRIGGER_SHA"
+          test "$(git rev-parse HEAD)" = "$TRIGGER_SHA"
+      - name: Keyless tests and formatting
+        env:
+          TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5432/tojima_test?sslmode=disable
+        run: |
+          make fmt-check
+          go test -race -count=1 ./...
+          python3 -m unittest discover -s scripts -p 'test_run_stripe_sandbox.py'
+
+  startup-smoke:
+    needs: keyless
+    if: github.ref == 'refs/heads/main' && inputs.reviewed_sha == github.sha
+    runs-on: ubuntu-latest
+    environment: stripe-test
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_HOST_AUTH_METHOD: trust
+          POSTGRES_DB: tojima_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -h 127.0.0.1 -U postgres -d tojima_test"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+          cache: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.15.0'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          package_json_file: web/package.json
+          run_install: false
+      - name: Build pinned web dependencies without Stripe credentials
+        run: |
+          pnpm --dir web install --frozen-lockfile
+          pnpm --dir web check
+          pnpm --dir web build
+          go build -o /tmp/tojima-operationstest ./cmd/operationstest
+      - name: Install pinned official Stripe CLI without Stripe credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/stripe_1.54.0_linux_x86_64.tar.gz"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            https://github.com/stripe/stripe-cli/releases/download/v1.54.0/stripe_1.54.0_linux_x86_64.tar.gz \
+            --output "$archive"
+          printf '%s  %s\n' '7e8b0693b56b3690bf0bd5d50f1f8a96bd8b84ad4efd1f08c493220b191e074b' "$archive" | sha256sum --check --status
+          mkdir -p "$RUNNER_TEMP/stripe-bin"
+          tar -xzf "$archive" -C "$RUNNER_TEMP/stripe-bin" stripe
+          echo "$RUNNER_TEMP/stripe-bin" >> "$GITHUB_PATH"
+      - name: Credentialed startup smoke for all three synthetic merchants
+        env:
+          TEST_DATABASE_URL: postgres://postgres@127.0.0.1:5432/tojima_test?sslmode=disable
+          TOJIMA_STRIPE_MODE: CONNECTED_DIRECT_TEST_FIXTURE
+          TOJIMA_STRIPE_API_VERSION: 2026-09-30.endive
+          TOJIMA_STRIPE_TEST_SECRET_KEY: ${{ secrets.TOJIMA_STRIPE_TEST_SECRET_KEY }}
+          TOJIMA_STRIPE_TEST_ACCOUNT_A: ${{ vars.TOJIMA_STRIPE_TEST_ACCOUNT_A }}
+          TOJIMA_STRIPE_TEST_ACCOUNT_B: ${{ vars.TOJIMA_STRIPE_TEST_ACCOUNT_B }}
+          TOJIMA_STRIPE_TEST_ACCOUNT_C: ${{ vars.TOJIMA_STRIPE_TEST_ACCOUNT_C }}
+          TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY: '10000'
+        run: |
+          set -eu
+          for tenant in A B C; do
+            python3 scripts/run-stripe-sandbox.py --tenant "$tenant" --startup-check \
+              --runtime-binary /tmp/tojima-operationstest \
+              --credentials "$RUNNER_TEMP/tojima-stripe-$tenant.json"
+          done
+      - name: State verified boundary
+        run: echo 'Runtime smoke only. No charge, paid/failed/async browser, capability readiness, or full P-80 E2E acceptance is claimed.'

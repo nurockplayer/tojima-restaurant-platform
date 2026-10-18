@@ -42,6 +42,7 @@ type Options struct {
 	CashEnabled           bool
 	CashMode              operations.CashMode
 	DemoShironagasukujira bool
+	StripeSandboxTenant   string
 }
 
 // New requires an explicit loopback test database and creates a random schema.
@@ -59,6 +60,9 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	if options.DemoShironagasukujira && (!options.CashEnabled || options.CashMode != operations.PayLater) {
 		return nil, errors.New("Shironagasukujira demo requires the explicit synthetic CASH/PAY_LATER test setting")
 	}
+	if options.StripeSandboxTenant != "" && (options.DemoShironagasukujira || (options.StripeSandboxTenant != "A" && options.StripeSandboxTenant != "B" && options.StripeSandboxTenant != "C")) {
+		return nil, errors.New("invalid synthetic Stripe Sandbox tenant")
+	}
 	if dsn == "" {
 		return nil, errors.New("TEST_DATABASE_URL is required")
 	}
@@ -66,7 +70,7 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	if err != nil {
 		return nil, errors.New("invalid test database URL")
 	}
-	if h := cfg.ConnConfig.Host; h != "127.0.0.1" && h != "localhost" && h != "::1" {
+	if !loopbackTestDatabaseHosts(cfg) {
 		return nil, errors.New("guest fixture requires a loopback test database")
 	}
 	var raw [12]byte
@@ -80,6 +84,13 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 		f.TenantID, f.StoreID, f.TableID = "demo-synthetic", "demo-shironagasukujira", "table-05"
 		f.Locator = "demo-shironagasukujira-table-05"
 		tenantName, storeName, tableName = "Synthetic demo tenant", "DEMO — 博多餃子酒場 シロナガスクジラ（historical reference）", "テーブル 05"
+	}
+	if options.StripeSandboxTenant != "" {
+		suffix := strings.ToLower(options.StripeSandboxTenant)
+		f.Schema = "p80_sandbox_" + hex.EncodeToString(raw[:])
+		f.TenantID, f.StoreID, f.TableID = "stripe-test-tenant-"+suffix, "stripe-test-store-"+suffix, "stripe-test-table-"+suffix
+		f.Locator = "stripe-test-table-" + suffix
+		tenantName, storeName, tableName = "Synthetic Stripe Sandbox tenant "+options.StripeSandboxTenant, "Synthetic JP JPY test store "+options.StripeSandboxTenant, "Synthetic test table"
 	}
 	f.admin, err = pgx.ConnectConfig(ctx, cfg.ConnConfig)
 	if err != nil {
@@ -263,4 +274,22 @@ func (f *Fixture) Close(ctx context.Context) {
 		}
 		_ = f.admin.Close(ctx)
 	}
+}
+
+// pgx can connect to a later host when the primary is unreachable. Validate the
+// entire parsed candidate set before opening any connection or creating schemas.
+func loopbackTestDatabaseHosts(cfg *pgxpool.Config) bool {
+	if cfg == nil || cfg.ConnConfig == nil || !loopbackTestDatabaseHost(cfg.ConnConfig.Host) {
+		return false
+	}
+	for _, fallback := range cfg.ConnConfig.Fallbacks {
+		if fallback == nil || !loopbackTestDatabaseHost(fallback.Host) {
+			return false
+		}
+	}
+	return true
+}
+
+func loopbackTestDatabaseHost(host string) bool {
+	return host == "127.0.0.1" || host == "localhost" || host == "::1"
 }
