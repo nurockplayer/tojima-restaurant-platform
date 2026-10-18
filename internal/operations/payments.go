@@ -21,7 +21,8 @@ type VerifiedStripePayment struct {
 }
 
 // ApplyStripePaidTx records the monotone Stripe-paid transition. The caller
-// must already hold the session and payment-attempt locks in that order.
+// must already hold company catalog SHARE, session and payment-attempt locks
+// in that order. HQ hold activation takes the same parent with UPDATE.
 func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedStripePayment) (bool, error) {
 	if tx == nil || strings.TrimSpace(v.OrderID) == "" || strings.TrimSpace(v.SessionID) == "" ||
 		strings.TrimSpace(v.TenantID) == "" || strings.TrimSpace(v.StoreID) == "" || strings.TrimSpace(v.TableID) == "" ||
@@ -47,7 +48,7 @@ func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedSt
 	if payment != "PENDING" && payment != "UNKNOWN" {
 		return false, ErrNotReady
 	}
-	var held, sessionOpen bool
+	var held, sessionOpen, companyHeld bool
 	var review bool
 	var version int64
 	if err = tx.QueryRow(ctx, `SELECT os.operational_hold,os.payment_review_required,os.version,ts.status='OPEN' AND ts.expires_at>clock_timestamp()
@@ -57,7 +58,17 @@ func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedSt
 	if review {
 		return false, nil
 	}
-	newReview := (held || !sessionOpen) && fulfillment == string(Waiting)
+	// The retained marker survives hold OFF and later detachment. The active
+	// hold query also covers a completed-but-unpaid session at ON time.
+	if err = tx.QueryRow(ctx, `SELECT a.company_hold_expire_requested_at IS NOT NULL OR (
+		NOT EXISTS(SELECT 1 FROM store_menu_bindings b WHERE b.tenant_id=a.tenant_id AND b.store_id=a.store_id)
+		AND EXISTS(SELECT 1 FROM company_product_emergency_holds h JOIN table_orders o ON o.order_id=a.order_id
+			WHERE h.tenant_id=a.tenant_id AND h.active
+			AND EXISTS(SELECT 1 FROM jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l WHERE l->>'product_key'=h.product_key)))
+		FROM stripe_payment_attempts a WHERE a.order_id=$1`, v.OrderID).Scan(&companyHeld); err != nil {
+		return false, err
+	}
+	newReview := (held || companyHeld || !sessionOpen) && fulfillment == string(Waiting)
 	newVersion := version + 1
 	if _, err = tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,before_payment_status,after_payment_status,state_version)
 		VALUES($1,'stripe','STRIPE_PAID_VERIFIED',$2,'PAID',$3)`, v.OrderID, payment, newVersion); err != nil {

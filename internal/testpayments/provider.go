@@ -32,6 +32,7 @@ type Provider struct {
 	nextPayment          stripeprovider.PaymentStatus
 	hasNextOutcome       bool
 	nextCreateHook       func(stripeprovider.CheckoutResult)
+	nextExpireHook       func(stripeprovider.CheckoutResult)
 	nextExpireStatus     stripeprovider.CheckoutStatus
 	nextExpirePayment    stripeprovider.PaymentStatus
 	nextExpireUnknown    bool
@@ -141,6 +142,11 @@ func (p *Provider) ExpireCheckout(ctx context.Context, account stripeprovider.Ac
 	}
 	r.Status, r.URL = stripeprovider.CheckoutExpired, ""
 	p.sessions[id] = r
+	if p.nextExpireHook != nil {
+		hook := p.nextExpireHook
+		p.nextExpireHook = nil
+		hook(clone(r))
+	}
 	return clone(r), nil
 }
 
@@ -184,6 +190,14 @@ func (p *Provider) SetNextCreateHook(hook func(stripeprovider.CheckoutResult)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.nextCreateHook = hook
+}
+
+// SetNextExpireHook pauses a successful synthetic expiration before returning
+// its observation, allowing a webhook to commit while that response is in flight.
+func (p *Provider) SetNextExpireHook(hook func(stripeprovider.CheckoutResult)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nextExpireHook = hook
 }
 
 // SetNextExpireOutcome models a concurrent payment completion while a worker

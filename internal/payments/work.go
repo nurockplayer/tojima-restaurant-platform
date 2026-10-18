@@ -66,6 +66,7 @@ type createRow struct {
 	amount, generation                                                                 int64
 	retry                                                                              time.Time
 	checkout, paymentIntent                                                            string
+	holdExpire                                                                         bool
 }
 
 func (s *Service) processCreate(ctx context.Context, w workItem) error {
@@ -164,10 +165,10 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	}
 	var state string
 	var currentSession string
-	var review, hold bool
+	var review, hold, companyHold bool
 	var sessionActive bool
-	err = tx.QueryRow(ctx, `SELECT a.state,a.session_id,coalesce(os.payment_review_required,true),coalesce(os.operational_hold,true),ts.status='OPEN' AND ts.expires_at>clock_timestamp()
-		FROM stripe_payment_attempts a LEFT JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id WHERE a.order_id=$1 FOR UPDATE OF a`, a.order).Scan(&state, &currentSession, &review, &hold, &sessionActive)
+	err = tx.QueryRow(ctx, `SELECT a.state,a.session_id,coalesce(os.payment_review_required,true),coalesce(os.operational_hold,true),a.company_hold_expire_requested_at IS NOT NULL,ts.status='OPEN' AND ts.expires_at>clock_timestamp()
+		FROM stripe_payment_attempts a LEFT JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id WHERE a.order_id=$1 FOR UPDATE OF a`, a.order).Scan(&state, &currentSession, &review, &hold, &companyHold, &sessionActive)
 	if err != nil {
 		return err
 	}
@@ -191,8 +192,12 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	if !now.Before(x.ExpiresAt) && x.Status == stripeprovider.CheckoutOpen {
 		newState = StateExpired
 	}
-	if hold || review || !sessionActive {
+	if hold || review || companyHold || !sessionActive {
 		newState = StateUnknown
+	}
+	// A late create response must not resurrect an already reconciled session.
+	if state == string(StateExpired) || state == string(StateFailed) {
+		newState = AttemptState(state)
 	}
 	if x.PaymentStatus == stripeprovider.PaymentPaid {
 		_, err = s.ops.ApplyStripePaidTx(ctx, tx, operations.VerifiedStripePayment{OrderID: a.order, SessionID: a.session, TenantID: a.tenant, StoreID: a.store, TableID: a.table, AmountJPY: a.amount, Currency: stripeprovider.CurrencyJPY, PaymentIntent: x.PaymentIntentID})
@@ -215,7 +220,7 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	if err = s.appendAttemptEvent(ctx, tx, a.order, "CREATE_RESULT:"+x.SessionID, state, string(newState), "provider"); err != nil {
 		return err
 	}
-	if newState == StateUnknown && x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid {
+	if !companyHold && newState == StateUnknown && x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid {
 		if err = s.enqueueWork(ctx, tx, "EXPIRE", a.order, nil, "expire:"+a.attempt+":"+x.SessionID); err != nil {
 			return err
 		}
@@ -547,6 +552,12 @@ func lockPaymentSessionAny(ctx context.Context, tx pgx.Tx, order string) error {
 	if err != nil {
 		return err
 	}
+	// Match HQ hold/admission ordering, including the first hold for a product.
+	var catalogID int64
+	err = tx.QueryRow(ctx, `SELECT catalog_id FROM menu_catalogs WHERE tenant_id=$1 AND owner_kind='COMPANY' FOR SHARE`, tenant).Scan(&catalogID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	var found string
 	err = tx.QueryRow(ctx, `SELECT session_id FROM table_sessions WHERE session_id=$1 AND tenant_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE`, sid, tenant, store, table).Scan(&found)
 	return err
@@ -554,16 +565,25 @@ func lockPaymentSessionAny(ctx context.Context, tx pgx.Tx, order string) error {
 
 func (s *Service) processExpire(ctx context.Context, w workItem) error {
 	var a createRow
+	var currentState string
 	err := s.db.QueryRow(ctx, `SELECT order_id,attempt_id,session_id,tenant_id,store_id,table_id,provider_mode,stripe_account_id,credential_ref,api_version,
-		request_profile_fingerprint,idempotency_key,amount_jpy,coalesce(checkout_session_id,''),coalesce(payment_intent_id,''),retry_not_after
-		FROM stripe_payment_attempts WHERE order_id=$1`, w.OrderID).Scan(&a.order, &a.attempt, &a.session, &a.tenant, &a.store, &a.table, &a.mode, &a.account, &a.credential, &a.api, &a.profile, &a.key, &a.amount, &a.checkout, &a.paymentIntent, &a.retry)
+		request_profile_fingerprint,idempotency_key,amount_jpy,coalesce(checkout_session_id,''),coalesce(payment_intent_id,''),retry_not_after,company_hold_expire_requested_at IS NOT NULL,state
+		FROM stripe_payment_attempts WHERE order_id=$1`, w.OrderID).Scan(&a.order, &a.attempt, &a.session, &a.tenant, &a.store, &a.table, &a.mode, &a.account, &a.credential, &a.api, &a.profile, &a.key, &a.amount, &a.checkout, &a.paymentIntent, &a.retry, &a.holdExpire, &currentState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.finishWork(ctx, w, false, 0, "MISSING_ATTEMPT")
 	}
 	if err != nil {
 		return err
 	}
+	if currentState == string(StatePaid) || currentState == string(StateReviewRequired) {
+		return s.finishWork(ctx, w, false, 0, "ALREADY_PAID")
+	}
 	if a.checkout == "" {
+		if a.holdExpire {
+			// CREATE may still be in flight or recovering the same idempotency
+			// key. Retain this work until the session binding becomes known.
+			return s.finishWork(ctx, w, true, 5*time.Second, "WAITING_FOR_CHECKOUT")
+		}
 		return s.finishWork(ctx, w, false, 0, "NO_CHECKOUT_TO_EXPIRE")
 	}
 	if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
@@ -609,10 +629,15 @@ func (s *Service) processExpire(ctx context.Context, w workItem) error {
 }
 
 // stopExpiredRetryWindow is checked before each provider call so an EXPIRE
-// work item cannot keep making remote requests after the attempt's immutable
-// create/reconciliation deadline. Once exhausted, UNKNOWN is the safe local
+// non-company work item cannot keep making remote requests after the attempt's
+// immutable create/reconciliation deadline. Once exhausted, UNKNOWN is the safe local
 // state and staff reconciliation remains available; no new Checkout is made.
 func (s *Service) stopExpiredRetryWindow(ctx context.Context, w workItem, a createRow) (bool, error) {
+	// HQ expiry is a retained obligation for an existing Checkout, independent
+	// of the CREATE idempotency deadline. It never creates another session.
+	if a.holdExpire {
+		return false, nil
+	}
 	var open bool
 	if err := s.db.QueryRow(ctx, `SELECT clock_timestamp() < $1`, a.retry).Scan(&open); err != nil {
 		return false, err
@@ -683,7 +708,17 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 			return e
 		}
 	}
-	if e = s.completeLeased(ctx, tx, w); e != nil {
+	if a.holdExpire && next == StateProcessing && state != string(StatePaid) && state != string(StateReviewRequired) {
+		cmd, err := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,
+			available_at=clock_timestamp()+interval '5 seconds',safe_error_code='PAYMENT_PROCESSING',updated_at=clock_timestamp()
+			WHERE work_id=$1 AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease)
+		if err != nil {
+			return err
+		}
+		if cmd.RowsAffected() != 1 {
+			return ErrConflict
+		}
+	} else if e = s.completeLeased(ctx, tx, w); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

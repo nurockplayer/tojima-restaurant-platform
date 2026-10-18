@@ -148,7 +148,7 @@ func (s *Service) canResume(ctx context.Context, sessionID, orderID string, proo
 	var ok bool
 	err := s.db.QueryRow(ctx, `SELECT a.session_id=$1 AND a.checkout_proof_hash=$3 AND a.continuation_expires_at>clock_timestamp() AND a.continuation_revoked_at IS NULL
 		AND a.state='OPEN' AND a.checkout_session_id IS NOT NULL AND a.checkout_status='open' AND a.provider_payment_status='unpaid'
-		AND NOT a.payment_review_required AND ts.status='OPEN' AND ts.expires_at>clock_timestamp() AND st.enabled AND st.operating AND t.enabled AND dt.enabled
+		AND a.company_hold_expire_requested_at IS NULL AND NOT a.payment_review_required AND ts.status='OPEN' AND ts.expires_at>clock_timestamp() AND st.enabled AND st.operating AND t.enabled AND dt.enabled
 		AND NOT coalesce(os.operational_hold,true) AND NOT coalesce(os.payment_review_required,true)
 		FROM stripe_payment_attempts a JOIN table_sessions ts ON ts.session_id=a.session_id
 		JOIN stores st ON st.tenant_id=a.tenant_id AND st.store_id=a.store_id

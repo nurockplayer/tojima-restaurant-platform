@@ -54,7 +54,7 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("idempotent up: %v", err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 7 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 8 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
 	if err = postgres.Reapply(ctx, target); err != nil {
@@ -70,11 +70,17 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".company_product_emergency_holds").Scan(&exists); err != nil || !exists {
 		t.Fatalf("007 company product holds schema missing after reapply: exists=%v err=%v", exists, err)
 	}
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=$1 AND table_name='stripe_payment_attempts' AND column_name='company_hold_expire_requested_at')`, schema).Scan(&exists); err != nil || !exists {
+		t.Fatalf("008 retained expiry marker missing after reapply: exists=%v err=%v", exists, err)
+	}
 	if err = postgres.Down(ctx, target); err != nil {
 		t.Fatalf("final down: %v", err)
 	}
 	if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".company_product_emergency_holds").Scan(&exists); err != nil || exists {
 		t.Fatalf("007 hold table survived migration down: exists=%v err=%v", exists, err)
+	}
+	if err = target.QueryRow(ctx, `SELECT to_regprocedure($1) IS NOT NULL`, schema+".protect_company_hold_expiry_request()").Scan(&exists); err != nil || exists {
+		t.Fatalf("008 function survived migration down: exists=%v err=%v", exists, err)
 	}
 	if err = postgres.Up(ctx, target); err != nil {
 		t.Fatalf("final up: %v", err)
