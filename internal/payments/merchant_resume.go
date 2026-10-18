@@ -120,14 +120,18 @@ func (s *Service) readSafeStatus(ctx context.Context, scope operations.TableScop
 	}
 	var out Status
 	var state string
-	err := s.db.QueryRow(ctx, `SELECT a.order_id,a.state,coalesce(a.checkout_status,''),coalesce(a.provider_payment_status,''),a.provider_expires_at,a.last_reconciled_at,a.payment_review_required OR st.payment_review_required
+	err := s.db.QueryRow(ctx, `SELECT a.order_id,a.state,coalesce(a.checkout_status,''),coalesce(a.provider_payment_status,''),a.provider_expires_at,a.last_reconciled_at,a.payment_review_required OR st.payment_review_required,
+		CASE WHEN a.company_hold_expire_requested_at IS NOT NULL AND a.state NOT IN ('PAID','REVIEW_REQUIRED')
+		AND EXISTS(SELECT 1 FROM stripe_payment_work w WHERE w.order_id=a.order_id AND w.work_type='EXPIRE'
+		    AND w.status IN ('READY','LEASED') AND w.safe_error_code='HOLD_RECONCILIATION_NEEDED')
+		THEN 'HOLD_RECONCILIATION_NEEDED' ELSE '' END
 		FROM stripe_payment_attempts a JOIN operation_order_state st USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id
 		JOIN stores so ON so.tenant_id=a.tenant_id AND so.store_id=a.store_id
 		JOIN tenants t ON t.tenant_id=a.tenant_id
 		JOIN dining_tables dt ON dt.tenant_id=a.tenant_id AND dt.store_id=a.store_id AND dt.table_id=a.table_id
 		WHERE a.order_id=$1 AND a.session_id=$2 AND a.tenant_id=$3 AND a.store_id=$4 AND a.table_id=$5
 		AND so.enabled AND t.enabled`, orderID, sessionID, scope.TenantID, scope.StoreID, scope.TableID).
-		Scan(&out.OrderID, &state, &out.CheckoutStatus, &out.PaymentStatus, &out.ProviderExpiresAt, &out.LastReconciledAt, &out.PaymentReviewRequired)
+		Scan(&out.OrderID, &state, &out.CheckoutStatus, &out.PaymentStatus, &out.ProviderExpiresAt, &out.LastReconciledAt, &out.PaymentReviewRequired, &out.SafeErrorCode)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Status{}, ErrNotFound
 	}

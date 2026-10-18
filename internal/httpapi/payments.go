@@ -301,6 +301,7 @@ func writePaymentStatus(w http.ResponseWriter, state payments.Status, resumeAvai
 		"checkout_status": state.CheckoutStatus, "payment_status": state.PaymentStatus,
 		"provider_expires_at": state.ProviderExpiresAt, "last_reconciled_at": state.LastReconciledAt,
 		"payment_review_required": state.PaymentReviewRequired, "resume_available": resumeAvailable,
+		"safe_error_code": state.SafeErrorCode,
 	})
 }
 

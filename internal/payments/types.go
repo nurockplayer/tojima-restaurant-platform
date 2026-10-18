@@ -86,6 +86,7 @@ type MerchantConfigInput struct {
 }
 
 type Status struct {
+	SafeErrorCode         string       `json:"safe_error_code,omitempty"`
 	OrderID               string       `json:"order_id"`
 	State                 AttemptState `json:"state"`
 	CheckoutStatus        string       `json:"checkout_status,omitempty"`

@@ -300,9 +300,10 @@ func enqueueHeldCheckoutsTx(ctx context.Context, tx pgx.Tx, tenantID, productKey
 	rows, err := tx.Query(ctx, `SELECT a.order_id,a.session_id FROM stripe_payment_attempts a
 		JOIN table_orders o USING(order_id)
 		WHERE a.tenant_id=$1 AND o.payment_method='STRIPE'
-		AND a.state IN ('CREATE_PENDING','OPEN','UNKNOWN','PROCESSING')
+		AND (a.state IN ('CREATE_PENDING','OPEN','UNKNOWN','PROCESSING')
+		     OR (a.state='FAILED' AND a.checkout_session_id IS NOT NULL))
 		AND a.provider_payment_status IS DISTINCT FROM 'paid'
-		AND (a.checkout_status IS NULL OR a.checkout_status='open')
+		AND (a.checkout_status IS NULL OR a.checkout_status IN ('open','complete'))
 		AND NOT EXISTS(SELECT 1 FROM store_menu_bindings b WHERE b.tenant_id=a.tenant_id AND b.store_id=a.store_id)
 		AND EXISTS(SELECT 1 FROM jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l WHERE l->>'product_key'=$2)
 		ORDER BY a.session_id,a.order_id`, tenantID, productKey)

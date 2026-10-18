@@ -16,6 +16,7 @@ import (
 type workItem struct {
 	ID, Lease, Kind, OrderID string
 	WebhookID                *int64
+	Attempts                 int
 }
 
 func (s *Service) processNext(ctx context.Context) (bool, error) {
@@ -25,9 +26,10 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var item workItem
-	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id FROM stripe_payment_work
+	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id,attempts+1 FROM stripe_payment_work
 		WHERE (status='READY' AND available_at<=clock_timestamp()) OR (status='LEASED' AND lease_until<=clock_timestamp())
-		ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID)
+		ORDER BY CASE WHEN work_type='EXPIRE' THEN 1 ELSE 0 END,available_at,created_at
+		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID, &item.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -582,7 +584,7 @@ func (s *Service) processExpire(ctx context.Context, w workItem) error {
 		if a.holdExpire {
 			// CREATE may still be in flight or recovering the same idempotency
 			// key. Retain this work until the session binding becomes known.
-			return s.finishWork(ctx, w, true, 5*time.Second, "WAITING_FOR_CHECKOUT")
+			return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "WAITING_FOR_CHECKOUT")
 		}
 		return s.finishWork(ctx, w, false, 0, "NO_CHECKOUT_TO_EXPIRE")
 	}
@@ -656,7 +658,27 @@ func (s *Service) retryExpireWithinWindow(ctx context.Context, w workItem, a cre
 	if stopped || err != nil {
 		return err
 	}
+	if a.holdExpire {
+		after = holdExpireBackoff(w.Attempts)
+		var elapsed bool
+		if err = s.db.QueryRow(ctx, `SELECT clock_timestamp() >= $1`, a.retry).Scan(&elapsed); err != nil {
+			return err
+		}
+		if elapsed {
+			code = "HOLD_RECONCILIATION_NEEDED"
+		}
+	}
 	return s.finishWork(ctx, w, true, after, code)
+}
+
+// Count durable leases, including restarts, and cap before doubling to avoid
+// overflow. Retained obligations must not continuously compete with new work.
+func holdExpireBackoff(attempts int) time.Duration {
+	delay := 5 * time.Second
+	for i := 1; i < attempts && delay < 5*time.Minute; i++ {
+		delay = min(2*delay, 5*time.Minute)
+	}
+	return delay
 }
 
 func validExpiryObservation(x stripeprovider.CheckoutResult, a createRow) bool {
@@ -710,8 +732,9 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 	}
 	if a.holdExpire && next == StateProcessing && state != string(StatePaid) && state != string(StateReviewRequired) {
 		cmd, err := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,
-			available_at=clock_timestamp()+interval '5 seconds',safe_error_code='PAYMENT_PROCESSING',updated_at=clock_timestamp()
-			WHERE work_id=$1 AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease)
+			available_at=clock_timestamp()+$3::interval,
+			safe_error_code=CASE WHEN clock_timestamp()>=$4 THEN 'HOLD_RECONCILIATION_NEEDED' ELSE 'PAYMENT_PROCESSING' END,updated_at=clock_timestamp()
+			WHERE work_id=$1 AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease, intervalString(holdExpireBackoff(w.Attempts)), a.retry)
 		if err != nil {
 			return err
 		}
