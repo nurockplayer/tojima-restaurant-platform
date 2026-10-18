@@ -15,6 +15,7 @@ export default defineConfig(({ mode }) => ({
   },
   test: {
     environment: 'node',
+    css: { include: [/[?&]raw(?:&|$)/] },
     include: ['src/**/*.test.{ts,tsx}'],
   },
 }));
