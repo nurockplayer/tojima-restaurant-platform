@@ -241,15 +241,23 @@ func TestPostgresP82StripePartialRefundWorkerAndWebhook(t *testing.T) {
 		t.Fatalf("whole order cancellation state=%+v", state)
 	}
 	status, err := f.Orders.ReadOrderStatus(ctx, committed.Order.ID, committed.OrderReadGrant.Token)
-	if err != nil || status.DisplayState != "UNKNOWN" || status.IsTerminal {
+	if err != nil || status.DisplayState != "CANCELLED" || status.IsTerminal {
 		t.Fatalf("pending refund guest status=%+v err=%v", status, err)
 	}
 	history, err := f.Operations.ReadGuestOperations(ctx, grant.Session.ID, grant.Token)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(history.Orders) != 1 || history.Orders[0].DisplayState != "UNKNOWN" || history.Orders[0].PaymentStatus != operations.Unknown || history.Orders[0].FulfillmentStatus != operations.Cancelled {
+	if len(history.Orders) != 1 || history.Orders[0].DisplayState != "CANCELLED" || history.Orders[0].PaymentStatus != operations.Unknown || history.Orders[0].FulfillmentStatus != operations.Cancelled {
 		t.Fatalf("pending refund guest history=%+v", history)
+	}
+	for _, details := range []ordering.GuestOrderDetails{status.GuestOrderDetails, history.Orders[0].GuestOrderDetails} {
+		if !details.Adjusted || details.TotalGrossJPY != 2000 || details.EffectiveTotalGrossJPY != 0 || len(details.Refunds) != 2 || details.RefundedTotalJPY != 500 {
+			t.Fatalf("mixed refund guest details=%+v", details)
+		}
+		if details.Refunds[0].Status != "SUCCEEDED" || details.Refunds[0].AmountJPY != 500 || details.Refunds[1].Status != "REQUESTED" || details.Refunds[1].AmountJPY != 1500 {
+			t.Fatalf("refund amounts/statuses mixed=%+v", details.Refunds)
+		}
 	}
 	provider.SetNextRefundOutcome("failed", false)
 	if worked, e := service.ProcessNext(ctx); e != nil || !worked {
@@ -296,6 +304,19 @@ func TestPostgresP82StripePartialRefundWorkerAndWebhook(t *testing.T) {
 	state = sessionOrderByID(t, detail.Orders, committed.Order.ID)
 	if state.PaymentStatus != operations.Refunded || state.FulfillmentStatus != operations.Cancelled {
 		t.Fatalf("whole refund completion=%+v", state)
+	}
+	status, err = f.Orders.ReadOrderStatus(ctx, committed.Order.ID, committed.OrderReadGrant.Token)
+	if err != nil || status.DisplayState != "CANCELLED" || status.IsTerminal {
+		t.Fatalf("refunded cancellation guest status=%+v err=%v", status, err)
+	}
+	history, err = f.Operations.ReadGuestOperations(ctx, grant.Session.ID, grant.Token)
+	if err != nil || len(history.Orders) != 1 {
+		t.Fatalf("refunded cancellation guest history=%+v err=%v", history, err)
+	}
+	for _, details := range []ordering.GuestOrderDetails{status.GuestOrderDetails, history.Orders[0].GuestOrderDetails} {
+		if details.RefundedTotalJPY != 2000 || len(details.Refunds) != 2 || details.Refunds[0].Status != "SUCCEEDED" || details.Refunds[1].Status != "SUCCEEDED" {
+			t.Fatalf("full refund guest details=%+v", details)
+		}
 	}
 	if err = checkClose(); err != nil {
 		t.Fatalf("close after full refund success: %v", err)

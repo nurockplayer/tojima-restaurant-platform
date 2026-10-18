@@ -270,3 +270,112 @@ DTO 白名單與非終止狀態；Vitest 涵蓋日中完整文案、中立回退
   PASS, 59 tests. `pnpm --dir web test`: PASS, 144 tests across 10 files.
 - No P-82 B manager-release integration, Ego-lite browser/device acceptance or
   separate Oracle review is claimed. No push, PR or deployment.
+
+## P-83 B part 2
+
+### English
+
+This part supersedes the earlier refund-display deferrals and original-only
+amount contract. Both ORDER_READ and in-session GuestOperations now expose the
+same allowlisted details: `total_gross_jpy` remains the immutable original total;
+`effective_total_gross_jpy` comes from C1's persisted, server-recomputed tax
+result (falling back to the original total before any adjustment).
+`effective_lines` contains only `product_name`, public `option_names`, effective
+`quantity`, and `line_total_jpy`, calculated from committed prices, including
+options, and finalized cancelled quantities. Selected option names retain
+committed order and distinguish variants of the same product on both surfaces;
+no internal product/option keys are included. `adjusted` remains true after kitchen
+acknowledgement. Original totals appear as secondary information; the current
+lines and total are primary. No original order snapshot is modified.
+
+The guest sees 「店舗により注文内容が変更されました」 / 「店家已調整您的訂單」
+for adjustments and 「この注文は取り消されました」 / 「此訂單已取消」 for
+whole-order cancellation. Refunds are independent of payment/kitchen labels:
+`refunds` contains only `status`, `amount_jpy`, and `method` (`CASH`/`STRIPE`);
+`refunded_total_jpy` sums only SUCCEEDED rows. REQUESTED and PROCESSING render
+「返金処理中」 / 「退款處理中」; FAILED renders
+「返金を確認中です。店舗にお問い合わせください」 /
+「退款確認中，請洽店家」; only SUCCEEDED renders
+「返金済み ¥X」 / 「已退款 ¥X」. Unknown states remain neutral. All JPY
+amounts are decimal strings at HTTP boundaries. Staff reasons, actors, safe
+error codes, provider identifiers and internal refund identifiers are excluded
+by construction. Staff DTOs and OrderState remain unchanged.
+
+Pending or kitchen-confirmed C2 stop requests do not affect guest lines,
+amounts, adjustment notices or refund summaries. Only finalization writes the
+adjustment that becomes visible. Existing server terminal rules and client
+polling remain in force, including nonterminal status for unresolved refunds.
+Failed refreshes retain the last confirmed effective state with a stale notice;
+they cannot promote pending/failed refunds to success.
+When no effective snapshot has been confirmed, history does not substitute the
+immutable original amount as the current amount; it shows a neutral unavailable
+message until the current details can be read.
+
+Coverage includes the director's unpaid CASH ¥660 → ¥330 reduction, original
+¥660 retention, cash refunds and whole cancellation, Stripe refund processing,
+failure, retry and success, pending/finalized C2 behavior, exact nested response
+key allowlists, both languages, and stale refresh/recovery on both web surfaces.
+This lane does not push, open a PR, deploy, or change payment/operations state
+transitions. Earlier execution receipts describe their own historical lanes;
+the B part 2 receipt below records this candidate's verification.
+
+### 日本語
+
+P-83 B part 2 は、ORDER_READ と同一卓内の注文履歴の両方に現在の有効な
+商品・数量・税込合計を表示する。C1 がサーバー側で税を再計算して保存した金額を
+使用し、元の注文スナップショットは変更しない。変更後の表示を主とし、元の合計は
+補足情報として残す。「店舗により注文内容が変更されました」を表示し、厨房での
+変更確認後も変更済みの表示を維持する。選択したオプション名も保持して、同じ商品
+の異なる選択内容を区別できるようにする。内部キーは公開しない。
+全取消は「この注文は取り消されました」。
+
+返金はサーバーの返金行のみから表示する。REQUESTED／PROCESSING は
+「返金処理中」、FAILED は「返金を確認中です。店舗にお問い合わせください」、
+SUCCEEDED のみ「返金済み ¥X」。支払済みや取消済みの状態から返金成功を
+推測しない。返金合計は成功した返金だけを集計する。内部理由・担当者・安全な
+エラーコード・プロバイダー ID・内部返金 ID は公開しない。
+C2 の停止申請中・厨房確認済みの段階は客に表示せず、最終確定した調整だけを
+反映する。返金未解決時の非終端・定期取得の規則は維持する。更新失敗時は前回
+確認した有効な注文と返金状態を保ち、古い情報である旨を表示する。
+実 PostgreSQL 試験と日中両言語の Vitest で、未払い現金 ¥660 → ¥330、元金額の
+保持、全取消、返金の処理中・失敗・再試行・成功、C2 の最終確定境界、JSON の
+許可キーと更新失敗からの回復を検証する。
+
+### 繁體中文
+
+P-83 B part 2 在 ORDER_READ 與同桌訂單歷史皆顯示目前有效的品項、數量與
+含稅總額。金額採用 C1 由服務端重新計稅後儲存的結果，原始訂單快照維持不變。
+目前內容為主要資訊，原始總額保留為次要資訊。調整顯示「店家已調整您的訂單」，
+廚房確認變更後仍保留此標示。保留選用項目名稱以區分同品項的不同選擇，不公開
+內部選項鍵值；整筆取消顯示「此訂單已取消」。
+
+退款只依服務端退款紀錄顯示：REQUESTED／PROCESSING 為「退款處理中」，
+FAILED 為「退款確認中，請洽店家」，僅 SUCCEEDED 可顯示「已退款 ¥X」。
+不得從已付款或已取消推測退款成功；已退款總額只加總成功紀錄。不得公開員工
+理由、操作人員、內部錯誤碼、供應者 ID 或內部退款 ID。C2 停止申請與廚房確認
+階段不對客人顯示，最終確定後才以訂單調整呈現。維持未解決退款的非終止與輪詢
+規則。更新失敗時保留上次確認的有效內容與退款狀態，並顯示資訊可能過時的提示。
+真實 PostgreSQL 與日中雙語 Vitest 涵蓋未付現金 ¥660 → ¥330、保留原始金額、
+整筆取消、退款處理中／失敗／重試／成功、C2 最終確定邊界、JSON 欄位白名單及
+更新失敗後恢復。
+
+### B part 2 execution receipt
+
+- Base: reviewed integration `ec886ed`; branch `codex/p83-b2-adjustment-display`.
+- Supplied `TEST_DATABASE_URL` with `go test -race -count=1 ./...`: PASS,
+  all packages, using writable temporary Go build/module caches. The complete
+  final run includes the extended paid/unpaid whole-cash cancellation and
+  multiple-Stripe-refund summary assertions.
+- Selected-option variant regression:
+  `go test -race -count=1 ./internal/httpapi -run '^TestPostgresP83B2GuestEffectiveLineOptionNames$'`:
+  PASS, including two configured lines, partial reduction and immutable names
+  after live catalog renaming. HTTP coverage also checks an exact nested
+  `line_total_jpy` above the JavaScript safe integer range.
+- `make fmt-check vet build migration-smoke`: PASS.
+- Node **24.15.0**, pnpm **12.11.2**:
+  `pnpm --dir web install --frozen-lockfile`, `pnpm --dir web lint`,
+  `pnpm --dir web exec tsc -b --pretty false`, `pnpm --dir web test`, and
+  `pnpm --dir web build`: PASS. Vitest: **238 tests across 12 files**.
+- `.pnpm-store/` is absent. No push, PR, deployment or payment-provider
+  configuration change. These are automated implementation checks; they do
+  not claim a new end-to-end browser walkthrough or device acceptance.

@@ -11,6 +11,11 @@ export interface OrderReadStatus {
   fulfillment_status: string;
   display_state: string;
   total_gross_jpy: string;
+  effective_total_gross_jpy: string;
+  effective_lines: Array<{ product_name: string; quantity: number; line_total_jpy: string; option_names: string[] }>;
+  adjusted: boolean;
+  refunds: Array<{ status: string; amount_jpy: string; method: 'CASH' | 'STRIPE' }>;
+  refunded_total_jpy: string;
   currency: 'JPY';
   is_terminal: boolean;
 }

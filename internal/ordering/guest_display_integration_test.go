@@ -108,7 +108,9 @@ func TestReadOrderStatusTerminalMatrix(t *testing.T) {
 								t.Errorf("payment=%s fulfillment=%s hold=%t review=%t card=%t: IsTerminal=%t, want %t", payment, fulfillment, hold, review, card, status.IsTerminal, wantTerminal)
 							}
 							wantDisplay := "STANDARD"
-							if fulfillment == "CANCELLED" || payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
+							if fulfillment == "CANCELLED" {
+								wantDisplay = "CANCELLED"
+							} else if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 								wantDisplay = "UNKNOWN"
 							} else if payment == "PAID" && review && !card {
 								wantDisplay = "PAID_UNDER_REVIEW"

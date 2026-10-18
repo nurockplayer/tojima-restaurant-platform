@@ -230,8 +230,28 @@ func TestPostgresC1CashLastItemClosesWithoutDeletingFacts(t *testing.T) {
 			if paid {
 				wantPayment = operations.Unknown
 			}
-			if len(history.Orders) != 1 || history.Orders[0].DisplayState != "UNKNOWN" || history.Orders[0].PaymentStatus != wantPayment || history.Orders[0].FulfillmentStatus != operations.Cancelled {
+			if len(history.Orders) != 1 || history.Orders[0].DisplayState != "CANCELLED" || history.Orders[0].PaymentStatus != wantPayment || history.Orders[0].FulfillmentStatus != operations.Cancelled {
 				t.Fatalf("cancelled guest history=%+v", history)
+			}
+			readGrant, err := f.Orders.RequestOrderRead(ctx, grant.Session.ID, grant.Token, order.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			status, err := f.Orders.ReadOrderStatus(ctx, order.ID, readGrant.Token)
+			if err != nil || status.DisplayState != "CANCELLED" || status.IsTerminal {
+				t.Fatalf("cancelled ORDER_READ=%+v err=%v", status, err)
+			}
+			for _, details := range []ordering.GuestOrderDetails{status.GuestOrderDetails, history.Orders[0].GuestOrderDetails} {
+				if !details.Adjusted || details.TotalGrossJPY != o.TotalGrossJPY || details.EffectiveTotalGrossJPY != 0 || len(details.EffectiveLines) != 1 || details.EffectiveLines[0].Quantity != 0 || details.EffectiveLines[0].LineTotalJPY != 0 {
+					t.Fatalf("cancelled guest details=%+v", details)
+				}
+				if paid {
+					if len(details.Refunds) != 1 || details.Refunds[0].Status != "SUCCEEDED" || details.Refunds[0].Method != "CASH" || details.Refunds[0].AmountJPY != o.TotalGrossJPY || details.RefundedTotalJPY != o.TotalGrossJPY {
+						t.Fatalf("cancelled cash refund details=%+v", details)
+					}
+				} else if len(details.Refunds) != 0 || details.RefundedTotalJPY != 0 {
+					t.Fatalf("unpaid cancellation invented refund=%+v", details)
+				}
 			}
 			if err = f.Sessions.Close(ctx, grant.Session.Scope, grant.Session.ID, "cashier"); err != nil {
 				t.Fatalf("resolved cancelled session cannot close: %v", err)

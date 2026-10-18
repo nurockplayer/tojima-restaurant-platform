@@ -230,7 +230,7 @@ describe('guest app mount', () => {
         quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: 'カレー', base_gross_jpy: '1100', quantity: 1, options: [{ group_key: 'rice', option_key: 'large', name: '大盛り', price_gross_jpy: '110' }] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1210', total_net_jpy: '1100', total_tax_jpy: '110', buckets: [] } },
         created_at: '2026-10-18T00:00:00Z',
       }] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [{ id: 'order-1', payment_status: 'UNPAID', fulfillment_status: 'WAITING', requires_staff_acceptance: true, staff_accepted: false, cash_mode: 'PREPAID' }], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [{ id: 'order-1', display_state: 'STANDARD', payment_status: 'UNPAID', fulfillment_status: 'WAITING', requires_staff_acceptance: true, staff_accepted: false, cash_mode: 'PREPAID', total_gross_jpy: '1210', effective_total_gross_jpy: '1210', effective_lines: [{ product_name: 'カレー', quantity: 1, line_total_jpy: '1210', option_names: ['大盛り'] }], adjusted: false, refunds: [], refunded_total_jpy: '0' }], cash_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -261,8 +261,7 @@ describe('guest app mount', () => {
     await act(async () => {
       [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('注文履歴'))?.click();
     });
-    expect(host.textContent).toContain('¥1,100 × 1');
-    expect(host.textContent).toContain('大盛り +¥110 × 1');
+    expect(host.textContent).toContain('カレー × 1');
     expect(host.textContent).toContain('¥1,210');
   });
 
@@ -348,6 +347,71 @@ describe('guest app mount', () => {
       await clickButton(host!, '繁中');
       expect(host?.querySelector('.guest-order-status')?.textContent).toBe('等待開始製作 · 尚未付款');
     }
+  });
+
+  it.each([
+    ['REQUESTED', '返金処理中', '退款處理中'], ['PROCESSING', '返金処理中', '退款處理中'],
+    ['FAILED', '返金を確認中です。店舗にお問い合わせください', '退款確認中，請洽店家'], ['SUCCEEDED', '返金済み ¥330', '已退款 ¥330'],
+  ] as const)('shows %s refund and current adjusted content in history', async (refundState, jaMessage, zhMessage) => {
+    const operation = { id: 'order-1', display_state: 'STANDARD', payment_status: 'PAID', fulfillment_status: 'SERVED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '660', effective_total_gross_jpy: '330', effective_lines: [{ product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['茶葉多め'] }], adjusted: true, refunds: [{ status: refundState, amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: refundState === 'SUCCEEDED' ? '330' : '0' };
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation);
+    await clickButton(host!, '注文履歴');
+    expect(host?.textContent).toContain('ほうじ茶 × 1'); expect(host?.textContent).toContain('¥330'); expect(host?.textContent).toContain('¥660');
+    expect(host?.textContent).toContain('茶葉多め');
+    expect(host?.textContent).toContain('店舗により注文内容が変更されました'); expect(host?.textContent).toContain(jaMessage);
+    if (refundState !== 'SUCCEEDED') expect(host?.textContent).not.toContain('返金済み');
+    await clickButton(host!, '繁中'); expect(host?.textContent).toContain(zhMessage);
+  });
+
+  it.each(['ja', 'zh'] as const)('distinguishes same-product variants in adjusted history (%s)', async (locale) => {
+    const operation = { id: 'order-1', display_state: 'STANDARD', payment_status: 'PAID', fulfillment_status: 'SERVED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '990', effective_total_gross_jpy: '660', effective_lines: [
+      { product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['無糖'] },
+      { product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['甘さ控えめ'] },
+    ], adjusted: true, refunds: [], refunded_total_jpy: '0' };
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation);
+    if (locale === 'zh') await clickButton(host!, '繁中');
+    await clickButton(host!, locale === 'ja' ? '注文履歴' : '已送出訂單');
+    expect(host?.textContent).toContain('ほうじ茶 × 1');
+    expect(host?.textContent).toContain('無糖'); expect(host?.textContent).toContain('甘さ控えめ');
+    expect(host?.textContent).toContain('¥660'); expect(host?.textContent).toContain('¥990');
+  });
+
+  it.each(['ja', 'zh'] as const)('retains confirmed adjustment and refund details during a stale refresh, then recovers (%s)', async (locale) => {
+    let reads = 0;
+    const operation = { id: 'order-1', display_state: 'STANDARD', payment_status: 'PAID', fulfillment_status: 'SERVED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '660', effective_total_gross_jpy: '330', effective_lines: [{ product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['茶葉多め'] }], adjusted: true, refunds: [{ status: 'PROCESSING', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '0' };
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation, async () => {
+      reads++;
+      if (reads === 2) throw new TypeError('offline');
+      return json({ orders: [reads === 1 ? operation : { ...operation, refunds: [{ status: 'SUCCEEDED', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '330' }], cash_enabled: true });
+    });
+    await clickButton(host!, '注文履歴');
+    if (locale === 'zh') await clickButton(host!, '繁中');
+    const pending = locale === 'ja' ? '返金処理中' : '退款處理中';
+    const success = locale === 'ja' ? '返金済み ¥330' : '已退款 ¥330';
+    expect(host?.textContent).toContain(pending); expect(host?.textContent).toContain('¥330'); expect(host?.textContent).toContain('¥660'); expect(host?.textContent).toContain('茶葉多め');
+    vi.useFakeTimers();
+    await act(async () => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(2); expect(host?.textContent).toContain(pending); expect(host?.textContent).toContain('¥330'); expect(host?.textContent).toContain('¥660'); expect(host?.textContent).toContain('茶葉多め');
+    expect(host?.textContent).toContain(locale === 'ja' ? '最新の状況を確認できません。表示は前回確認時の内容です。' : '無法確認最新狀態，目前顯示上次確認的內容。');
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(3); expect(host?.textContent).toContain(success); expect(host?.textContent).toContain('¥330'); expect(host?.textContent).toContain('茶葉多め');
+  });
+
+  it('does not present the immutable order amount as current when guest operations are unavailable', async () => {
+    await mountGuestStatus('DIRECT_SCAN', { ...stripeOrder('order-1'), total_gross_jpy: '660' }, undefined, async () => json({ error: 'temporarily_unavailable' }, 503));
+    await clickButton(host!, '注文履歴');
+    expect(host?.textContent).toContain('最新の注文内容と金額を確認できません。');
+    expect(host?.textContent).not.toContain('¥660');
+  });
+
+  it.each([['ja', 'この注文は取り消されました', '返金済み ¥1,100'], ['zh', '此訂單已取消', '已退款 ¥1,100']] as const)('shows refunded whole-order cancellation in history (%s)', async (locale, message, refunded) => {
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state: 'CANCELLED', payment_status: 'UNKNOWN', fulfillment_status: 'CANCELLED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '1100', effective_total_gross_jpy: '0', effective_lines: [], adjusted: true, refunds: [{ status: 'SUCCEEDED', amount_jpy: '1100', method: 'STRIPE' }], refunded_total_jpy: '1100' });
+    if (locale === 'zh') await clickButton(host!, '繁中');
+    await clickButton(host!, locale === 'ja' ? '注文履歴' : '已送出訂單');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe(message);
+    expect(host?.textContent).toContain(refunded);
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
   });
 
   it('shows paid review in both history languages and follows the ordinary session poll through release', async () => {
