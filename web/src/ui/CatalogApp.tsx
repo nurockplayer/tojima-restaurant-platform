@@ -158,23 +158,28 @@ export function CatalogApp({ demo = false }: DemoSurfaceProps) {
   };
 
   const sendHoldIntent = async (intent: CompanyProductEmergencyHoldRequest) => {
-    if (!context) return;
+    const productKey = holdProductKey;
+    if (!context || !productKey) return;
     const requestEpoch = epoch.current;
+    const isCurrentIntent = () => epoch.current === requestEpoch && holdProductKeyRef.current === productKey;
     setHoldBusy(true); setHoldError('');
     try {
-      await catalogClient.setCompanyProductEmergencyHold(context.tenantID, holdProductKey, context.token, intent);
-      if (epoch.current !== requestEpoch) return;
-      const loaded = await loadHold(context, holdProductKey);
-      if (epoch.current === requestEpoch) {
+      await catalogClient.setCompanyProductEmergencyHold(context.tenantID, productKey, context.token, intent);
+      if (!isCurrentIntent()) return;
+      // Once the write is known to have succeeded, recovery must be a GET only.
+      // Keep the immutable intent only while the mutation outcome is uncertain.
+      setHoldIntent(null); setHoldUncertain(false);
+      const loaded = await loadHold(context, productKey);
+      if (isCurrentIntent()) {
         if (loaded) setNotice(t.holdSaved);
         else setHoldError(t.holdReloadRequired);
       }
     } catch (cause) {
-      if (epoch.current !== requestEpoch) return;
+      if (!isCurrentIntent()) return;
       if (cause instanceof ApiError && cause.status === 409) {
         setHoldIntent(null); setHoldUncertain(false);
-        const loaded = await loadHold(context, holdProductKey);
-        if (epoch.current === requestEpoch) setHoldError(loaded ? t.holdConflict : t.holdReloadRequired);
+        const loaded = await loadHold(context, productKey);
+        if (isCurrentIntent()) setHoldError(loaded ? t.holdConflict : t.holdReloadRequired);
       } else if (!(cause instanceof ApiError) || cause.status >= 500) {
         setHoldIntent(intent); setHoldUncertain(true); setHoldError(t.holdUncertain);
       } else {
@@ -182,7 +187,7 @@ export function CatalogApp({ demo = false }: DemoSurfaceProps) {
         setHoldError(errorCopy(cause, locale));
       }
     } finally {
-      if (epoch.current === requestEpoch) setHoldBusy(false);
+      if (isCurrentIntent()) setHoldBusy(false);
     }
   };
 

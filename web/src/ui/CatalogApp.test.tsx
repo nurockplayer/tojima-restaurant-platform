@@ -254,6 +254,51 @@ describe('catalog admin UI', () => {
     expect(readHold).toHaveBeenCalledTimes(3);
   });
 
+  it('allows GET-only recovery when a same-key retry succeeds but its authoritative read fails', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const holdState = (active: boolean, version: number) => ({ product_key: 'meal', active, version, reason: active ? 'safety review' : '', published_revision: 4, linked_store_count: 3 });
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold')
+      .mockResolvedValueOnce(holdState(false, 2))
+      .mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' }))
+      .mockResolvedValueOnce(holdState(true, 3));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold')
+      .mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' }))
+      .mockResolvedValueOnce(holdState(true, 3));
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    await user.click(screen.getByRole('button', { name: '緊急販売停止を確認' }));
+    await screen.findByText('本部緊急停止なし');
+    await user.type(screen.getByLabelText('停止理由'), '食品安全の確認');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+    await screen.findByRole('button', { name: '同じ操作を再試行' });
+    const frozen = writeHold.mock.calls[0]![3];
+
+    await user.click(screen.getByRole('button', { name: '同じ操作を再試行' }));
+
+    expect(writeHold).toHaveBeenCalledTimes(2);
+    expect(writeHold.mock.calls[1]![3]).toEqual(frozen);
+    expect(readHold).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('button', { name: '現在の状態を再読込' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '同じ操作を再試行' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '連動店舗すべての販売を停止' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '本部の販売停止を解除' })).toBeNull();
+    expect(screen.queryByLabelText('停止理由')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '現在の状態を再読込' }));
+
+    expect(await screen.findByText('連動店舗で販売停止中')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '同じ操作を再試行' })).toBeNull();
+    expect(readHold).toHaveBeenCalledTimes(3);
+    expect(writeHold).toHaveBeenCalledTimes(2);
+    await user.type(screen.getByLabelText('停止理由'), '再確認');
+    expect((screen.getByRole('button', { name: '本部の販売停止を解除' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('reloads the current generation after a CAS conflict and does not automatically reapply the stale transition', async () => {
     installContext();
     vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
