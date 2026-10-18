@@ -509,7 +509,11 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	}
 	out := GuestOperations{Orders: make([]GuestOrderState, 0, len(rows)), CashEnabled: enabled}
 	for _, o := range rows {
-		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, PaymentStatus: o.PaymentStatus, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
+		payment := o.PaymentStatus
+		if payment == RefundPending || payment == Refunded {
+			payment = Unknown
+		}
+		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, PaymentStatus: payment, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
 	}
 	var trustedAt time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&trustedAt); err != nil {
