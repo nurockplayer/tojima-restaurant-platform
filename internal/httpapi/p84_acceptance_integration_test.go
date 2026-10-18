@@ -566,6 +566,17 @@ func TestP84OpenCheckoutResumeRefusesOtherBrowser(t *testing.T) {
 		t.Fatal("second browser did not receive independent proof")
 	}
 	path := base + "/orders/" + orderID + "/checkout/resume"
+	snapshot := func() map[string]string {
+		state := p84PaymentSnapshot(t, h, orderID)
+		var work string
+		if err := h.fixture.Pool.QueryRow(context.Background(), `SELECT coalesce(jsonb_agg(to_jsonb(w) ORDER BY to_jsonb(w)::text),'[]'::jsonb)::text FROM stripe_payment_work w WHERE order_id=$1`, orderID).Scan(&work); err != nil {
+			t.Fatal(err)
+		}
+		state["stripe_payment_work"] = work
+		return state
+	}
+	before := snapshot()
+	var otherBrowserRefusals []*httptest.ResponseRecorder
 	for _, tc := range []struct {
 		name   string
 		cookie *http.Cookie
@@ -576,10 +587,21 @@ func TestP84OpenCheckoutResumeRefusesOtherBrowser(t *testing.T) {
 			if denied.Header().Get("Location") != "" || strings.Contains(denied.Body.String(), "url") || strings.Contains(denied.Body.String(), "https://") {
 				t.Fatalf("resume denial exposed URL: headers=%v body=%s", denied.Header(), denied.Body.String())
 			}
-			if tc.cookie != nil && denied.Code == http.StatusConflict && strings.TrimSpace(denied.Body.String()) == `{"error":"payment_unavailable"}` {
-				t.Skip("P-84 defect: another guest's cookie against an OPEN Checkout returns HTTP 409 payment_unavailable; require HTTP 403 (matrix 5f)")
+			if tc.cookie != nil {
+				decodePaymentHTTP(t, denied, http.StatusConflict, nil)
+				if denied.Body.String() != "{\"error\":\"payment_unavailable\"}\n" {
+					t.Fatalf("non-uniform resume refusal: %s", denied.Body.String())
+				}
+				otherBrowserRefusals = append(otherBrowserRefusals, denied)
+			} else {
+				decodePaymentHTTP(t, denied, http.StatusForbidden, nil)
 			}
-			decodePaymentHTTP(t, denied, http.StatusForbidden, nil)
+			if after := snapshot(); !reflect.DeepEqual(before, after) {
+				t.Fatalf("resume refusal changed durable state: before=%v after=%v", before, after)
+			}
+			if after, err := h.provider.RetrieveCheckout(context.Background(), h.account, checkout.SessionID); err != nil || !reflect.DeepEqual(checkout, after) {
+				t.Fatalf("resume refusal changed provider Checkout: before=%+v after=%+v err=%v", checkout, after, err)
+			}
 		})
 	}
 	var resumed struct {
@@ -589,6 +611,24 @@ func TestP84OpenCheckoutResumeRefusesOtherBrowser(t *testing.T) {
 	decodePaymentHTTP(t, allowed, http.StatusOK, &resumed)
 	if resumed.URL != checkout.URL {
 		t.Fatalf("original browser did not resume the same OPEN Checkout: %+v", resumed)
+	}
+	// A genuine expired Checkout with its original proof must be indistinguishable
+	// from an OPEN Checkout requested by another browser: no ownership oracle.
+	if _, err := h.provider.SetOutcome(checkout.SessionID, stripeprovider.CheckoutExpired, stripeprovider.PaymentUnpaid); err != nil {
+		t.Fatal(err)
+	}
+	unavailable := h.request(t, http.MethodPost, path, "", "", cookie, paymentHTTPOrigin, "")
+	decodePaymentHTTP(t, unavailable, http.StatusConflict, nil)
+	if unavailable.Header().Get("Location") != "" || unavailable.Body.String() != "{\"error\":\"payment_unavailable\"}\n" {
+		t.Fatalf("expired Checkout refusal exposed URL or changed body: headers=%v body=%s", unavailable.Header(), unavailable.Body.String())
+	}
+	for _, denied := range otherBrowserRefusals {
+		if denied.Code != unavailable.Code || denied.Body.String() != unavailable.Body.String() {
+			t.Fatalf("resume refusal reveals ownership: other-browser=%d %q unavailable=%d %q", denied.Code, denied.Body.String(), unavailable.Code, unavailable.Body.String())
+		}
+	}
+	if after := snapshot(); !reflect.DeepEqual(before, after) {
+		t.Fatalf("unavailable resume changed durable state: before=%v after=%v", before, after)
 	}
 }
 
