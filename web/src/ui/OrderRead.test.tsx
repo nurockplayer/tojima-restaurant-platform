@@ -191,6 +191,41 @@ describe('read-only order status', () => {
 });
 
 describe('same-browser my orders', () => {
+  it.each([
+    ['expired', '2000-01-01T00:00:00Z', 403],
+    ['rejected', grant.expires_at, 403],
+    ['expired despite a successful read', '2000-01-01T00:00:00Z', 200],
+  ])('keeps a valid saved grant when a fragment is %s', async (_reason, expires_at, status) => {
+    rememberOrderGrant(grant);
+    const replacement = { ...grant, order_read_token: 'B'.repeat(43), expires_at };
+    vi.stubGlobal('fetch', vi.fn(async () => json(state, status)));
+    window.history.replaceState({}, '', orderReadLink(replacement));
+    render(<OrderPage />);
+    expect(loadMyOrders()).toEqual([grant]);
+    await flush();
+    expect(loadMyOrders()).toEqual([grant]);
+    expect(JSON.parse(localStorage.getItem('tojima.my-orders.v1')!)).toEqual([grant]);
+    expect(screen.getByRole('link').getAttribute('href')).toBe(orderReadLink(grant));
+  });
+
+  it.each([false, true])('saves a valid fragment only after its first successful status read (existing grant: %s)', async (existing) => {
+    if (existing) rememberOrderGrant(grant);
+    const replacement = { ...grant, order_read_token: 'B'.repeat(43) };
+    let resolveStatus!: (response: Response) => void;
+    const fetcher = vi.fn(() => new Promise<Response>((resolve) => { resolveStatus = resolve; }));
+    vi.stubGlobal('fetch', fetcher);
+    window.history.replaceState({}, '', orderReadLink(replacement));
+    render(<OrderPage />);
+    await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(loadMyOrders()).toEqual(existing ? [grant] : []);
+    await act(async () => { resolveStatus(json(state)); });
+    await flush();
+    expect(loadMyOrders()).toEqual([replacement]);
+    expect(JSON.parse(localStorage.getItem('tojima.my-orders.v1')!)).toEqual([replacement]);
+    expect(screen.getByRole('link').getAttribute('href')).toBe(orderReadLink(replacement));
+  });
+
   it('persists grants and reloads a bounded list of fragment links', async () => {
     act(() => rememberOrderGrant(grant));
     const view = render(<MyOrders locale="ja" />);
