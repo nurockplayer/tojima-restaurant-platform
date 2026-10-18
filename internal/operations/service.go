@@ -222,7 +222,7 @@ func releaseOrder(ctx context.Context, tx pgx.Tx, orderID, actor string) error {
 func (s *Service) CheckClose(ctx context.Context, tx pgx.Tx, session tablesession.Session) error {
 	var bad int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM table_orders o LEFT JOIN operation_order_state st ON st.order_id=o.order_id
-		WHERE o.session_id=$1 AND (st.order_id IS NULL OR NOT ((st.payment_status='PAID' AND st.fulfillment_status='SERVED') OR (st.fulfillment_status='CANCELLED' AND (st.payment_status='REFUNDED' OR (st.payment_method='CASH' AND st.payment_status='UNPAID')))) OR st.operational_hold OR st.payment_review_required OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED'))`, session.ID).Scan(&bad)
+		WHERE o.session_id=$1 AND (st.order_id IS NULL OR NOT ((st.payment_status='PAID' AND st.fulfillment_status='SERVED') OR (st.fulfillment_status='CANCELLED' AND (st.payment_status='REFUNDED' OR (st.payment_method='CASH' AND st.payment_status='UNPAID')))) OR st.operational_hold OR st.payment_review_required OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED') OR EXISTS(SELECT 1 FROM cancellation_requests c WHERE c.order_id=o.order_id AND c.status IN ('REQUESTED','KITCHEN_CONFIRMED')))`, session.ID).Scan(&bad)
 	if err != nil {
 		return err
 	}
@@ -361,12 +361,12 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND (st.fulfillment_status NOT IN ('SERVED','CANCELLED') OR (st.fulfillment_status='CANCELLED' AND st.order_updated)) AND NOT st.operational_hold AND NOT st.payment_review_required`
 	}
 	if reviewOnly {
-		where += ` AND ((st.payment_status='PAID' AND st.payment_review_required AND st.fulfillment_status='WAITING' AND st.review_decision='UNRESOLVED' AND NOT EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)) OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED')) AND dt.enabled AND EXISTS(SELECT 1 FROM stores rs JOIN tenants rt USING(tenant_id) WHERE rs.tenant_id=o.tenant_id AND rs.store_id=o.store_id AND rs.enabled AND rs.operating AND rt.enabled)`
+		where += ` AND ((st.payment_status='PAID' AND st.payment_review_required AND st.fulfillment_status='WAITING' AND st.review_decision='UNRESOLVED' AND NOT EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)) OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED') OR EXISTS(SELECT 1 FROM cancellation_requests c WHERE c.order_id=o.order_id AND (c.status IN ('REQUESTED','KITCHEN_CONFIRMED','REJECTED') OR c.manual_exception_reason<>''))) AND dt.enabled AND EXISTS(SELECT 1 FROM stores rs JOIN tenants rt USING(tenant_id) WHERE rs.tenant_id=o.tenant_id AND rs.store_id=o.store_id AND rs.enabled AND rs.operating AND rt.enabled)`
 	}
 	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot,coalesce(st.review_decision,'UNRESOLVED'),coalesce(st.effective_total_gross_jpy,o.total_gross_jpy),coalesce(st.order_updated,false),coalesce(st.cancelled_quantities,'[]'::jsonb),coalesce((SELECT jsonb_agg(jsonb_build_object('id',r.refund_id,'amount_jpy',r.amount_jpy,'status',r.status,'method',r.method,'safe_error_code',
 		CASE WHEN r.status IN ('REQUESTED','PROCESSING') THEN (SELECT w.safe_error_code FROM stripe_payment_work w
 		WHERE w.refund_id=r.refund_id AND w.refund_generation=r.generation AND w.status IN ('READY','LEASED')
-		AND w.safe_error_code IN ('REFUND_DISPATCH_PENDING','HOLD_RECONCILIATION_NEEDED') ORDER BY w.updated_at DESC LIMIT 1) END) ORDER BY r.created_at,r.refund_id) FROM operation_refunds r WHERE r.order_id=o.order_id),'[]'::jsonb),EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
+		AND w.safe_error_code IN ('REFUND_DISPATCH_PENDING','HOLD_RECONCILIATION_NEEDED') ORDER BY w.updated_at DESC LIMIT 1) END) ORDER BY r.created_at,r.refund_id) FROM operation_refunds r WHERE r.order_id=o.order_id),'[]'::jsonb),coalesce((SELECT jsonb_agg(jsonb_build_object('id',c.request_id,'line_index',c.line_index,'quantity',c.quantity,'reason',c.reason,'requesting_manager',c.requesting_manager,'kitchen_confirmer',c.kitchen_confirmer,'non_delivery_confirmer',c.non_delivery_confirmer,'status',c.status,'version',c.version,'manual_exception_reason',c.manual_exception_reason) ORDER BY c.created_at,c.request_id) FROM cancellation_requests c WHERE c.order_id=o.order_id),'[]'::jsonb),EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
 		FROM table_orders o JOIN dining_tables dt USING(tenant_id,store_id,table_id) LEFT JOIN operation_order_state st USING(order_id) WHERE `+where+` ORDER BY o.created_at,o.order_id`, args...)
 	if err != nil {
 		return nil, err
@@ -378,9 +378,9 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		var cash string
 		var hold bool
 		var created time.Time
-		var raw, cancelledJSON, refundsJSON []byte
+		var raw, cancelledJSON, refundsJSON, stopsJSON []byte
 		var payment, fulfill *string
-		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.ReviewDecision, &v.EffectiveTotalGrossJPY, &v.OrderUpdated, &cancelledJSON, &refundsJSON, &v.kdsCardExists); err != nil {
+		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.ReviewDecision, &v.EffectiveTotalGrossJPY, &v.OrderUpdated, &cancelledJSON, &refundsJSON, &stopsJSON, &v.kdsCardExists); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = created
@@ -424,6 +424,9 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		if err = json.Unmarshal(refundsJSON, &v.Refunds); err != nil {
 			return nil, err
 		}
+		if err = json.Unmarshal(stopsJSON, &v.CancellationRequests); err != nil {
+			return nil, err
+		}
 		for i, l := range snap.Quote.Lines {
 			line := OrderLine{LineIndex: i, OriginalQuantity: l.Quantity, ProductName: l.Name, Quantity: l.Quantity, UnitGrossJPY: l.BaseGrossJPY, Options: []OrderOption{}}
 			for _, o := range l.Options {
@@ -446,6 +449,7 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 				line.Quantity -= cancelled[i]
 			}
 			line.LineGrossJPY = line.UnitGrossJPY * line.Quantity
+			line.StopRequestEligibility = stopRequestEligibility(line, v.CancellationRequests)
 			v.Lines = append(v.Lines, line)
 		}
 		out = append(out, v)
@@ -455,6 +459,14 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 
 func closeBlockers(orders []OrderState) []string {
 	out := []string{}
+	for _, o := range orders {
+		for _, c := range o.CancellationRequests {
+			if c.Status == "REQUESTED" || c.Status == "KITCHEN_CONFIRMED" {
+				out = append(out, "STOP_REQUEST_PENDING")
+				break
+			}
+		}
+	}
 	for _, o := range orders {
 		for _, r := range o.Refunds {
 			if r.Status != "SUCCEEDED" {
@@ -881,6 +893,13 @@ func (s *Service) mutateOrder(ctx context.Context, input OrderActionRequest, act
 			return OrderState{}, err
 		}
 	} else {
+		var pending bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM cancellation_requests WHERE order_id=$1 AND status IN ('REQUESTED','KITCHEN_CONFIRMED'))`, input.OrderID).Scan(&pending); err != nil {
+			return OrderState{}, err
+		}
+		if pending {
+			return OrderState{}, ErrStopRequestPending
+		}
 		var updated bool
 		if err = tx.QueryRow(ctx, `SELECT order_updated FROM operation_order_state WHERE order_id=$1`, input.OrderID).Scan(&updated); err != nil {
 			return OrderState{}, err

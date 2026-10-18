@@ -55,8 +55,33 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("idempotent up: %v", err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 11 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 12 {
 		t.Fatalf("migration version %d err %v", version, err)
+	}
+	// Paired C2 rollback restores exactly the C1 transition guard before C1 down.
+	down012, err := os.ReadFile("012_stop_requests.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx012, err := target.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx012.Exec(ctx, string(down012)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx012.Exec(ctx, "DELETE FROM schema_migrations WHERE version=12"); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx012.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var guard012 string
+	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('validate_operation_order_transition()'::regprocedure)`).Scan(&guard012); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(guard012, "cancellation_requests") || !strings.Contains(guard012, "order_adjustments") {
+		t.Fatal("012 down failed to restore C1 guard")
 	}
 	// Exercise 011 rollback before 010 and verify it restores lane B guards.
 	down011, err := os.ReadFile("011_item_adjustments_refunds.down.sql")

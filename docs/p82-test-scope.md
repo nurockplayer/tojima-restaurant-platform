@@ -524,3 +524,167 @@ web lint and TypeScript checking. Web Vitest: 9 files, 137 tests passed.
 vet、build、migration-smoke、Web lint・型検査、Web 9 ファイル・137 テストが成功した。
 繁體中文：第二輪修正的指定指令全部通過，包含 Go race 與 PostgreSQL 遷移、格式、
 vet、build、migration-smoke、Web lint、型別檢查，以及 Web 9 個檔案、137 項測試。
+
+# P-82 C2
+
+P-45 / Step 08 Owner decision B adds explicit STOP_REQUEST for individual
+quantities of a PREPARING order's existing KDS card. It is an exception workflow,
+not an item fulfillment state. C1 direct adjustment and preview still refuse
+PREPARING, READY and SERVED. Guest display is out of scope.
+
+Migration **012** adds `cancellation_requests`: order, zero-based line index,
+quantity, original reason, requesting manager, kitchen confirmer, non-delivery
+confirmer, status, version, idempotency key, manual-exception reason, and the
+final adjustment link. A submission may contain several distinct lines; each
+gets one request row, atomically. One unresolved request per order/line is
+allowed. States are REQUESTED → KITCHEN_CONFIRMED → FINALIZED; kitchen may
+REJECT a REQUESTED request and a manager may WITHDRAW either unresolved state.
+Request identity and decisions are retained; terminal states cannot be edited.
+Paired rollback refuses to discard populated stop-request history and restores
+the exact C1 operation guard in an empty schema.
+
+The existing staff order endpoint prefix adds:
+
+- `POST .../orders/{orderID}/stop-requests`: `expected_version`, trimmed
+  `reason` (1–500 Unicode characters), `lines` with `line_index` and positive
+  `cancelled_quantity`.
+- `POST .../orders/{orderID}/stop-requests/{requestID}/{action}`: action is
+  `confirm`, `reject`, `withdraw` or `finalize`. Body includes `expected_version`
+  and `expected_request_version`. Reject requires `reason`; finalize requires
+  `non_delivery_confirmed=true` for cancellation and, for a positive paid CASH
+  refund, `cash_hand_back_confirmed=true`.
+
+All writes require `Idempotency-Key`. Request, withdraw and finalize require
+current exact-store STORE_MANAGER membership plus MFA. Confirm/reject require
+KITCHEN membership in that store; manager authority alone cannot confirm for the
+kitchen. Actors come from verified identity, never the body. Every replay is
+reauthorized. Same-key/body resends replay the saved result; changed body or
+actor conflicts. Every action CASes both the order and request version.
+
+REQUESTED and KITCHEN_CONFIRMED change no effective quantities, amounts, tax or
+refund records. Both block READY/SERVED and table close, including database
+transition guards. Stop requests are included in every KDS read, so a lost
+notification is repaired by the existing polling/resync path. No timeout,
+notification delivery or close action cancels an order automatically.
+
+Finalization takes company catalog SHARE → session UPDATE → Stripe attempt
+UPDATE, if present → operation UPDATE → request UPDATE, followed by C1
+adjustment/refund/outbox/audit writes. The session lock serializes kitchen
+progress, cash settlement and table close. It re-reads current quantities,
+payment, session, order and request state before deriving a historical-tax
+adjustment. C1's shared transaction code persists the adjustment, cumulative
+refund reservation, CASH due reduction or separate confirmed cash refund
+ledger, and Stripe refund outbox against the original PaymentIntent. Provider
+calls remain outside transactions. Cancellation success and refund success
+are separate facts; C1's unresolved-refund close gate and reconciliation/retry
+rules continue to apply.
+
+A partial finalization leaves the order PREPARING, other lines' effective
+quantities and progress unchanged, and preserves the one KDS card. It does not
+set C1's pre-start update-acknowledgement flag: the kitchen has already confirmed
+the stopped line. Finalizing the last effective quantity performs C1 whole-order
+cancellation, retaining the cancelled card until the existing kitchen update
+acknowledgement. A previously manager-approved order that has reached PREPARING
+also qualifies for C2; this does not broaden C1's direct-cancel eligibility.
+Historical sessions remain closed, with stop requests reachable through the
+store review queue and kitchen board; no guest capability is restored.
+
+REJECTED records the kitchen's reason and audit and cannot be finalized or
+re-requested through normal cancellation. For uncertain delivery, a manager
+submits `finalize` with `non_delivery_confirmed=false` and a reason. This is a
+successful **manual-exception recording**, never a successful cancellation:
+the request stays KITCHEN_CONFIRMED, keeps blocking progress/close, and displays
+its manual-exception reason in the review queue. No cash hand-back is required
+for recording uncertainty. A later normal finalize remains refused. Explicit
+withdrawal can release the workflow gate, but retains the manual-exception
+reason and prevents re-requesting that line. There is no automatic refund or
+new manual-exception financial action in this lane; subsequent resolution needs
+separate Owner authority. No additional Owner decision is needed to implement
+the specified normal stop-request path.
+
+The JA/zh-Hant staff console has native dialogs for request quantities/reason,
+withdrawal, and non-delivery finalization; the kitchen card has a request banner
+and native 「停止を確認 / 確認已停止」 and 「停止できない / 無法停止」 dialogs.
+Controls retain the existing 44px minimum. Requests show line, quantity and
+reason. Stale writes reload and require renewed consent; uncertain network
+results retain the exact body/key for explicit resend. Identity changes discard
+old dialogs/results. Review-queue actions preserve access to historical sessions.
+
+Validation uses the supplied loopback PostgreSQL with disposable schemas and
+fake Stripe only. Acceptance covers unchanged pending amounts and resync,
+kitchen confirmation plus finalization, manual exceptions and audit, blocked
+progress/close, partial and last-item CASH/Stripe adjustments, role/scope denial,
+CAS/idempotency and concurrency. Lock-barrier tests cover finalize versus READY,
+finalize versus close, and withdraw versus kitchen confirmation. Existing C1
+historical tax, cumulative refund limits and provider reconciliation regressions
+remain in the complete suite. Web Vitest covers staff and kitchen actions,
+manual/uncertain outcomes, stale state and retry isolation.
+
+The sandbox validation sets `GOCACHE=/tmp/tojima-p82-c2-go-cache` because the
+default macOS Go cache is outside writable roots.
+
+```sh
+export GOCACHE=/tmp/tojima-p82-c2-go-cache
+TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
+  go test -race -count=1 ./internal/... ./migrations/postgres
+make fmt-check vet build migration-smoke
+pnpm --dir web lint
+pnpm --dir web exec tsc -b --pretty false
+pnpm --dir web test
+```
+
+Independent review is separate from local verification. The required
+Oracle/Ego-lite route could not start in this restricted sandbox: the
+`ego-browser nodejs` capability probe exited 4 with `Failed to start ego lite`
+and requested Full Access. No alternate browser or reviewer substitutes for
+that verdict. Re-entry: review the final C2 commit with Oracle/Ego-lite in an
+environment where that transport is available. This lane remains local only;
+no push, PR, merge, deployment, live Stripe or guest-display acceptance is claimed.
+
+日本語：P-82 C2 は PREPARING 注文の既存 KDS カードに、商品行・数量ごとの停止依頼を
+追加する。品目別の調理状態ではない。対象店舗の現在の STORE_MANAGER 権限と MFA を
+持つ店長が理由付きで依頼し、厨房の KITCHEN 権限で停止確認または停止不可を記録する。
+依頼中・厨房確認済みは金額・税・返金を変えず、READY／SERVED と閉卓を阻止する。
+KDS の再読込で依頼を復元でき、時間切れによる自動取消はない。店長の未提供確認後だけ、
+同じロック順と CAS の下で C1 の調整・返金処理を同一取引内で実行する。未払い現金は
+請求額のみ減額し、支払済み現金は手渡し確認付きの別返金台帳、Stripe は元 PaymentIntent
+への outbox を使用する。取消成功と返金成功は別記録。部分取消は他の商品と PREPARING
+を維持し、最後の有効数量を取り消すと注文全体を CANCELLED にする。全取消カードは
+既存の厨房更新確認まで表示を保つ。C1 の直接取消は
+調理中を引き続き拒否する。停止不可・提供不明は理由と監査を残して手動例外へ送り、
+通常の取消・再依頼は拒否する。不明を記録しても返金はせず、明示的取下げまで保留する。
+取下げ後も例外理由は保持し、自動的な金銭処理は行わない。終了済み卓も要確認一覧から
+処理できる。標準 dialog、44px 操作、日繁中、同一キー再送、古い状態の再確認を備える。
+012 は対になる up/down と履歴保護を持つ。PostgreSQL の受入・ロック競合と Web Vitest
+で検証する。Oracle/Ego-lite は sandbox 内で起動できず独立レビューは未完了。最終コミットを
+利用可能な環境でレビューする必要がある。push・PR・本番・実 Stripe・ゲスト表示は対象外。
+
+繁體中文：P-82 C2 在 PREPARING 訂單的既有 KDS 卡片上加入指定品項與數量的停止申請，
+不是品項出餐狀態。限該分店目前 STORE_MANAGER 成員且已驗證 MFA 提出含原因的申請；
+同店 KITCHEN 確認已停止或記錄無法停止。REQUESTED／KITCHEN_CONFIRMED 不改金額、
+稅額或退款，並阻止 READY／SERVED 與關桌。KDS 重新同步可取得申請，沒有逾時自動取消。
+主管確認尚未送達後，後端依同一鎖定順序與雙版本 CAS 重新讀取資料，在同一交易重用 C1
+調整與退款。未付款現金只減應收；已付現金需交付退款確認並另存出納紀錄；Stripe 透過
+outbox 對原 PaymentIntent 退款。取消成功與退款成功分開記錄。部分取消保留其他品項及
+PREPARING；最後有效數量取消時整單 CANCELLED，保留取消卡片直到既有廚房更新確認。
+C1 直接取消仍拒絕製作中訂單。
+無法停止或送達不明須保留原因與稽核，轉人工例外，拒絕一般取消與重新申請。記錄不明
+不會退款，保留阻擋至明確撤回；撤回後仍保留例外原因，不自動處理款項。已結束桌次仍可
+從待審核佇列處理。介面使用原生 dialog、44px 操作區、日繁中、同鍵重送與過期狀態重新確認。
+012 提供成對遷移並保護既有歷史，使用 PostgreSQL 受理／鎖競爭測試與 Web Vitest。
+Oracle/Ego-lite 無法於 sandbox 啟動，獨立審查尚未完成；須於可用環境審查最後提交。
+不包含 push、PR、正式環境、真實 Stripe 或訪客顯示。
+
+C2 local verification (2026-10-18): all commands above passed against the final
+implementation with the supplied TEST_DATABASE_URL and the writable GOCACHE.
+The full race-enabled internal/PostgreSQL suite passed (payments: 71.375s),
+as did fmt-check, vet, build and migration-smoke. Web lint and TypeScript
+checking passed; Vitest passed 9 files / 145 tests. The final regression also
+retains a wholly cancelled KDS card until kitchen update acknowledgement.
+Oracle/Ego-lite independent review remains pending for the reason above.
+日本語：C2 の指定ローカル検証はすべて成功。Go race・PostgreSQL 遷移、整形・vet・build・
+migration-smoke、Web lint・型検査、Web 9 ファイル／145 テストが成功した。全取消カードは
+厨房の更新確認まで残ることも検証済み。Oracle/Ego-lite 独立レビューは未完了。
+繁體中文：C2 指定的本地驗證全部通過：Go race、PostgreSQL 遷移、格式、vet、build、
+migration-smoke、Web lint、型別檢查，以及 Web 9 個檔案／145 項測試。另驗證整單取消卡片
+保留至廚房確認更新。Oracle/Ego-lite 獨立審查仍待完成。

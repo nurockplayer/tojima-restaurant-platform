@@ -26,6 +26,211 @@ afterEach(async () => {
 });
 
 describe('staff operations', () => {
+  it.each([
+    { status: 'REJECTED' as const, eligibility: 'MANUAL_EXCEPTION' as const, manual: 'Already plated', reason: '手動対応が必要です' },
+    { status: 'WITHDRAWN' as const, eligibility: 'MANUAL_EXCEPTION' as const, manual: 'Delivery uncertain', reason: '手動対応が必要です' },
+    { status: 'REQUESTED' as const, eligibility: 'PENDING' as const, reason: '停止依頼中' },
+    { status: 'KITCHEN_CONFIRMED' as const, eligibility: 'PENDING' as const, reason: '停止依頼中' },
+    { status: 'FINALIZED' as const, eligibility: 'NO_REMAINING_QUANTITY' as const, reason: '停止できる数量がありません' },
+  ])('keeps line B requestable when line A is $status and excludes A from submission', async ({ status, eligibility, manual, reason }) => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', lines: [
+      { ...defaultOrder().lines[0]!, line_index: 0, product_name: 'Line A', quantity: status === 'FINALIZED' ? 0 : 1, stop_request_eligibility: eligibility },
+      { ...defaultOrder().lines[0]!, line_index: 1, product_name: 'Line B', stop_request_eligibility: 'ELIGIBLE' },
+    ], cancellation_requests: [{ id: 'stop-A', line_index: 0, quantity: 1, reason: 'Stop A', requesting_manager: 'manager-1', status, version: 2, manual_exception_reason: manual }] });
+    let submitted: unknown;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      if (url.endsWith('/stop-requests')) { submitted = JSON.parse(String(init.body)); return json(order); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '調理中の商品を止める');
+    const rows = host!.querySelectorAll<HTMLLIElement>('.confirm-dialog .adjustment-lines li');
+    const inputA = rows[0]!.querySelector('input')!;
+    expect(inputA.disabled).toBe(true);
+    expect(rows[0]!.textContent).toContain(reason);
+    const inputB = rows[1]!.querySelector('input')!;
+    expect(inputB.disabled).toBe(false);
+    await act(async () => { await userEvent.type(inputA, '1'); });
+    expect(inputA.value).toBe('0');
+    await setField(rows[1]!, '停止数量', '1');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Stop B');
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(submitted).toEqual({ expected_version: 3, reason: 'Stop B', lines: [{ line_index: 1, cancelled_quantity: 1 }] }));
+  });
+
+  it('hides the stop request action when the server reports no eligible lines', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', lines: [
+      { ...defaultOrder().lines[0]!, stop_request_eligibility: 'MANUAL_EXCEPTION' },
+      { ...defaultOrder().lines[0]!, stop_request_eligibility: 'NO_REMAINING_QUANTITY', quantity: 0 },
+    ] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細');
+    expect(within(host!).queryByRole('button', { name: '調理中の商品を止める' })).toBeNull();
+  });
+
+  it('lets a manager request a PREPARING line stop and keeps the write idempotent', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_status: 'PAID', payment_method: 'STRIPE' });
+    let saved: unknown;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [saved ? { ...order, cancellation_requests: [{ id: 'stop-1', line_index: 0, quantity: 1, reason: 'Allergy', requesting_manager: 'manager-1', status: 'REQUESTED', version: 1 }] } : order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests')) { saved = { body: String(init.body), key: new Headers(init.headers).get('Idempotency-Key') }; expect(JSON.parse(String(init.body))).toEqual({ expected_version: 3, reason: 'Allergy', lines: [{ line_index: 0, cancelled_quantity: 1 }] }); return json(order); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '調理中の商品を止める');
+    await setField(host!, '停止数量', '1');
+    const reason = [...host!.querySelectorAll('textarea')].find((item) => item.closest('label')?.textContent?.includes('停止理由'))!;
+    await setTextarea(reason, 'Allergy'); await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(saved).toBeTruthy());
+    expect((saved as { key: string }).key).toBeTruthy();
+  });
+
+  it('shows pending stop requests on the kitchen card and confirms the stop', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', cancellation_requests: [{ id: 'stop-1', line_index: 0, quantity: 1, reason: 'Allergy', requesting_manager: 'manager-1', status: 'REQUESTED', version: 1 }] });
+    let confirmed = false;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
+      if (url === `${base}/operations/kds`) return json({ orders: [confirmed ? { ...order, cancellation_requests: [{ ...order.cancellation_requests![0]!, status: 'KITCHEN_CONFIRMED' }] } : order] });
+      if (url.endsWith('/stop-requests/stop-1/confirm')) { expect(JSON.parse(String(init.body))).toEqual({ expected_version: 3, expected_request_version: 1 }); confirmed = true; return json(order); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes, { initialView: 'kds' });
+    expect(host?.textContent).toContain('停止依頼中'); await click(host!, '停止を確認');
+    expect(host?.textContent).toContain('停止済みであることを確認しますか？'); await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(confirmed).toBe(true));
+  });
+
+  it('requires non-delivery and paid-cash hand-back before finalizing a confirmed stop', async () => {
+    const request = { id: 'stop-cash', line_index: 0, quantity: 1, reason: 'Wrong item', requesting_manager: 'manager-1', kitchen_confirmer: 'cook-1', status: 'KITCHEN_CONFIRMED' as const, version: 2 };
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_method: 'CASH', payment_status: 'PAID', cancellation_requests: [request] });
+    let submitted: Record<string, unknown> | undefined;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'CLOSED', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests/stop-cash/finalize')) { submitted = JSON.parse(String(init.body)); return json({ ...order, version: 4 }); }
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await clickNth(host!, '.stop-request-list button', 1);
+    expect(host?.textContent).toContain('Wrong item'); expect(host?.textContent).toContain('ラーメン');
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeNull();
+    await clickNth(host!, '.confirm-dialog input[type=checkbox]', 0);
+    expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeTruthy();
+    await clickNth(host!, '.confirm-dialog input[type=checkbox]', 1);
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(submitted).toBeTruthy());
+    expect(submitted).toMatchObject({ expected_version: 3, expected_request_version: 2, non_delivery_confirmed: true, cash_hand_back_confirmed: true });
+  });
+
+  it('routes uncertain delivery to a manual exception without asking for cash hand-back', async () => {
+    const request = { id: 'stop-uncertain', line_index: 0, quantity: 1, reason: 'Guest changed mind', requesting_manager: 'manager-1', kitchen_confirmer: 'cook-1', status: 'KITCHEN_CONFIRMED' as const, version: 1 };
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_method: 'CASH', payment_status: 'PAID', cancellation_requests: [request] });
+    let submitted: Record<string, unknown> | undefined;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests/stop-uncertain/finalize')) { submitted = JSON.parse(String(init.body)); return json(order); }
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await clickNth(host!, '.stop-request-list button', 1); await clickNth(host!, '.confirm-dialog button.primary', 0);
+    const reason = host!.querySelector<HTMLTextAreaElement>('.confirm-dialog textarea')!; await setTextarea(reason, 'Delivery status unknown');
+    expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeNull();
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(submitted).toBeTruthy());
+    expect(submitted).toMatchObject({ non_delivery_confirmed: false, cash_hand_back_confirmed: false, reason: 'Delivery status unknown' });
+  });
+
+  it('keeps rejected and withdrawn manual exceptions visible in the review queue without finalize controls', async () => {
+    const order = staffOrder({ cancellation_requests: [
+      { id: 'stop-rejected', line_index: 0, quantity: 1, reason: 'Need to stop', requesting_manager: 'manager-1', status: 'REJECTED', version: 2, manual_exception_reason: 'Already plated' },
+      { id: 'stop-withdrawn', line_index: 0, quantity: 1, reason: 'Second request', requesting_manager: 'manager-1', status: 'WITHDRAWN', version: 2, manual_exception_reason: 'Delivery uncertain' },
+    ] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/reviews`) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '要確認');
+    expect(host?.textContent).toContain('Already plated'); expect(host?.textContent).toContain('Delivery uncertain');
+    expect(within(host!).queryByRole('button', { name: /確認取消|確認取消/ })).toBeNull();
+  });
+
+  it('records kitchen rejection reason and manager withdrawal through native dialogs', async () => {
+    const requested = { id: 'stop-flow', line_index: 0, quantity: 1, reason: 'Customer request', requesting_manager: 'manager-1', status: 'REQUESTED' as const, version: 1 };
+    const order = staffOrder({ fulfillment_status: 'PREPARING', cancellation_requests: [requested] });
+    const calls: Array<{ action: string; body: Record<string, unknown> }> = [];
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/kds`) return json({ orders: [order] });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests/stop-flow/reject') || url.endsWith('/stop-requests/stop-flow/withdraw')) { const action = url.endsWith('/reject') ? 'reject' : 'withdraw'; calls.push({ action, body: JSON.parse(String(init.body)) }); return json(order); }
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes, { initialView: 'kds' }); await click(host!, '停止できない');
+    expect(host?.textContent).toContain('停止できない理由を記録しますか？');
+    const reason = host!.querySelector<HTMLTextAreaElement>('.confirm-dialog textarea')!; await setTextarea(reason, 'Already plated');
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(calls[0]?.action).toBe('reject'));
+    expect(calls[0]?.body).toMatchObject({ expected_version: 3, expected_request_version: 1, reason: 'Already plated' });
+    await click(host!, 'テーブル'); await click(host!, '詳細'); await clickNth(host!, '.stop-request-list button', 0);
+    expect(host?.textContent).toContain('停止依頼を取り下げますか？'); await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(calls[1]?.action).toBe('withdraw'));
+  });
+
+  it('retries an uncertain stop request with the exact original body and idempotency key', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_status: 'PAID', payment_method: 'STRIPE' });
+    const calls: Array<{ body: string; key: string | null }> = [];
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests')) { calls.push({ body: String(init.body), key: new Headers(init.headers).get('Idempotency-Key') }); return calls.length === 1 ? json({ error: 'unknown_result' }, 502) : json(order); }
+      if (url.endsWith('/operations/reviews')) return json({ orders: [] });
+      if (url.endsWith('/operations/kds')) return json({ orders: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '調理中の商品を止める');
+    await setField(host!, '停止数量', '1'); const reason = host!.querySelector<HTMLTextAreaElement>('.confirm-dialog textarea')!; await setTextarea(reason, 'Allergy');
+    await clickNth(host!, '.confirm-dialog button.primary', 0); await waitFor(() => expect(calls).toHaveLength(1));
+    await click(host!, '同じ操作を確認して再試行'); await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]).toEqual(calls[0]);
+  });
+
+  it('closes a stale stop dialog after refreshing the current order version and clears it on disconnect', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_status: 'PAID', payment_method: 'STRIPE' });
+    let detailReads = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) { detailReads++; return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [{ ...order, version: detailReads > 1 ? 4 : 3 }], receipts: [], close_blockers: [] }); }
+      if (url.endsWith('/stop-requests')) return json({ error: 'stale_version' }, 409);
+      if (url.endsWith('/operations/reviews')) return json({ orders: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '調理中の商品を止める');
+    await setField(host!, '停止数量', '1'); const reason = host!.querySelector<HTMLTextAreaElement>('.confirm-dialog textarea')!; await setTextarea(reason, 'Allergy');
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(host?.querySelector('.confirm-dialog')).toBeNull());
+    expect(detailReads).toBeGreaterThan(1); expect(host?.textContent).toContain('注文が更新されました。最新状態を読み込みました。内容を確認してください。');
+    await click(host!, '調理中の商品を止める'); await click(host!, '切断');
+    expect(host?.querySelector('.confirm-dialog')).toBeNull(); expect(host?.textContent).not.toContain('停止を依頼');
+  });
+
   it('retains a cancelled kitchen card until the kitchen acknowledges its update', async () => {
     const order = staffOrder({ fulfillment_status: 'CANCELLED', order_updated: true, version: 4, lines: [{ product_name: '餃子', quantity: 0, unit_gross_jpy: '500', line_gross_jpy: '0', options: [] }] });
     let acknowledged = false;
@@ -1038,9 +1243,14 @@ async function setField(container: Element, label: string, value: string) {
   await act(async () => { setter?.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
+async function setTextarea(textarea: HTMLTextAreaElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set;
+  await act(async () => { setter?.call(textarea, value); textarea.dispatchEvent(new Event('input', { bubbles: true })); textarea.dispatchEvent(new Event('change', { bubbles: true })); });
+}
+
 function staffOrder(overrides: Partial<StaffOrder> = {}): StaffOrder { return { ...defaultOrder(), ...overrides }; }
 function defaultOrder(): StaffOrder {
-  return { id: 'order-1', session_id: 'session-1', table_id: 'table-1', table_name: 'T1', generation: 1, payment_method: 'CASH' as const, payment_status: 'UNPAID' as const, fulfillment_status: 'WAITING' as const, requires_staff_acceptance: false, staff_accepted: true, version: 3, total_gross_jpy: '1210', created_at: '2026-10-18T00:59:00Z', lines: [{ product_name: 'ラーメン', quantity: 1, unit_gross_jpy: '1100', line_gross_jpy: '1210', options: [{ group_name: 'サイズ', option_name: '大盛り', price_delta_minor: '110' }] }] };
+  return { id: 'order-1', session_id: 'session-1', table_id: 'table-1', table_name: 'T1', generation: 1, payment_method: 'CASH' as const, payment_status: 'UNPAID' as const, fulfillment_status: 'WAITING' as const, requires_staff_acceptance: false, staff_accepted: true, version: 3, total_gross_jpy: '1210', created_at: '2026-10-18T00:59:00Z', lines: [{ stop_request_eligibility: 'ELIGIBLE', product_name: 'ラーメン', quantity: 1, unit_gross_jpy: '1100', line_gross_jpy: '1210', options: [{ group_name: 'サイズ', option_name: '大盛り', price_delta_minor: '110' }] }] };
 }
 function paymentStatus(state: string) {
   return { order_id: 'order-1', state, last_reconciled_at: '2026-10-18T12:00:00Z', payment_review_required: state === 'REVIEW_REQUIRED', resume_available: false };

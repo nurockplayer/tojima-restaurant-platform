@@ -82,39 +82,41 @@ const (
 )
 
 type OrderState struct {
-	ID                      string            `json:"id"`
-	SessionID               string            `json:"session_id"`
-	TableID                 string            `json:"table_id"`
-	TableName               string            `json:"table_name"`
-	Generation              int64             `json:"generation"`
-	PaymentMethod           string            `json:"payment_method"`
-	PaymentStatus           PaymentStatus     `json:"payment_status"`
-	FulfillmentStatus       FulfillmentStatus `json:"fulfillment_status"`
-	RequiresStaffAcceptance bool              `json:"requires_staff_acceptance"`
-	StaffAccepted           bool              `json:"staff_accepted"`
-	CashMode                CashMode          `json:"cash_mode,omitempty"`
-	OperationalHold         bool              `json:"operational_hold"`
-	PaymentReviewRequired   bool              `json:"payment_review_required"`
-	ReviewDecision          string            `json:"review_decision"`
-	ReviewReasonCodes       []string          `json:"review_reason_codes"`
-	Version                 int64             `json:"version"`
-	EffectiveTotalGrossJPY  int64             `json:"effective_total_gross_jpy"`
-	OrderUpdated            bool              `json:"order_updated"`
-	Refunds                 []Refund          `json:"refunds"`
-	TotalGrossJPY           int64             `json:"total_gross_jpy"`
-	CreatedAt               time.Time         `json:"created_at"`
-	Lines                   []OrderLine       `json:"lines"`
-	BlockedReason           string            `json:"blocked_reason,omitempty"`
+	CancellationRequests    []CancellationRequest `json:"cancellation_requests"`
+	ID                      string                `json:"id"`
+	SessionID               string                `json:"session_id"`
+	TableID                 string                `json:"table_id"`
+	TableName               string                `json:"table_name"`
+	Generation              int64                 `json:"generation"`
+	PaymentMethod           string                `json:"payment_method"`
+	PaymentStatus           PaymentStatus         `json:"payment_status"`
+	FulfillmentStatus       FulfillmentStatus     `json:"fulfillment_status"`
+	RequiresStaffAcceptance bool                  `json:"requires_staff_acceptance"`
+	StaffAccepted           bool                  `json:"staff_accepted"`
+	CashMode                CashMode              `json:"cash_mode,omitempty"`
+	OperationalHold         bool                  `json:"operational_hold"`
+	PaymentReviewRequired   bool                  `json:"payment_review_required"`
+	ReviewDecision          string                `json:"review_decision"`
+	ReviewReasonCodes       []string              `json:"review_reason_codes"`
+	Version                 int64                 `json:"version"`
+	EffectiveTotalGrossJPY  int64                 `json:"effective_total_gross_jpy"`
+	OrderUpdated            bool                  `json:"order_updated"`
+	Refunds                 []Refund              `json:"refunds"`
+	TotalGrossJPY           int64                 `json:"total_gross_jpy"`
+	CreatedAt               time.Time             `json:"created_at"`
+	Lines                   []OrderLine           `json:"lines"`
+	BlockedReason           string                `json:"blocked_reason,omitempty"`
 }
 
 type OrderLine struct {
-	LineIndex        int           `json:"line_index"`
-	OriginalQuantity int64         `json:"original_quantity"`
-	ProductName      string        `json:"product_name"`
-	Quantity         int64         `json:"quantity"`
-	UnitGrossJPY     int64         `json:"unit_gross_jpy"`
-	LineGrossJPY     int64         `json:"line_gross_jpy"`
-	Options          []OrderOption `json:"options"`
+	StopRequestEligibility StopRequestEligibility `json:"stop_request_eligibility"`
+	LineIndex              int                    `json:"line_index"`
+	OriginalQuantity       int64                  `json:"original_quantity"`
+	ProductName            string                 `json:"product_name"`
+	Quantity               int64                  `json:"quantity"`
+	UnitGrossJPY           int64                  `json:"unit_gross_jpy"`
+	LineGrossJPY           int64                  `json:"line_gross_jpy"`
+	Options                []OrderOption          `json:"options"`
 }
 
 type OrderOption struct {

@@ -65,6 +65,10 @@ func (a OperationsAPI) acknowledgeUpdate(w http.ResponseWriter, r *http.Request)
 }
 func adjustmentRespond(w http.ResponseWriter, v any, err error) {
 	switch {
+	case errors.Is(err, operations.ErrStopRequestState):
+		writeError(w, 409, "stop_request_state")
+	case errors.Is(err, operations.ErrManualException):
+		writeError(w, 409, "manual_exception_required")
 	case errors.Is(err, operations.ErrConflict):
 		writeError(w, 409, "stale_version")
 	case errors.Is(err, operations.ErrIdempotencyConflict):

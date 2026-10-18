@@ -50,6 +50,8 @@ func NewOperationsHandler(service *operations.Service, sessions *tablesession.Se
 	m.HandleFunc("POST "+session+"/orders/{orderID}/accept", a.accept)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/approve-fulfillment", a.approveFulfillment)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/fulfillment", a.fulfillment)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/stop-requests", a.requestStop)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/stop-requests/{requestID}/{action}", a.stopAction)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments/preview", a.previewAdjustment)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments", a.adjustOrder)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/refunds/{refundID}/retry", a.retryRefund)
@@ -371,6 +373,8 @@ func operationRespond(w http.ResponseWriter, v any, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, operations.ErrStopRequestPending):
+		writeError(w, 409, "stop_request_pending")
 	case errors.Is(err, operations.ErrInvalid), errors.Is(err, tax.ErrInvalidInput), errors.Is(err, tax.ErrOverflow):
 		writeError(w, 400, "invalid_request")
 	case errors.Is(err, operations.ErrNotFound):

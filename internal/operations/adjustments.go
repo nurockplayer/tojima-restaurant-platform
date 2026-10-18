@@ -95,12 +95,17 @@ func validAdjustment(r AdjustmentRequest) bool {
 	return validTableScope(r.Scope) && r.SessionID != "" && r.OrderID != "" && validActor(r.Actor) && r.ExpectedVersion > 0 && len(r.Lines) > 0 && len(r.Lines) <= 1000 && utf8.RuneCountInString(strings.TrimSpace(r.Reason)) > 0 && utf8.RuneCountInString(strings.TrimSpace(r.Reason)) <= 500
 }
 func calculateAdjustment(a adjustmentState, r AdjustmentRequest) (AdjustmentPreview, []int64, error) {
+	return calculateAdjustmentMode(a, r, false)
+}
+
+// Only the locked, kitchen-confirmed stop workflow may enable this mode.
+func calculateAdjustmentMode(a adjustmentState, r AdjustmentRequest, stopped bool) (AdjustmentPreview, []int64, error) {
 	o := a.order
 	p := AdjustmentPreview{ExpectedVersion: o.Version, OriginalTotalGrossJPY: o.TotalGrossJPY, Lines: append([]OrderLine(nil), o.Lines...)}
 	if o.Version != r.ExpectedVersion {
 		return p, nil, ErrConflict
 	}
-	if o.FulfillmentStatus != Waiting && o.FulfillmentStatus != Accepted {
+	if (!stopped && o.FulfillmentStatus != Waiting && o.FulfillmentStatus != Accepted) || (stopped && o.FulfillmentStatus != Preparing) {
 		return p, nil, ErrPreparationStarted
 	}
 	if o.PaymentMethod == "STRIPE" && (o.PaymentStatus != Paid || a.paymentIntent == "") {
@@ -108,7 +113,7 @@ func calculateAdjustment(a adjustmentState, r AdjustmentRequest) (AdjustmentPrev
 	}
 	// Approved review decisions are terminal for C1. A new post-approval action
 	// belongs to a subsequent lane; approve and adjust cannot both win.
-	if o.ReviewDecision != "UNRESOLVED" {
+	if o.ReviewDecision != "UNRESOLVED" && !(stopped && o.ReviewDecision == "APPROVED") {
 		return p, nil, ErrReviewNotReady
 	}
 	if len(o.Lines) != len(a.tax.Lines) {
@@ -234,9 +239,22 @@ func (s *Service) AdjustOrder(ctx context.Context, r AdjustmentRequest) (OrderSt
 	if err != nil {
 		return OrderState{}, err
 	}
+	if err = applyAdjustment(ctx, tx, a, r, p, cancelled, adjustmentID); err != nil {
+		return OrderState{}, err
+	}
+	o, err := saveAction(ctx, tx, action, "ADJUST", digest)
+	if err != nil {
+		return o, err
+	}
+	return o, tx.Commit(ctx)
+}
+
+// applyAdjustment is shared by C1 and C2, under the same parent locks. It never
+// commits or calls the provider; cancellation, refund reservation and outbox are atomic.
+func applyAdjustment(ctx context.Context, tx pgx.Tx, a adjustmentState, r AdjustmentRequest, p AdjustmentPreview, cancelled []int64, adjustmentID string) error {
 	taxJSON, err := json.Marshal(a.tax)
 	if err != nil {
-		return OrderState{}, err
+		return err
 	}
 	linesJSON, _ := json.Marshal(p.Lines)
 	cancelledJSON, _ := json.Marshal(cancelled)
@@ -244,13 +262,13 @@ func (s *Service) AdjustOrder(ctx context.Context, r AdjustmentRequest) (OrderSt
 	if p.Tax != nil {
 		b, e := json.Marshal(p.Tax)
 		if e != nil {
-			return OrderState{}, e
+			return e
 		}
 		effectiveTax = string(b)
 	}
 	_, err = tx.Exec(ctx, `INSERT INTO order_adjustments(adjustment_id,order_id,actor_id,reason,state_version,original_snapshot,original_tax_snapshot,lines,cancelled_quantities,previous_total_gross_jpy,effective_total_gross_jpy,effective_tax_snapshot,refund_amount_jpy,whole_order_cancel) VALUES($1,$2,$3,$4,$5,$6::jsonb,$7::jsonb,$8::jsonb,$9::jsonb,$10,$11,$12::jsonb,$13,$14)`, adjustmentID, r.OrderID, r.Actor, r.Reason, a.order.Version+1, string(a.quote), string(taxJSON), string(linesJSON), string(cancelledJSON), a.order.EffectiveTotalGrossJPY, p.EffectiveTotalGrossJPY, effectiveTax, p.RefundAmountJPY, p.WholeOrderCancel)
 	if err != nil {
-		return OrderState{}, err
+		return err
 	}
 	payment := a.order.PaymentStatus
 	fulfillment := a.order.FulfillmentStatus
@@ -275,7 +293,7 @@ func (s *Service) AdjustOrder(ctx context.Context, r AdjustmentRequest) (OrderSt
 	if p.WholeOrderCancel && payment == RefundPending && p.RefundAmountJPY == 0 {
 		var pending bool
 		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_refunds WHERE order_id=$1 AND status<>'SUCCEEDED')`, r.OrderID).Scan(&pending); err != nil {
-			return OrderState{}, err
+			return err
 		}
 		if !pending {
 			payment = Refunded
@@ -285,20 +303,20 @@ func (s *Service) AdjustOrder(ctx context.Context, r AdjustmentRequest) (OrderSt
 	after, _ := json.Marshal(map[string]any{"preview": p, "payment_status": payment, "fulfillment_status": fulfillment, "review_decision": decision, "payment_review_required": review, "operational_hold": hold, "version": a.order.Version + 1})
 	_, err = tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,before_payment_status,after_payment_status,before_fulfillment_status,after_fulfillment_status,state_version,reason,before_state,after_state) VALUES($1,$2,'ORDER_ADJUSTED',$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb)`, r.OrderID, r.Actor, string(a.order.PaymentStatus), string(payment), string(a.order.FulfillmentStatus), string(fulfillment), a.order.Version+1, r.Reason, string(before), string(after))
 	if err != nil {
-		return OrderState{}, err
+		return err
 	}
 	if p.WholeOrderCancel && a.order.PaymentReviewRequired {
 		if _, err = tx.Exec(ctx, `INSERT INTO stripe_payment_attempt_events(order_id,event_key,actor_id,before_state,after_state) VALUES($1,$2,$3,'REVIEW_REQUIRED','PAID')`, r.OrderID, "manager-review:cancel:"+adjustmentID, r.Actor); err != nil {
-			return OrderState{}, err
+			return err
 		}
 		if _, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='PAID',payment_review_required=false,updated_at=clock_timestamp() WHERE order_id=$1 AND state='REVIEW_REQUIRED'`, r.OrderID); err != nil {
-			return OrderState{}, err
+			return err
 		}
 	}
 	if p.RefundAmountJPY > 0 {
 		refundID, e := randomID()
 		if e != nil {
-			return OrderState{}, e
+			return e
 		}
 		state := "REQUESTED"
 		var receipt any
@@ -306,39 +324,35 @@ func (s *Service) AdjustOrder(ctx context.Context, r AdjustmentRequest) (OrderSt
 			state = "SUCCEEDED"
 			var id string
 			if err = tx.QueryRow(ctx, `SELECT receipt_id FROM cash_settlement_allocations WHERE order_id=$1`, r.OrderID).Scan(&id); err != nil {
-				return OrderState{}, err
+				return err
 			}
 			receipt = id
 		}
 		if _, err = tx.Exec(ctx, `INSERT INTO operation_refunds(refund_id,adjustment_id,order_id,amount_jpy,method,status,actor_id,receipt_id,provider_key) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)`, refundID, adjustmentID, r.OrderID, p.RefundAmountJPY, a.order.PaymentMethod, state, r.Actor, receipt, "p82-refund:"+refundID+":1"); err != nil {
-			return OrderState{}, err
+			return err
 		}
 		if a.order.PaymentMethod == "STRIPE" {
 			if err = enqueueRefund(ctx, tx, r.OrderID, refundID, 1); err != nil {
-				return OrderState{}, err
+				return err
 			}
 		} else {
 			invoice, e := cashAdjustedInvoice(ctx, tx, receipt.(string), r.OrderID, p.Tax)
 			if e != nil {
-				return OrderState{}, e
+				return e
 			}
 			if _, err = tx.Exec(ctx, `INSERT INTO cash_refund_ledger(refund_id,receipt_id,order_id,actor_id,amount_jpy,effective_tax_invoice) VALUES($1,$2,$3,$4,$5,$6::jsonb)`, refundID, receipt, r.OrderID, r.Actor, p.RefundAmountJPY, invoice); err != nil {
-				return OrderState{}, err
+				return err
 			}
 		}
 	}
-	cmd, err := tx.Exec(ctx, `UPDATE operation_order_state SET effective_total_gross_jpy=$3,effective_tax_snapshot=$4::jsonb,cancelled_quantities=$5::jsonb,payment_status=$6,fulfillment_status=$7,review_decision=$8,payment_review_required=$9,operational_hold=$10,order_updated=order_updated OR EXISTS(SELECT 1 FROM operation_kds_cards WHERE order_id=$1),version=version+1,updated_at=clock_timestamp() WHERE order_id=$1 AND version=$2 AND review_decision='UNRESOLVED'`, r.OrderID, r.ExpectedVersion, p.EffectiveTotalGrossJPY, effectiveTax, string(cancelledJSON), string(payment), string(fulfillment), decision, review, hold)
+	cmd, err := tx.Exec(ctx, `UPDATE operation_order_state SET effective_total_gross_jpy=$3,effective_tax_snapshot=$4::jsonb,cancelled_quantities=$5::jsonb,payment_status=$6,fulfillment_status=$7,review_decision=$8,payment_review_required=$9,operational_hold=$10,order_updated=order_updated OR ($7<>'PREPARING' AND EXISTS(SELECT 1 FROM operation_kds_cards WHERE order_id=$1)),version=version+1,updated_at=clock_timestamp() WHERE order_id=$1 AND version=$2 AND review_decision=$11`, r.OrderID, r.ExpectedVersion, p.EffectiveTotalGrossJPY, effectiveTax, string(cancelledJSON), string(payment), string(fulfillment), decision, review, hold, a.order.ReviewDecision)
 	if err != nil {
-		return OrderState{}, err
+		return err
 	}
 	if cmd.RowsAffected() != 1 {
-		return OrderState{}, ErrConflict
+		return ErrConflict
 	}
-	o, err := saveAction(ctx, tx, action, "ADJUST", digest)
-	if err != nil {
-		return o, err
-	}
-	return o, tx.Commit(ctx)
+	return nil
 }
 
 func enqueueRefund(ctx context.Context, tx pgx.Tx, orderID, refundID string, generation int64) error {
