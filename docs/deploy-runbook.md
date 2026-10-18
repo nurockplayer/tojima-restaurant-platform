@@ -140,6 +140,7 @@ PostgreSQL migration: it is the legacy disposable SQLite check.
 | [010 manager_review](../migrations/postgres/010_manager_review.up.sql) | Manager decision/audit/replay / 管理者判断 / 經理決策 | Restores pre-review guards; old action/event CHECKs refuse REVIEW_APPROVE / MANAGER_REVIEW_APPROVED history. Drops decision/reason/snapshot columns if allowed / 履歴で拒否 / 有該歷史即拒絕。 |
 | [011 item_adjustments_refunds](../migrations/postgres/011_item_adjustments_refunds.up.sql) | Effective lines/tax, refunds/ledger/work / 調整・返金 / 調整退款 | Explicitly refuses when **any** `order_adjustments` or `operation_refunds` row exists, regardless of final status; restored CHECKs may also refuse newer history / 履歴破棄を拒否 / 有任何調整或退款即拒絕抹除。 |
 | [012 stop_requests](../migrations/postgres/012_stop_requests.up.sql) | Kitchen-confirmed stop requests and close guard / 停止申請 / 停止申請 | Explicitly refuses when **any** `cancellation_requests` row exists (also finalized/rejected/withdrawn); restores C1 guard/action/event constraints / 全状態の履歴で拒否 / 任何狀態歷史皆拒絕。 |
+| [013 stop_request_state_lock](../migrations/postgres/013_stop_request_state_lock.up.sql) | Locks operation state before accepting direct stop inserts; upgrades existing 012 databases / 停止申請の行ロック / 停止申請列鎖 | Restores the 012 request guard and reopens the direct-insert/fulfillment race; no history is removed / 競合が再発 / 重新引入競態。 |
 
 Read the paired downs before any rollback. A failed `Down` rolls back the entire
 transaction. Do not delete audit/history rows or disable guards to force it.
@@ -210,8 +211,8 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT current_database(), current_schema();
 SELECT version, applied_at FROM schema_migrations ORDER BY version;
--- Exactly versions 1..12, not merely max(version)=12.
-SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12] AS ledger_complete
+-- Exactly versions 1..13, not merely max(version)=13.
+SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13] AS ledger_complete
 FROM schema_migrations;
 SELECT to_regclass('order_read_grants'), to_regclass('order_adjustments'),
        to_regclass('operation_refunds'), to_regclass('cancellation_requests'),
@@ -261,7 +262,7 @@ PGOPTIONS='-c search_path=p84c_rehearsal' pg_restore --dbname="$restore_url" \
 psql "$restore_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT * FROM restore_probe; -- p84c-disposable-only, exactly one row
-SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..12
+SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..13
 SELECT to_regclass('cancellation_requests');
 SQL
 # Confirm Up is idempotent on the restored schema.
@@ -282,12 +283,12 @@ TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disab
 
 This induces a duplicate-function failure mid-008 after column/index changes,
 checks exact prior ledger timestamps and schema objects/definitions (001–006),
-checks 007 and partial 008 rollback, removes the conflict, reruns Up through 012
+checks 007 and partial 008 rollback, removes the conflict, reruns Up through 013
 and verifies Down/Up. It does **not** establish production backup/restore or
 RPO/RTO: matrix **8n remains partially GAP**, owned by database/hosting recovery.
-008途中で失敗させ、既存001–006・ledger不変と007/008 rollback、原因除去後の012までの
+008途中で失敗させ、既存001–006・ledger不変と007/008 rollback、原因除去後の013までの
 再実行・Down/Upを確認。実backup/restore・RPO/RTOは未受入、**8nは一部GAP**。
-在008中途注入失敗，檢查001–006與ledger不變、007／部分008回滾、排除衝突後重跑至012及
+在008中途注入失敗，檢查001–006與ledger不變、007／部分008回滾、排除衝突後重跑至013及
 Down/Up；未驗收正式backup/restore或RPO/RTO，**8n維持部分GAP**。
 
 ## Smoke after an authorized deployment / 配備後確認 / 核准部署後smoke
