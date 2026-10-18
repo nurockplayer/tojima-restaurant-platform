@@ -1,7 +1,7 @@
 import { bearerHeaders, request as httpRequest } from '../shared/http';
 
 export interface StaffContext { tenantID: string; storeID: string }
-export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean }
+export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean; can_approve_fulfillment?: boolean }
 export interface StaffTable { table_id: string; name: string; session_id?: string; status: 'OPEN' | 'CLOSED' | 'IDLE'; mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN'; expires_at?: string; unpaid_cash_jpy: string; order_count: number }
 export interface StaffOrder {
   id: string; session_id: string; table_id: string; table_name: string; generation: number;
@@ -9,6 +9,8 @@ export interface StaffOrder {
   fulfillment_status: 'WAITING' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
   requires_staff_acceptance: boolean; staff_accepted: boolean; cash_mode?: 'PREPAID' | 'PAY_LATER'; version: number;
   total_gross_jpy: string; created_at: string; blocked_reason?: string;
+  payment_review_required?: boolean; review_reason_codes?: Array<'COMPANY_HOLD' | 'OPERATIONAL_HOLD' | 'SESSION_CLOSED' | 'PAYMENT_REVIEW'>;
+  review_decision?: 'UNRESOLVED' | 'APPROVED' | 'CANCELLED';
   lines: Array<{ product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;
 }
 export interface Receipt {
@@ -38,6 +40,8 @@ export const operationsClient = {
   tables: (context: StaffContext, token: string) => request<{ tables: StaffTable[] }>(`${base(context)}/operations/tables`, token),
   session: (context: StaffContext, token: string, tableID: string, sessionID: string) => request<SessionOperations>(`${base(context)}/tables/${enc(tableID)}/sessions/${enc(sessionID)}/operations`, token),
   kds: (context: StaffContext, token: string, signal?: AbortSignal) => request<{ orders: StaffOrder[] }>(`${base(context)}/operations/kds`, token, { signal }),
+  reviews: (context: StaffContext, token: string) => request<{ orders: StaffOrder[] }>(`${base(context)}/operations/reviews`, token),
+  approveFulfillment: (context: StaffContext, token: string, order: StaffOrder, body: { expected_version: number; reason: string }, key: string) => request<StaffOrder>(`${base(context)}/tables/${enc(order.table_id)}/sessions/${enc(order.session_id)}/orders/${enc(order.id)}/approve-fulfillment`, token, json(body, key)),
   cashSettings: (context: StaffContext, token: string) => request<CashSettings>(`${base(context)}/operations/cash-settings`, token),
   saveCashSettings: (context: StaffContext, token: string, settings: Omit<CashSettings, 'version'> & { expected_version: number }, key: string) => request<CashSettings>(`${base(context)}/operations/cash-settings`, token, { ...json(settings, key), method: 'PUT' }),
   cashPreview: (context: StaffContext, token: string, tableID: string, sessionID: string) => request<CashPreview>(`${sessionPath(context, tableID, sessionID)}/cash/preview`, token, json({})),

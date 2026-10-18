@@ -10,8 +10,8 @@ import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
-type View = 'tables' | 'kds';
-type Dialog = 'cash' | 'close' | null;
+type View = 'tables' | 'kds' | 'reviews';
+type Dialog = 'cash' | 'close' | 'approve' | null;
 const CONTEXT_KEY = 'tojima.staff.context';
 const TOKEN_KEY = 'tojima.staff.access-token';
 // The HTTP client has no timeout, so a hung KDS poll is aborted (and the board marked stale) after this.
@@ -30,6 +30,7 @@ const copy = {
     receipt: '精算済み', receiptID: '領収番号', change: 'お釣り', cashier: '担当者', close: 'テーブルを閉じる', closeTitle: 'テーブルを閉じますか？', closeConfirm: '閉卓を確認', blockers: '閉卓できない注文があります。', noBlockers: '未収・処理中の支払いや未提供の注文はありません。',
     cashSettings: '現金受付設定', enabled: '現金を受け付ける', prepaid: '先払い', payLater: '後払い', save: '設定を保存',
     noCashOrders: '精算対象の現金注文はありません。', closeBlocked: '未提供または未精算の注文があるため閉卓できません。',
+    reviews: '要確認', reviewQueue: '支払済み・要確認の注文', noReviews: '確認が必要な注文はありません。', approve: '提供を承認', approveTitle: '提供を承認しますか？', reason: '承認理由', confirmApprove: '承認して厨房へ送る', reviewCompany: '企業の商品保留', reviewOperations: '運営保留', reviewClosed: '卓セッション終了後の確認', reviewPayment: '支払い確認', reviewStale: '注文が更新されました。最新状態を読み込みました。内容を確認してください。', reviewLoading: '確認が必要な注文を読み込んでいます…', reviewDataStale: '表示中の確認一覧が最新ではありません。再読み込みしてください。', reviewLoadError: '確認一覧を読み込めませんでした。', companyHoldActive: '企業の商品保留中です。解除後に再度お試しください。', reviewNotReady: 'この注文は承認できません。最新状態を確認してください。',
     paymentCheck: '支払い状況を確認', paymentReconcile: '最新の支払い状況を確認', paymentError: '支払い状況を確認できません。時間をおいてお試しください。', paymentReview: '支払い状況を店舗で確認する必要があります。', lastPaymentCheck: '最終確認',
     kdsStale: '厨房看板の接続が切れています。表示が最新ではない可能性があります。自動で再接続しています。', kdsLastSync: '最終同期',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
@@ -49,6 +50,7 @@ const copy = {
     receipt: '已完成結帳', receiptID: '收據編號', change: '找零', cashier: '收銀人員', close: '關閉桌次', closeTitle: '確定關閉此桌次？', closeConfirm: '確認關桌', blockers: '仍有訂單未完成，無法關桌。', noBlockers: '沒有未收款、處理中付款或未送達的訂單。',
     cashSettings: '現金收款設定', enabled: '接受現金付款', prepaid: '先付款', payLater: '後付款', save: '儲存設定',
     noCashOrders: '目前沒有待收現金訂單。', closeBlocked: '尚有未送達或未結清的訂單，無法關桌。',
+    reviews: '待審核', reviewQueue: '已付款且待審核的訂單', noReviews: '目前沒有待審核的訂單。', approve: '核准出餐', approveTitle: '要核准此訂單出餐嗎？', reason: '核准原因', confirmApprove: '核准並送至廚房', reviewCompany: '企業商品保留', reviewOperations: '營運保留', reviewClosed: '桌次結束後確認', reviewPayment: '付款確認', reviewStale: '訂單狀態已更新。已重新載入最新資料，請確認後操作。', reviewLoading: '正在載入待審核訂單…', reviewDataStale: '目前顯示的審核清單不是最新資料，請重新載入。', reviewLoadError: '無法載入審核清單。', companyHoldActive: '企業商品仍在保留中，解除後才能核准。', reviewNotReady: '此訂單目前無法核准，請確認最新狀態。',
     paymentCheck: '確認付款狀態', paymentReconcile: '更新付款狀態', paymentError: '目前無法確認付款狀態，請稍後再試。', paymentReview: '需要由門店確認付款狀態。', lastPaymentCheck: '最後確認',
     kdsStale: '廚房看板連線中斷，畫面可能不是最新狀態，系統正在自動重新連線。', kdsLastSync: '最後同步',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
@@ -71,6 +73,13 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const [view, setView] = useState<View>(initialView);
   const [tables, setTables] = useState<StaffTable[]>([]);
   const [kdsOrders, setKdsOrders] = useState<StaffOrder[]>([]);
+  const [reviewOrders, setReviewOrders] = useState<StaffOrder[]>([]);
+  const [reviewLoaded, setReviewLoaded] = useState(false);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewStale, setReviewStale] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+  const [approveOrder, setApproveOrder] = useState<StaffOrder | null>(null);
+  const [approveReason, setApproveReason] = useState('');
   const [kdsStale, setKdsStale] = useState(false);
   const [kdsSyncedAt, setKdsSyncedAt] = useState<Date | null>(null);
   const [settings, setSettings] = useState<CashSettings | null>(null);
@@ -100,6 +109,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const kdsRequest = useRef(0);
   const settingsRequest = useRef(0);
   const detailRequest = useRef(0);
+  const reviewRequest = useRef(0);
   const paymentRequest = useRef(0);
   const hasTables = !!capabilities && (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage);
 
@@ -179,6 +189,31 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     setSettings(result);
     return result;
   }, [currentEpoch, isCurrent]);
+  const loadReviews = useCallback(async (ctx: StaffContext, bearer: string) => {
+    const requestEpoch = currentEpoch(ctx, bearer);
+    if (requestEpoch === null) return null;
+    const requestID = ++reviewRequest.current;
+    setReviewLoading(true); setReviewError('');
+    try {
+      const result = await operationsClient.reviews(ctx, bearer);
+      if (!isCurrent(requestEpoch, ctx, bearer) || requestID !== reviewRequest.current) return null;
+      setReviewOrders(result.orders.filter((order) => order.payment_status === 'PAID' && order.payment_review_required && order.review_decision === 'UNRESOLVED'));
+      setReviewLoaded(true); setReviewStale(false);
+      return result.orders;
+    } catch (cause) {
+      if (isCurrent(requestEpoch, ctx, bearer) && requestID === reviewRequest.current) {
+        setReviewStale(reviewLoaded); setReviewError(t.reviewLoadError);
+      }
+      throw cause;
+    } finally {
+      if (requestID === reviewRequest.current) setReviewLoading(false);
+    }
+  }, [currentEpoch, isCurrent, reviewLoaded, t.reviewLoadError]);
+  const refreshReviews = useCallback(async () => {
+    const requestEpoch = currentEpoch(context, token);
+    try { await loadReviews(context, token); }
+    catch { if (requestEpoch !== null && !isCurrent(requestEpoch, context, token)) return; }
+  }, [context, currentEpoch, isCurrent, loadReviews, token]);
   const loadDetail = useCallback(async (ctx: StaffContext, bearer: string, tableID: string, sessionID: string) => {
     const requestEpoch = currentEpoch(ctx, bearer);
     if (requestEpoch === null) return null;
@@ -226,7 +261,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     setToken(cleanBearer);
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
     openerRef.current = null; kdsPoll.current = null;
-    setCapabilities(null); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
+    reviewRequest.current++; setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError('');
+    setCapabilities(null); setTables([]); setKdsOrders([]); setApproveOrder(null); setApproveReason(''); setKdsStale(false); setKdsSyncedAt(null); setSettings(null); setDetail(null); setSelectedTableID(''); setCashPreview(null); setReceipt(null); setDialog(null); setNotice('');
     pendingWrite.current = null; setBusy(false); setUncertain(false);
     setLoading(true); setError(''); setNotice('');
     try {
@@ -323,7 +359,8 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     } catch (cause) {
       if (epoch.current !== requestEpoch) return;
       if (cause instanceof ApiError && cause.status === 409) {
-        pendingWrite.current = null; setUncertain(false); setError(t.stale);
+        pendingWrite.current = null; setUncertain(false);
+        setError(cause.body.error === 'company_hold_active' ? t.companyHoldActive : cause.body.error === 'review_not_ready' ? t.reviewNotReady : cause.body.error === 'stale_version' || cause.body.error === 'idempotency_conflict' ? t.reviewStale : t.stale);
         try { await operation.conflict(); }
         catch (conflictCause) { if (epoch.current === requestEpoch) setError(explain(conflictCause, locale)); }
       } else if (!(cause instanceof ApiError) || cause.status >= 500) {
@@ -332,7 +369,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
         pendingWrite.current = null; setUncertain(false); setError(explain(cause, locale));
       }
     } finally { if (epoch.current === requestEpoch) setBusy(false); }
-  }, [locale, t.network, t.stale]);
+  }, [locale, t.companyHoldActive, t.network, t.reviewNotReady, t.reviewStale, t.stale]);
 
   const startWrite = <P, R>(payload: P, execute: (payload: P, key: string) => Promise<R>, success: (result: R) => Promise<void> | void, conflict: () => Promise<void>) => {
     if (busy || uncertain) return;
@@ -412,6 +449,22 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     startWrite(body, (payload, key) => operationsClient.acceptOrder(context, token, table.table_id, table.session_id!, order.id, payload.expected_version, key), async () => { await refreshDetail(); await loadTables(context, token); }, async () => { await refreshDetail(); await loadTables(context, token); });
   };
 
+  const approveFulfillment = () => {
+    if (!approveOrder || !capabilities?.can_approve_fulfillment || !approveReason.trim()) return;
+    const target = approveOrder;
+    const payload = { expected_version: target.version, reason: approveReason.trim() };
+    startWrite(payload, (body, key) => operationsClient.approveFulfillment(context, token, target, body, key), async () => {
+      setDialog(null); setApproveOrder(null); setApproveReason('');
+      const tasks: Promise<unknown>[] = [loadReviews(context, token)];
+      if (capabilities.can_kitchen) tasks.push(guardedKds(context, token, true));
+      if (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage) tasks.push(loadTables(context, token));
+      await Promise.all(tasks);
+    }, async () => {
+      setDialog(null); setApproveOrder(null); setApproveReason('');
+      await loadReviews(context, token);
+    });
+  };
+
   const advanceOrder = (order: StaffOrder, target: 'PREPARING' | 'READY' | 'SERVED') => {
     const body = { expected_version: order.version, target };
     const success = async () => { await refreshDetail(); await loadTables(context, token); if (capabilities?.can_kitchen) await guardedKds(context, token, true); };
@@ -425,13 +478,14 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     epoch.current += 1;
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
     active.current = null;
-    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1;
+    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1; reviewRequest.current += 1;
     sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
     openerRef.current = null; kdsPoll.current = null;
-    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; setUncertain(false);
+    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError(''); setApproveOrder(null); setApproveReason(''); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; setUncertain(false);
   };
 
-  const noOperations = !!capabilities && !hasTables && !capabilities.can_kitchen;
+  const canReadReviews = !!capabilities && (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage || capabilities.can_kitchen || capabilities.can_approve_fulfillment === true);
+  const noOperations = !!capabilities && !hasTables && !capabilities.can_kitchen && !canReadReviews;
   const boardOrders = kdsOrders.filter((order) => ['ACCEPTED', 'PREPARING', 'READY'].includes(order.fulfillment_status)).sort((a, b) => a.created_at.localeCompare(b.created_at));
   const blockers = detail?.close_blockers ?? [];
 
@@ -454,6 +508,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
         <nav className="tabs staff-tabs" aria-label={locale === 'ja' ? 'スタッフ操作' : '店員操作'}>
           {hasTables && <button className={view === 'tables' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('tables'); setSelectedTableID(''); setDetail(null); }}>{t.tables}</button>}
           {capabilities?.can_kitchen && <button className={view === 'kds' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('kds'); setSelectedTableID(''); setDetail(null); }}>{t.kds}</button>}
+          {canReadReviews && <button className={view === 'reviews' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('reviews'); setSelectedTableID(''); setDetail(null); void refreshReviews(); }}>{t.reviews}{reviewLoaded ? ` · ${reviewOrders.length}` : ''}</button>}
           <button className="icon-button" aria-label={t.refresh} onClick={() => void refreshDashboard()} disabled={loading || busy || uncertain}>↻</button>
         </nav>
         {loading && <p role="status" className="muted">{t.loading}</p>}
@@ -489,6 +544,17 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
             {boardOrders.filter((order) => order.fulfillment_status === status).map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} canServe={false} busy={busy || uncertain} compact onStart={() => advanceOrder(order, 'PREPARING')} onReady={() => advanceOrder(order, 'READY')} />)}
           </section>)}</div>
         </section>}
+        {view === 'reviews' && canReadReviews && <section className="staff-table-view review-queue"><div className="section-heading"><div><div className="eyebrow">{t.subtitle}</div><h2>{t.reviewQueue}</h2></div><button className="button quiet" disabled={loading || reviewLoading || busy || uncertain} onClick={() => void refreshReviews()}>{t.refresh}</button></div>
+          {reviewLoading && <p className="muted" role="status">{t.reviewLoading}</p>}
+          {reviewError && <p className={reviewStale ? 'notice' : 'error'} role={reviewStale ? 'status' : 'alert'}>{reviewStale ? t.reviewDataStale : t.reviewLoadError}</p>}
+          {reviewLoaded && reviewOrders.length === 0 && !reviewLoading ? <div className="empty-state"><p>{t.noReviews}</p></div> : reviewOrders.map((order) => <article className="staff-order-card" key={order.id}>
+            <header className="staff-order-head"><div><strong>{order.table_name} · #{order.generation}</strong><small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW', { timeZone: 'Asia/Tokyo' })}</small></div><span className="status-chip">{t.reviews}</span></header>
+            <ul className="staff-order-lines">{order.lines.map((line, index) => <li key={`${line.product_name}-${index}`}><span>{line.product_name} × {line.quantity}{line.options.map((option, optionIndex) => <small key={`${option.group_name}-${option.option_name}-${optionIndex}`}>{option.group_name.trim() ? `${option.group_name}: ` : ''}{option.option_name}</small>)}</span><strong>{amountJPY(line.line_gross_jpy)}</strong></li>)}</ul>
+            <div className="staff-order-payment"><span>{paymentLabel(order.payment_status, t)}</span><strong>{amountJPY(order.total_gross_jpy)}</strong></div>
+            <p className="notice">{(order.review_reason_codes ?? []).map((code) => code === 'COMPANY_HOLD' ? t.reviewCompany : code === 'OPERATIONAL_HOLD' ? t.reviewOperations : code === 'SESSION_CLOSED' ? t.reviewClosed : t.reviewPayment).join(' · ')}</p>
+            {capabilities?.can_approve_fulfillment && <div className="staff-order-actions"><button className="button primary" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; setApproveOrder(order); setApproveReason(''); setDialog('approve'); }}>{t.approve}</button></div>}
+          </article>)}
+        </section>}
       </>}
     </div>
     {dialog === 'cash' && <StaffDialog labelledBy="cash-title" dismissible={!busy && !uncertain} onDismiss={() => { setDialog(null); setReceipt(null); setCashPreview(null); }}><div className="eyebrow">{demo ? t.demoCashTitle : t.cashTitle}</div><h2 id="cash-title">{receipt ? t.receipt : demo ? t.demoCashTitle : t.cashTitle}</h2>
@@ -508,10 +574,11 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     {dialog === 'close' && <StaffDialog labelledBy="close-title" dismissible={!busy && !uncertain} onDismiss={() => setDialog(null)}><div className="eyebrow">{demo ? t.demoClose : t.close}</div><h2 id="close-title">{t.closeTitle}</h2>{demo && <DemoBanner demo locale={locale} />}
       {blockers.length > 0 ? <><p className="error">{t.blockers}</p><ul className="blocker-list">{blockers.map((blocker, index) => <li key={`${blocker}-${index}`}>{blockerLabel(blocker, locale)}</li>)}</ul></> : <p className="notice">{t.noBlockers}</p>}
       <button className="button primary wide" disabled={busy || uncertain || blockers.length > 0} onClick={closeTable}>{t.closeConfirm}</button>
-      <button className="button quiet wide" disabled={busy} onClick={() => setDialog(null)}>{t.closeDialog}</button>
+      <button className="button quiet wide" disabled={busy || uncertain} onClick={() => setDialog(null)}>{t.closeDialog}</button>
       {uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}
       {error && <p className="error" role="alert">{error}</p>}
     </StaffDialog>}
+    {dialog === 'approve' && approveOrder && <StaffDialog labelledBy="approve-title" dismissible={!busy && !uncertain} onDismiss={() => { setDialog(null); setApproveOrder(null); }}><div className="eyebrow">{t.reviews}</div><h2 id="approve-title">{t.approveTitle}</h2><p>{approveOrder.table_name} · #{approveOrder.generation} · {amountJPY(approveOrder.total_gross_jpy)}</p><label className="field">{t.reason}<textarea rows={3} required maxLength={500} value={approveReason} disabled={busy || uncertain} onChange={(event) => setApproveReason(event.target.value)} /></label><button className="button primary wide" disabled={busy || uncertain || !approveReason.trim()} onClick={approveFulfillment}>{t.confirmApprove}</button><button className="button quiet wide" disabled={busy || uncertain} onClick={() => setDialog(null)}>{t.closeDialog}</button>{uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}{error && <p className="error" role="alert">{error}</p>}</StaffDialog>}
   </StaffShell>;
 }
 

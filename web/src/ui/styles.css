@@ -71,6 +71,15 @@ dialog.confirm-dialog::backdrop {
   min-height: 44px;
 }
 
+.confirm-dialog .field textarea {
+  min-height: 88px;
+  width: 100%;
+  border: 1px solid #dfe5de;
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+}
+
 .settings-check {
   min-height: 44px;
 }

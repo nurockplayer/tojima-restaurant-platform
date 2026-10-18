@@ -323,6 +323,12 @@ func (s *Service) ListKDS(ctx context.Context, scope StoreScope) ([]OrderState, 
 func readOrders(ctx context.Context, q interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
 }, scope TableScope, sessionID string, releasedOnly bool) ([]OrderState, error) {
+	return readOrdersMode(ctx, q, scope, sessionID, releasedOnly, false)
+}
+
+func readOrdersMode(ctx context.Context, q interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}, scope TableScope, sessionID string, releasedOnly, reviewOnly bool) ([]OrderState, error) {
 	args := []any{scope.TenantID, scope.StoreID}
 	where := `o.tenant_id=$1 AND o.store_id=$2`
 	if scope.TableID != "" {
@@ -336,7 +342,10 @@ func readOrders(ctx context.Context, q interface {
 	if releasedOnly {
 		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') AND NOT st.operational_hold AND NOT st.payment_review_required`
 	}
-	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot
+	if reviewOnly {
+		where += ` AND st.payment_status='PAID' AND st.payment_review_required AND st.fulfillment_status='WAITING' AND st.review_decision='UNRESOLVED' AND dt.enabled AND EXISTS(SELECT 1 FROM stores rs JOIN tenants rt USING(tenant_id) WHERE rs.tenant_id=o.tenant_id AND rs.store_id=o.store_id AND rs.enabled AND rs.operating AND rt.enabled) AND NOT EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)`
+	}
+	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot,coalesce(st.review_decision,'UNRESOLVED')
 		FROM table_orders o JOIN dining_tables dt USING(tenant_id,store_id,table_id) LEFT JOIN operation_order_state st USING(order_id) WHERE `+where+` ORDER BY o.created_at,o.order_id`, args...)
 	if err != nil {
 		return nil, err
@@ -350,7 +359,7 @@ func readOrders(ctx context.Context, q interface {
 		var created time.Time
 		var raw []byte
 		var payment, fulfill *string
-		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw); err != nil {
+		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.ReviewDecision); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = created
@@ -758,8 +767,20 @@ func (s *Service) mutateOrder(ctx context.Context, input OrderActionRequest, act
 		return OrderState{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockSession(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE"); err != nil {
+	sessionStatus, err := lockSessionStatus(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE")
+	if err != nil {
 		return OrderState{}, err
+	}
+	if sessionStatus != "OPEN" {
+		// A manager may fulfill a reviewed late payment without reopening its
+		// historical session or restoring any guest grant. Other actions stay shut.
+		var approved bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_order_state WHERE order_id=$1 AND session_id=$2 AND tenant_id=$3 AND store_id=$4 AND table_id=$5 AND review_decision='APPROVED')`, input.OrderID, input.SessionID, input.Scope.TenantID, input.Scope.StoreID, input.Scope.TableID).Scan(&approved); err != nil {
+			return OrderState{}, err
+		}
+		if action != "FULFILLMENT" || !approved {
+			return OrderState{}, ErrConflict
+		}
 	}
 	var priorDigest []byte
 	err = tx.QueryRow(ctx, `SELECT request_digest FROM operation_action_idempotency WHERE session_id=$1 AND order_id=$2 AND action=$3 AND idempotency_key=$4`, input.SessionID, input.OrderID, action, input.IdempotencyKey).Scan(&priorDigest)

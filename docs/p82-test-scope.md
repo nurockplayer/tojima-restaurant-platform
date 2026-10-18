@@ -138,3 +138,121 @@ safe_error_code，員工狀態及核對回應則保留該欄位。
 CREATE 回應遺失 → 綁定前付款失敗 → ON → OFF → CREATE 期限已過 → 延遲的
 completed／未付款 webhook；保留的 EXPIRE 恢復取得，核對完成未付款後的付款成功與
 待覆核結果，或讓仍開放的 Checkout 失效，全程不建立新 Checkout。
+
+# P-82 B — Manager review / 店長による提供承認 / 店長出餐審核
+
+Lane B (MOD-05 S7) builds on accepted lane A `311a7ba` (PR #22). This
+local-only candidate adds explicit fulfillment approval for a PAID order whose
+existing payment-review flag is set, whose fulfillment is WAITING, and which
+has no KDS card. Only a current STORE_MANAGER membership in the exact tenant
+and store, with verified MFA, authorizes the action. STAFF_CASHIER, KITCHEN,
+TENANT_ADMIN alone, guest capabilities, revoked memberships and cross-store or
+cross-tenant memberships cannot approve. Read access uses the existing staff
+operations policy; no client-supplied actor or role is trusted.
+
+`POST /v1/staff/tenants/{tenantID}/stores/{storeID}/tables/{tableID}/sessions/{sessionID}/orders/{orderID}/approve-fulfillment`
+requires `reason` (1–500 Unicode characters after trimming), `expected_version`
+and `Idempotency-Key`. A committed key
+replays the saved original response, even after later fulfillment, while
+conflicting reuse is rejected. Authorization is checked again on every replay.
+Stable 409 codes distinguish `stale_version`, `idempotency_conflict`,
+`company_hold_active` and `review_not_ready`.
+
+The decision lives in `operation_order_state.review_decision`, initially
+UNRESOLVED; approval CASes that value plus the existing operation version to
+APPROVED. CANCELLED is reserved for lane C; there is no cancellation/refund
+endpoint or implemented cancellation transition. Lane C must lock the same
+rows and CAS UNRESOLVED plus the expected operation version, so an approval
+and cancellation cannot both win. Existing decisions are terminal in lane B.
+
+The transaction lock order is company catalog SHARE → table session UPDATE →
+Stripe payment attempt UPDATE → operation order state UPDATE → audit,
+idempotency and release writes. This matches lane A/payment workers and HQ's
+company catalog UPDATE, including the first hold when no hold row yet exists.
+No provider call occurs in this transaction. Active HQ holds on ordered
+product keys in the immutable quote block approval; turning the hold OFF only
+makes explicit approval possible and never releases the order automatically.
+Product/option PAUSED availability does not block this explicit fulfillment
+decision: the manager checks with the kitchen. Store/tenant/table enablement
+and current authorization still apply. Closed or expired sessions can be
+reviewed without reopening them or restoring guest capabilities. The existing
+fulfillment action permits kitchen/service transitions for APPROVED review
+orders in closed sessions; all other closed-session actions remain blocked.
+
+Approval clears both the order and payment-attempt review projections and the
+order's operational hold. It also satisfies required staff reception, since
+this is an explicit manager acceptance of fulfillment. It preserves paid
+status, immutable order/amount/tax snapshots, the retained HQ expiry marker
+and original-browser revocation. The existing release path creates one KDS
+card, one KDS outbox row and its normal release audit in the same transaction.
+One immutable manager decision event records actor, reason and before/after
+state; KDS release remains a separate existing operational event. Duplicate
+requests or concurrent managers cannot duplicate these effects. The existing
+operations and payment `CheckClose` gates remain authoritative: unresolved
+reviews block close; approval alone still requires service completion before
+close can succeed.
+
+Paired migration 010 extends existing state, event and idempotency tables and
+restores previous transition guards on rollback. Number 009 is left untouched
+for the parallel lane. Downgrade is for an empty/disposable schema: it refuses
+to silently discard accepted manager history in a populated schema.
+
+`GET .../operations/reviews` exposes a store-wide queue, including historical
+sessions absent from the active table list. Staff see immutable amount/item
+snapshots and safe reason codes, never Checkout/PaymentIntent IDs, provider
+credentials or internal audit reasons. The existing `/staff` console adds
+「要確認 / 待審核」 and a manager-only native approval dialog, a required reason,
+44px controls, Japanese/Traditional Chinese copy and Asia/Tokyo timestamps.
+A stale decision reloads the queue and requires renewed confirmation; an
+uncertain response retains the frozen body and key for explicit retry. No
+write is retried automatically. Identity changes discard prior queue/results.
+This extends the P-79 console's own state under ADR-0006; no new frontend
+framework, server-state library or guest wording is introduced.
+
+Validation uses disposable PostgreSQL schemas and the existing in-process
+fake provider only. Coverage includes HTTP role/MFA/current-membership/scope
+checks, snapshot projection, CAS, exact-result replay and conflicting reuse,
+concurrent approval, HQ hold ON/OFF, product PAUSED, non-review/unpaid rejection,
+closed/expired sessions, close gates, immutable audit, and late/duplicate
+payment observations after approval. Web Vitest cases cover queue rendering,
+read-only cashier access, approval, stale reload/reconfirmation, uncertain
+same-key/body retry and obsolete identity responses. The director runs Vitest;
+this sandbox does not claim those tests executed.
+
+```sh
+TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
+  go test -race -count=1 ./internal/... ./migrations/postgres
+make fmt-check vet build migration-smoke
+pnpm --dir web lint
+pnpm --dir web exec tsc -b --pretty false
+# Director, outside this sandbox:
+pnpm --dir web test
+```
+
+日本語：P-82 B は支払済み・要確認・KDS 未送信の注文に対し、同一店舗の現在の
+STORE_MANAGER 権限と MFA を持つ店長だけが、理由・状態バージョン・冪等キーを
+用いて提供を承認する。承認は注文と決済試行の確認フラグ、運営保留を解除し、必要な
+スタッフ受付も満たして、既存経路で KDS カードと outbox を一件だけ作成する。
+同一トランザクションで既存の変更不可イベントに担当者・理由・前後状態を記録する。
+本部の商品保留が有効な間は company_hold_active で拒否し、解除後も自動承認しない。
+店舗の商品 PAUSED は承認を妨げず、店長が厨房と確認する。終了・期限切れの卓も
+店舗全体の要確認一覧から処理でき、ゲスト参加権限は復活しない。
+ロック順は本部カタログ SHARE → 卓セッション → 決済試行 → 注文状態。決定列と
+既存バージョンの CAS を将来の取消レーンと共有する。未解決は閉卓不可、承認後も
+提供完了が必要。同一キーは保存済み結果を返し、競合は拒否する。画面は理由入力付き
+標準 dialog、44px 操作領域、日繁中対応。古い状態は再読込・再確認、応答不明は
+同じ内容・キーで明示再試行する。PostgreSQL と fake provider のみを使用し、Vitest
+実行は director に引き継ぐ。取消・返金、ゲスト文言、実 Stripe、本番受入は対象外。
+
+繁體中文：P-82 B 讓同租戶、同分店且具現行 STORE_MANAGER 權限及 MFA 的店長，
+以原因、預期狀態版本與冪等鍵，明確核准已付款、待審核且尚無 KDS 卡片的訂單。
+同一交易清除訂單與付款嘗試的覆核旗標、營運保留，完成必要的員工接單，透過既有
+流程建立唯一 KDS 卡片及 outbox，並在既有不可變事件記錄人員、原因與前後狀態。
+本部商品保留仍有效時回傳 company_hold_active；解除後仍需明確核准。分店商品
+PAUSED 不阻止核准，由店長向廚房確認。已關閉或過期桌次也能從全店待審核佇列處理，
+不恢復訪客權限。鎖定順序為本部菜單 SHARE → 桌次 → 付款嘗試 → 訂單狀態；決定欄
+與既有版本 CAS 供未來取消線共用。未解決不得關桌，核准後仍須完成送餐。
+相同鍵回傳原結果，衝突重用拒絕。畫面採原生 dialog、必填原因、44px 操作目標與日文／
+繁中；過期版本重新載入並確認，回應不明則以固定內容與相同鍵明確重試。
+僅用 PostgreSQL 及 fake provider；Vitest 交 director 執行。取消／退款、訪客文案、
+真實 Stripe 與正式上線不屬於本線。

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { waitFor, within } from '@testing-library/dom';
+import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StaffOrder } from '../api/operations';
 import { StaffApp } from './StaffApp';
@@ -24,6 +26,105 @@ afterEach(async () => {
 });
 
 describe('staff operations', () => {
+  it('renders paid review orders and retries an uncertain approval with the same key and body', async () => {
+    const order = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['COMPANY_HOLD', 'SESSION_CLOSED'] });
+    let postCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: false, can_approve_fulfillment: true });
+      if (url === `${base}/operations/reviews`) return json({ orders: postCalls > 1 ? [] : [order] });
+      if (url.endsWith('/approve-fulfillment')) {
+        postCalls++;
+        if (postCalls === 1) return json({ error: 'uncertain' }, 502);
+        return json({ ...order, payment_review_required: false, review_decision: 'APPROVED', fulfillment_status: 'ACCEPTED', version: 4 });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const user = userEvent.setup();
+    await user.click(within(host!).getByRole('button', { name: '要確認' }));
+    await waitFor(() => expect(host?.textContent).toContain('企業の商品保留'));
+    expect(host?.textContent).toContain('企業の商品保留');
+    expect(host?.textContent).toContain('1,210');
+    expect(host?.textContent).not.toContain('stripe');
+    await user.click(within(host!).getByRole('button', { name: '提供を承認' }));
+    await user.type(within(host!).getByLabelText('承認理由'), '商品保留解除を確認');
+    await user.click(within(host!).getByRole('button', { name: '承認して厨房へ送る' }));
+    const approvalDialog = host?.querySelector<HTMLDialogElement>('dialog[open]');
+    await waitFor(() => expect(within(approvalDialog!).getByRole('button', { name: '同じ操作を確認して再試行' })).toBeTruthy());
+    const firstCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).endsWith('/approve-fulfillment'));
+    await user.click(within(approvalDialog!).getByRole('button', { name: '同じ操作を確認して再試行' }));
+    const approvalCalls = vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/approve-fulfillment'));
+    expect(approvalCalls).toHaveLength(2);
+    expect(new Headers(approvalCalls[0]?.[1]?.headers).get('Idempotency-Key')).toBe(new Headers(approvalCalls[1]?.[1]?.headers).get('Idempotency-Key'));
+    expect(approvalCalls[0]?.[1]?.body).toBe(approvalCalls[1]?.[1]?.body);
+    expect(String(approvalCalls[0]?.[1]?.body)).toContain('商品保留解除を確認');
+    expect(firstCall).toBeDefined();
+    expect(host?.textContent).toContain('確認が必要な注文はありません');
+  });
+
+  it('reloads the review queue after a stale approval version', async () => {
+    const order = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['PAYMENT_REVIEW'] });
+    let postCalls = 0;
+    let reviewCalls = 0;
+    const posts: Array<{ body: string; key: string | null }> = [];
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: false, can_approve_fulfillment: true });
+      if (url === `${base}/operations/reviews`) { reviewCalls++; return json({ orders: [reviewCalls === 1 ? order : { ...order, version: 4 }] }); }
+      if (url.endsWith('/approve-fulfillment')) { postCalls++; posts.push({ body: String(init.body), key: new Headers(init.headers).get('Idempotency-Key') }); return postCalls === 1 ? json({ error: 'stale_version' }, 409) : json({ ...order, version: 5, review_decision: 'APPROVED' }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const user = userEvent.setup();
+    await user.click(within(host!).getByRole('button', { name: '要確認' }));
+    await waitFor(() => expect(host?.textContent).toContain('支払い確認'));
+    await user.click(within(host!).getByRole('button', { name: '提供を承認' }));
+    await user.type(within(host!).getByLabelText('承認理由'), '最新状態を確認');
+    await user.click(within(host!).getByRole('button', { name: '承認して厨房へ送る' }));
+    expect(postCalls).toBe(1);
+    await waitFor(() => expect(host?.textContent).toContain('最新状態を読み込みました'));
+    expect(host?.querySelector('dialog[open]')).toBeNull();
+    await user.click(within(host!).getByRole('button', { name: '提供を承認' }));
+    await user.type(within(host!).getByLabelText('承認理由'), '再確認後に承認');
+    await user.click(within(host!).getByRole('button', { name: '承認して厨房へ送る' }));
+    expect(postCalls).toBe(2);
+    expect(JSON.parse(posts[1]!.body)).toEqual({ expected_version: 4, reason: '再確認後に承認' });
+    expect(posts[0]!.key).not.toBe(posts[1]!.key);
+    expect(reviewCalls).toBe(3);
+  });
+
+  it('shows the queue read-only to staff and never renders an approval action', async () => {
+    const order = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['OPERATIONAL_HOLD'] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/operations/reviews`) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const user = userEvent.setup();
+    await user.click(within(host!).getByRole('button', { name: '要確認' }));
+    await waitFor(() => expect(host?.textContent).toContain('運営保留'));
+    expect(within(host!).queryByRole('button', { name: '提供を承認' })).toBeNull();
+  });
+
+  it('drops a late review response after staff disconnects', async () => {
+    const response = deferred<Response>();
+    const order = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['PAYMENT_REVIEW'] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url === `${base}/operations/reviews`) return response.promise;
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const user = userEvent.setup();
+    await user.click(within(host!).getByRole('button', { name: '要確認' }));
+    await user.click(within(host!).getByRole('button', { name: '切断' }));
+    await act(async () => { response.resolve(json({ orders: [order] })); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(host?.textContent).toContain('接続');
+    expect(host?.textContent).not.toContain('ラーメン');
+  });
+
   it('keeps the document language in sync with the selected staff locale', async () => {
     const routes: Route = async (url) => {
       if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });

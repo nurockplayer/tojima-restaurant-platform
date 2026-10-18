@@ -20,6 +20,8 @@ var (
 	ErrBlocked             = errors.New("operation is blocked")
 	ErrCashUnavailable     = errors.New("cash acceptance is disabled")
 	ErrNotReady            = errors.New("order is not ready for this operation")
+	ErrCompanyHoldActive   = errors.New("company product hold is active")
+	ErrReviewNotReady      = errors.New("order is not ready for review approval")
 )
 
 type StoreScope struct {
@@ -93,6 +95,8 @@ type OrderState struct {
 	CashMode                CashMode          `json:"cash_mode,omitempty"`
 	OperationalHold         bool              `json:"operational_hold"`
 	PaymentReviewRequired   bool              `json:"payment_review_required"`
+	ReviewDecision          string            `json:"review_decision"`
+	ReviewReasonCodes       []string          `json:"review_reason_codes"`
 	Version                 int64             `json:"version"`
 	TotalGrossJPY           int64             `json:"total_gross_jpy"`
 	CreatedAt               time.Time         `json:"created_at"`
@@ -153,6 +157,7 @@ type OrderActionRequest struct {
 	ExpectedVersion int64
 	IdempotencyKey  string
 	Target          FulfillmentStatus
+	Reason          string
 }
 
 type SessionDetail struct {
