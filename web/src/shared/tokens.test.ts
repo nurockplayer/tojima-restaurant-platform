@@ -34,6 +34,42 @@ function split(source: string, delimiter: string): string[] {
   return parts;
 }
 
+type Specificity = [number, number, number];
+function compareSpecificity(a: Specificity, b: Specificity): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+// Bounded selector grammar for the focus rules; fail on unsupported syntax.
+// :where() contributes zero; :is() takes its most specific argument.
+function specificity(selector: string): Specificity {
+  const result: Specificity = [0, 0, 0];
+  let rest = selector.trim();
+  while (rest) {
+    const token = rest.match(/^(?:(#[\w-]+)|(\.[\w-]+|\[[\w-]+\])|(:[\w-]+)|([a-z][\w-]*)|([\s>+~*]+))/i);
+    if (!token) throw new Error(`unsupported specificity syntax: ${rest}`);
+    rest = rest.slice(token[0].length);
+    if (token[3] && rest.startsWith('(')) {
+      const name = token[3];
+      if (name !== ':is' && name !== ':where') throw new Error(`unsupported specificity function: ${name}`);
+      let end = 0;
+      let depth = 0;
+      do {
+        if (rest[end] === '(') depth++;
+        if (rest[end] === ')') depth--;
+        end++;
+      } while (depth && end < rest.length);
+      if (depth) throw new Error('Unbalanced specificity function');
+      const args = split(rest.slice(1, end - 1), ',').map(specificity);
+      const maximum = args.reduce((a, b) => compareSpecificity(a, b) > 0 ? a : b);
+      if (name === ':is') for (const i of [0, 1, 2] as const) result[i] += maximum[i];
+      rest = rest.slice(end);
+    } else if (token[1]) result[0]++;
+    else if (token[2] || token[3]) result[1]++;
+    else if (token[4]) result[2]++;
+  }
+  return result;
+}
+
 function rules(file: string, source: string, context = ''): Rule[] {
   source = source.replace(/\/\*[\s\S]*?\*\//g, '');
   const result: Rule[] = [];
@@ -234,6 +270,36 @@ describe('DS-1 static design-token regression gate', () => {
     expect(fontPixels(resolve(value)), 'Base small size must resolve to at least 12px').toBeGreaterThanOrEqual(12);
   });
 
+  it('gives inset focus greater specificity than every global focus selector and preserves white overrides', () => {
+    const base = allRules.filter((r) => r.file === '../ui/styles.css' && !r.context);
+    const insetRules = base.filter((r) => declarations(r, 'outline-offset').some((d) => d.value === '-3px'));
+    expect(insetRules).toHaveLength(1);
+    const inset = insetRules[0]!;
+    expect(inset.selector).toMatch(/^:(?:is|where)\(\.cart-lines, \.quote-lines, \.confirm-dialog\) :is\(button, a, input, select, textarea, \[tabindex\]\):focus-visible$/);
+    const insetWeight = specificity(inset.selector);
+    for (const element of ['button', 'a', 'input', 'select', 'textarea', '[tabindex]']) {
+      const selector = `${element}:focus-visible`;
+      const globalRules = base.filter((r) => split(r.selector, ',').map(normal).includes(selector)
+        && declarations(r, 'outline').length);
+      expect(globalRules, `${selector}: global focus rule must exist`).toHaveLength(1);
+      const globalWeight = specificity(selector);
+      expect(compareSpecificity(insetWeight, globalWeight),
+        `${inset.selector} (${insetWeight}) must outrank ${selector} (${globalWeight})`).toBeGreaterThan(0);
+    }
+    const whiteRules = base.filter((r) => declarations(r, 'outline-color').some((d) => d.value === 'var(--color-on-action)'));
+    expect(whiteRules).toHaveLength(1);
+    const whiteSelectors = split(whiteRules[0]!.selector, ',').map(normal);
+    expect(whiteSelectors).toEqual([
+      ':is(.cart-lines, .quote-lines, .confirm-dialog) .button.primary:focus-visible',
+      ':is(.cart-lines, .quote-lines, .confirm-dialog) input:checked:focus-visible',
+    ]);
+    for (const selector of whiteSelectors) {
+      const weight = specificity(selector);
+      expect(compareSpecificity(weight, insetWeight),
+        `${selector} (${weight}) must outrank inset focus (${insetWeight})`).toBeGreaterThan(0);
+    }
+  });
+
   it('keeps every font-size at 12px or above with only reviewed 0/initial exceptions', () => {
     expect(definitions.get('--text-meta')).toBe('12px');
     expect(allRules.find((r) => r.selector === ':root' && declarations(r, 'font-size').length)?.declarations)
@@ -283,6 +349,28 @@ describe('DS-1 static design-token regression gate', () => {
 });
 
 describe('static gate grammar safeguards', () => {
+  it.each([
+    ['button:focus-visible', [0, 1, 1]],
+    ['[tabindex]:focus-visible', [0, 2, 0]],
+    [':where(.cart-lines, .quote-lines, .confirm-dialog) :focus-visible', [0, 1, 0]],
+    [':is(.cart-lines, .quote-lines, .confirm-dialog) :focus-visible', [0, 2, 0]],
+    [':is(.cart-lines, .quote-lines, .confirm-dialog) :is(button, a, input, select, textarea, [tabindex]):focus-visible', [0, 3, 0]],
+    [':where(.cart-lines, .quote-lines, .confirm-dialog) :is(button, a, input, select, textarea, [tabindex]):focus-visible', [0, 2, 0]],
+    [':where(.cart-lines) .button.primary:focus-visible', [0, 3, 0]],
+    [':where(.cart-lines) input:checked:focus-visible', [0, 2, 1]],
+    [':is(button, .cart-lines, #dialog) :focus-visible', [1, 1, 0]],
+    [':is(:where(#ignored), .cart-lines) :focus-visible', [0, 2, 0]],
+  ] as const)('computes focus-selector specificity for %s', (selector, expected) => {
+    expect(specificity(selector)).toEqual(expected);
+  });
+  it('compares specificity lexicographically', () => {
+    expect(compareSpecificity([0, 2, 0], [0, 1, 9])).toBeGreaterThan(0);
+    expect(compareSpecificity([0, 2, 0], [0, 2, 0])).toBe(0);
+    expect(compareSpecificity([0, 2, 0], [1, 0, 0])).toBeLessThan(0);
+  });
+  it.each([':has(button)', ':is(.cart-lines', 'button::before', '[data-label="a,b"]'])('rejects unsupported specificity syntax %s', (selector) => {
+    expect(() => specificity(selector)).toThrow();
+  });
   it('uses WCAG sRGB luminance and expands short hex', () => {
     expect(contrast('#000', '#fff')).toBe(21);
     expect(contrast('#fff', '#ffffff')).toBe(1);

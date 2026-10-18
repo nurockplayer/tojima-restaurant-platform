@@ -4,13 +4,13 @@
 small { font-size: var(--text-meta); }
 
 /* Keep the full 3px focus ring inside scrolling regions, without changing layout. */
-:where(.cart-lines, .quote-lines, .confirm-dialog) :focus-visible {
+:is(.cart-lines, .quote-lines, .confirm-dialog) :is(button, a, input, select, textarea, [tabindex]):focus-visible {
   outline-offset: -3px;
 }
 
 /* Inset focus on green fills needs the contrasting on-action colour. */
-:where(.cart-lines, .quote-lines, .confirm-dialog) .button.primary:focus-visible,
-:where(.cart-lines, .quote-lines, .confirm-dialog) input:checked:focus-visible {
+:is(.cart-lines, .quote-lines, .confirm-dialog) .button.primary:focus-visible,
+:is(.cart-lines, .quote-lines, .confirm-dialog) input:checked:focus-visible {
   outline-color: var(--color-on-action);
 }
 .app-shell{max-width:1440px;margin:0 auto;padding:0 40px}.topbar{height:82px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dfe4db}.brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;color:var(--ink)}.brand-mark{width:39px;height:39px;border-radius:12px;background:var(--green);color:#fff;display:grid;place-items:center;font-size:21px;font-weight:700}.brand strong,.brand small{display:block}.brand strong{font-size:16px;letter-spacing:.06em}.brand small{font-size:12px;color:var(--muted);letter-spacing:.17em;margin-top:2px}.locale-switch,.icon-button{border:1px solid var(--color-border-control);background:var(--cream);border-radius:9px;color:var(--ink);padding:9px 13px;font-size:12px}.locale-switch span{color:var(--muted);padding-left:6px}.workspace{padding:34px 0 48px;display:grid;grid-template-columns:minmax(0,1fr) 365px;column-gap:34px;align-items:start}.welcome{grid-column:1/-1;display:flex;justify-content:space-between;align-items:center;padding:7px 0 26px}.welcome h1{font-size:27px;letter-spacing:-.035em;margin:6px 0}.welcome p{margin:0;color:var(--muted);font-size:12px}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.2em;color:var(--color-text-muted);text-transform:uppercase}.join-badge{display:flex;gap:8px;align-items:center;color:#537060;background:#e8efe8;border-radius:20px;padding:8px 12px;font-size:12px}.live-dot{width:7px;height:7px;background:#4b956e;border-radius:50%;display:inline-block;box-shadow:0 0 0 3px rgba(75,149,110,.14)}

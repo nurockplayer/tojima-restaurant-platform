@@ -67,6 +67,10 @@ The gate checks:
   12px or an unsupported expression (`em`, `%`, `calc`, `clamp`, etc.) fails.
   Only exact, reasoned `0`/`initial` exceptions pass. An unconditional shared
   `small { font-size: var(--text-meta); }` rule must exist and resolve to ≥12px.
+- Focus selectors: the inset rule must have greater specificity than each of
+  the six global focus selectors; white-on-green overrides must outrank it.
+  A dependency-free calculator handles the bounded selector grammar, including
+  the maximum argument specificity of `:is()` and the zero weight of `:where()`.
 - Text declarations paired with an opaque hex/known token background in the
   same rule. A rule without a background is checked on **both** default page
   and white surface. All text uses the conservative 4.5:1 threshold.
@@ -84,8 +88,8 @@ The gate checks:
   at-rules, nested style rules and malformed declarations fail explicitly.
 
 **This is a static regression gate, not a rendered WCAG AA guarantee.** It does
-not calculate selector matching, specificity, DOM ancestry, browser control
-appearance, stacking, clipping, dynamic states or compositing. A colour-only
+not calculate selector matching, general cascade precedence, DOM ancestry,
+browser control appearance, stacking, clipping, dynamic states or compositing. A colour-only
 rule's two default surfaces do not represent every actual ancestor. Font
 shorthands, inline styles and computed/inherited font sizes are outside the
 font-size declaration audit. UA-relative defaults such as `small`'s `smaller`
