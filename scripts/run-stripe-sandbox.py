@@ -28,6 +28,7 @@ EVENTS = ",".join((
     "checkout.session.async_payment_failed", "checkout.session.expired",
     "payment_intent.succeeded", "payment_intent.payment_failed",
     "payment_intent.processing",
+    "refund.updated", "refund.failed", "charge.refunded",
 ))
 API_VERSION = "2026-09-30.endive"
 MODE = "CONNECTED_DIRECT_TEST_FIXTURE"
@@ -46,7 +47,7 @@ def checked_environment(source):
     if any(not re.fullmatch(r"acct_[A-Za-z0-9]+", a) or a == PLATFORM_ACCOUNT for a in accounts) or len(set(accounts)) != 3:
         raise ValueError("invalid synthetic connected account mapping")
     amount = env.get("TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY", "")
-    if not re.fullmatch(r"[1-9][0-9]*", amount) or len(amount) > 19 or int(amount) > 2**63 - 1:
+    if not re.fullmatch(r"[1-9][0-9]*", amount) or len(amount) > 19 or int(amount) > 10000:
         raise ValueError("invalid test JPY ceiling")
     # The existing Go fixture parses and enforces disposable loopback DB scope.
     if not env.get("TEST_DATABASE_URL"):

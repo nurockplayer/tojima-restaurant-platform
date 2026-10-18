@@ -3,6 +3,7 @@ import importlib.util
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
+import re
 import unittest
 from unittest import mock
 import warnings
@@ -39,6 +40,7 @@ class EnvironmentTests(unittest.TestCase):
             ("TOJIMA_STRIPE_TEST_ACCOUNT_A", runner.PLATFORM_ACCOUNT),
             ("TOJIMA_STRIPE_TEST_ACCOUNT_B", "acct_syntheticA"),
             ("TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY", "0"),
+            ("TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY", "10001"),
             ("TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY", "9223372036854775808"),
             ("TEST_DATABASE_URL", ""),
         ):
@@ -102,6 +104,22 @@ class EnvironmentTests(unittest.TestCase):
             runtime_env = dict(base, **self.fixture(),
                                TOJIMA_STRIPE_TEST_WEBHOOK_SECRET="whsec_synthetic123")
             self.assertEqual(launch.popen.call_args_list[1].kwargs["env"], runtime_env)
+
+    def test_forwarded_events_match_service_and_provider_projections(self):
+        root = Path(__file__).resolve().parents[1]
+        event_pattern = r'"((?:checkout\.session|payment_intent|refund|charge)\.[a-z_]+)"'
+        handled = set(re.findall(event_pattern, (root / "internal/payments/work.go").read_text()))
+        projected = set(re.findall(event_pattern, (root / "internal/stripeprovider/webhook.go").read_text()))
+        events = runner.EVENTS.split(",")
+        self.assertEqual(set(events), handled | projected)
+        self.assertEqual(len(events), len(set(events)))
+        self.assertTrue({"refund.updated", "refund.failed", "charge.refunded"} <= set(events))
+        with self.mocked_run() as launch:
+            self.assertEqual(runner.run(launch.args), 0)
+            argv = launch.popen.call_args_list[0].args[0]
+            self.assertEqual(argv[argv.index("--events") + 1], runner.EVENTS)
+            self.assertEqual(argv[argv.index("--forward-connect-to") + 1],
+                             "http://127.0.0.1:8083/v1/payments/stripe/webhook")
 
     def test_bad_cli_version_never_receives_credentials_or_launches_children(self):
         with self.mocked_run() as launch:

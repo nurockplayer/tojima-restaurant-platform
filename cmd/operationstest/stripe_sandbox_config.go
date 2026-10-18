@@ -61,7 +61,7 @@ func loadStripeSandboxConfig(getenv func(string) string) (stripeSandboxConfig, e
 	amount := getenv("TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY")
 	var err error
 	c.maxAmountJPY, err = strconv.ParseInt(amount, 10, 64)
-	if err != nil || c.maxAmountJPY <= 0 || strconv.FormatInt(c.maxAmountJPY, 10) != amount {
+	if err != nil || c.maxAmountJPY <= 0 || c.maxAmountJPY > 10000 || strconv.FormatInt(c.maxAmountJPY, 10) != amount {
 		return stripeSandboxConfig{}, errStripeSandboxConfig
 	}
 	return c, nil

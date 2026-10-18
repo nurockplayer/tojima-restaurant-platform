@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"crypto/rand"
 	"crypto/sha256"
 	"errors"
 	"net/http"
@@ -11,11 +10,8 @@ import (
 	"time"
 
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/checkoutproof"
-	"github.com/nurockplayer/tojima-restaurant-platform/internal/operations"
-	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/payments"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/stripeprovider"
-	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/testguest"
 )
 
@@ -42,37 +38,7 @@ func configureStripeSandbox(ctx context.Context, f *testguest.Fixture, tenant st
 		Provider: sandboxProvider{provider}, Account: account,
 		ProfileFingerprint: sha256.Sum256([]byte(stripeprovider.APIVersion + "|stripe-sandbox-direct|" + cfg.successURL + "|" + cfg.cancelURL + "|" + strconv.FormatInt(cfg.maxAmountJPY, 10))),
 	}}
-	service, err := payments.New(f.Pool, f.Operations, resolver, payments.Config{
-		CreateRetryWindow: 20 * time.Hour, ContinuationTTL: 30 * time.Minute, WorkLeaseTTL: 30 * time.Second,
-	})
-	if err != nil {
-		return nil, nil, errStripeSandboxRuntime
-	}
-	_, err = service.SetMerchantConfig(ctx, operations.StoreScope{TenantID: f.TenantID, StoreID: f.StoreID}, 0, "sandbox-bootstrap", payments.MerchantConfigInput{
-		Enabled: true, Mode: account.Mode, StripeAccountID: account.StripeAccountID,
-		CredentialRef: ref, WebhookEndpointRef: "stripe-test-cli", APIVersion: stripeprovider.APIVersion,
-	})
-	if err != nil {
-		return nil, nil, errStripeSandboxRuntime
-	}
-	pepper, signingKey := make([]byte, 32), make([]byte, 32)
-	for _, dst := range [][]byte{pepper, signingKey} {
-		if _, err := rand.Read(dst); err != nil {
-			return nil, nil, errStripeSandboxRuntime
-		}
-	}
-	f.Sessions, err = tablesession.New(f.Pool, tablesession.Options{
-		SessionTTL: 4 * time.Hour, GrantTTL: time.Hour, GrantWindow: time.Minute, GrantWindowMax: 1000,
-		PINTTL: 15 * time.Minute, PINLockout: time.Minute, PINMaxAttempts: 3, PINLength: 6, PINPepper: pepper,
-	}, service)
-	if err != nil {
-		return nil, nil, errStripeSandboxRuntime
-	}
-	f.Orders, err = ordering.NewWithOrderPolicy(f.Pool, f.Sessions, f.Menus, service)
-	if err != nil {
-		return nil, nil, errStripeSandboxRuntime
-	}
-	proofs, err := checkoutproof.New(checkoutproof.Config{SigningKeys: [][]byte{signingKey}, TTL: 30 * time.Minute})
+	service, proofs, err := configurePaymentGraph(ctx, f, resolver, ref, "stripe-test-cli", "sandbox-bootstrap", account)
 	if err != nil {
 		return nil, nil, errStripeSandboxRuntime
 	}
