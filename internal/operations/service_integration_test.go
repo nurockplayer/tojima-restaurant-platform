@@ -2,9 +2,11 @@ package operations_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -52,6 +54,20 @@ func TestPostgresCashSnapshotSettlementConcurrencyAndCloseGate(t *testing.T) {
 	cards, err := f.Operations.ListKDS(ctx, operations.StoreScope{TenantID: scope.TenantID, StoreID: scope.StoreID})
 	if err != nil || len(cards) != 1 {
 		t.Fatalf("expected one released card: %+v %v", cards, err)
+	}
+	// Idempotent action results must survive JSON replay even after KDS release.
+	original := cards[0]
+	original.CreatedAt = original.CreatedAt.UTC()
+	wire, err := json.Marshal(original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var replayed operations.OrderState
+	if err = json.Unmarshal(wire, &replayed); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(original, replayed) {
+		t.Fatalf("released order changed during JSON replay: original=%+v replayed=%+v", original, replayed)
 	}
 	if _, err = f.Operations.SetCashSettings(ctx, operations.StoreScope{TenantID: scope.TenantID, StoreID: scope.StoreID}, "manager", true, operations.Prepaid, 1); err != nil {
 		t.Fatal(err)

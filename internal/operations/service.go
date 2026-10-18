@@ -320,9 +320,29 @@ func (s *Service) ListKDS(ctx context.Context, scope StoreScope) ([]OrderState, 
 	return readOrders(ctx, s.db, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID}, "", true)
 }
 
-func readOrders(ctx context.Context, q interface {
+type orderReader interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
-}, scope TableScope, sessionID string, releasedOnly bool) ([]OrderState, error) {
+}
+
+// orderRow keeps query-only display facts out of the shared, replayable DTO.
+type orderRow struct {
+	OrderState
+	kdsCardExists bool
+}
+
+func readOrders(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly bool) ([]OrderState, error) {
+	rows, err := readOrderRows(ctx, q, scope, sessionID, releasedOnly)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OrderState, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, row.OrderState)
+	}
+	return out, nil
+}
+
+func readOrderRows(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly bool) ([]orderRow, error) {
 	args := []any{scope.TenantID, scope.StoreID}
 	where := `o.tenant_id=$1 AND o.store_id=$2`
 	if scope.TableID != "" {
@@ -342,9 +362,9 @@ func readOrders(ctx context.Context, q interface {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []OrderState{}
+	out := []orderRow{}
 	for rows.Next() {
-		var v OrderState
+		var v orderRow
 		var cash string
 		var hold bool
 		var created time.Time
@@ -458,7 +478,7 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	} else if err != nil {
 		return GuestOperations{}, err
 	}
-	rows, err := readOrders(ctx, tx, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}, sessionID, false)
+	rows, err := readOrderRows(ctx, tx, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}, sessionID, false)
 	if err != nil {
 		return GuestOperations{}, err
 	}

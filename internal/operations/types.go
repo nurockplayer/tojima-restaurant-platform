@@ -80,7 +80,6 @@ const (
 )
 
 type OrderState struct {
-	kdsCardExists           bool
 	ID                      string            `json:"id"`
 	SessionID               string            `json:"session_id"`
 	TableID                 string            `json:"table_id"`
