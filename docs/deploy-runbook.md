@@ -169,7 +169,7 @@ not to an existing repository binary. Use a fresh local database for restore;
 ```sh
 set -eu # stop on any failed step; run these rehearsal blocks in the same shell
 # REHEARSAL: dedicated loopback database only. Never point this at business data.
-rehearsal_dir=$(mktemp -d /private/tmp/tojima-migration.XXXXXX)
+rehearsal_dir=$(mktemp -d "${TMPDIR:-/tmp}/tojima-migration.XXXXXX")
 cat > "$rehearsal_dir/main.go" <<'GO'
 package main
 import (
@@ -314,14 +314,16 @@ Down/Up；未驗收正式backup/restore或RPO/RTO，**8n維持部分GAP**。
 TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
   go run ./cmd/guesttest -web web/dist
 # http://127.0.0.1:8081/?table=test-table
+credentials_dir=$(mktemp -d "${TMPDIR:-/tmp}/tojima-credentials.XXXXXX")
 TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable' \
   go run ./cmd/operationstest -catalog-fixture -payments-fixture \
-    -credentials /private/tmp/tojima-p84c-staff.json -web-dist web/dist -port 8082
+    -credentials "$credentials_dir/tojima-p84c-staff.json" -web-dist web/dist -port 8082
 # /?table=test-table, /staff, /kitchen, /catalog on http://127.0.0.1:8082
 ```
 
-The credentials path must be new. Enter fixture credentials locally from the
-0600 file; do not print/upload them. These two commands create different random
+The credentials path must be new and outside the served web root; ensure the
+temporary directory is outside that root. Enter fixture credentials locally from
+the owner-only 0600 file; do not print/upload them. These two commands create different random
 schemas; clients in a shared journey must use the same runtime. `.invalid`
 Checkout handoff cannot accept payment and has no UI to fabricate success.
 Signed provider outcome/refund transitions are covered by Go acceptance tests;
@@ -330,10 +332,12 @@ repeat the applicable journeys with Owner-authorized test identities and data,
 including denied staff access, HTTPS proof/fragment handling, direct `/order`
 entry and proxy/collector log checks; do not reuse fixture identities.
 
-credential pathは未使用が必須。0600ファイルをローカルで利用し公開しない。
+credential pathは公開web root外の未使用パスが必須。一時ディレクトリも公開領域外であることを確認。
+所有者のみ読み書き可能な0600ファイルをローカルで利用し公開しない。
 2runtimeは別schemaなので同じjourneyは同runtimeを使用。架空Checkoutは決済不能、成功捏造UIなし。
 将来の本番構成ではOwner承認の試験identity/dataで同じ確認、拒否・HTTPS・直接link・配備ログも検証する。
 
-憑證路徑必須新建，0600檔僅於本地使用，不公開。兩個runtime各建不同schema，同一流程用同runtime。
+憑證路徑必須新建且位於公開web root之外；確認暫存目錄亦在公開範圍外。
+僅擁有者可讀寫的0600檔僅於本地使用，不公開。兩個runtime各建不同schema，同一流程用同runtime。
 合成Checkout不能付款也沒有偽造成功的UI。未來正式runtime需以Owner授權測試身分／資料重跑適用流程，
 包含拒絕存取、HTTPS憑證／fragment、`/order`直入及入口／收集端日誌；不可沿用fixture身分。
