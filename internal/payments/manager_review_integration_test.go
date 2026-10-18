@@ -175,6 +175,66 @@ func TestPostgresP82BExpiredSessionLatePaymentCanBeApproved(t *testing.T) {
 	}
 }
 
+// An HQ hold applies to the catalog saved on the order. Detached menus retain
+// product keys, but their independently owned products are outside that hold.
+func TestPostgresP82BReviewCompanyHoldUsesOrderCatalog(t *testing.T) {
+	for _, detached := range []bool{false, true} {
+		t.Run(fmt.Sprintf("detached-%v", detached), func(t *testing.T) {
+			h := newHoldFixture(t)
+			if detached {
+				scope := catalog.StoreScope{TenantID: h.TenantID, StoreID: h.StoreID}
+				menu, err := h.Menus.ReadStoreMenu(h.ctx, scope)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if _, err = h.Menus.DetachStore(h.ctx, scope, "fixture-manager", menu.Revision); err != nil {
+					t.Fatal(err)
+				}
+			}
+			order, _ := h.commit(h.Locator, "teishoku", ordering.Stripe)
+			h.work()
+			// A late payment creates review independently of the company hold.
+			if _, err := h.Pool.Exec(h.ctx, `UPDATE table_sessions SET status='CLOSED',closed_at=clock_timestamp(),version=version+1 WHERE session_id=$1`, order.Order.SessionID); err != nil {
+				t.Fatal(err)
+			}
+			x := h.checkout(order.Order.ID)
+			x, err := h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.event(x, "catalog-scoped-late-payment", "checkout.session.completed")
+			h.work()
+			h.assertState(order.Order.ID, StateReviewRequired, true, true)
+			h.hold(true, 0)
+
+			reviews, err := h.Operations.ListPaymentReviews(h.ctx, operations.StoreScope{TenantID: h.TenantID, StoreID: h.StoreID})
+			if err != nil || len(reviews) != 1 || reviews[0].ID != order.Order.ID {
+				t.Fatalf("review queue: reviews=%+v err=%v", reviews, err)
+			}
+			if got := slices.Contains(reviews[0].ReviewReasonCodes, "COMPANY_HOLD"); got != !detached {
+				t.Errorf("company hold reason=%v, want %v: %+v", got, !detached, reviews[0].ReviewReasonCodes)
+			}
+			request := managerApprovalRequest(h, order.Order.SessionID, order.Order.ID, reviewOrderVersion(t, h, order.Order.ID), "catalog-scoped-approval", "Late payment verified; kitchen can fulfill")
+			approved, err := h.Operations.ApproveFulfillment(h.ctx, request)
+			if !detached {
+				if !errors.Is(err, operations.ErrCompanyHoldActive) {
+					t.Fatalf("company catalog approval during hold: %v", err)
+				}
+				assertNoManagerApproval(t, h, order.Order.ID)
+				return
+			}
+			if err != nil {
+				t.Fatalf("detached catalog approval during HQ hold: %v", err)
+			}
+			if approved.ReviewDecision != "APPROVED" || approved.PaymentReviewRequired {
+				t.Fatalf("detached approval: %+v", approved)
+			}
+			h.assertState(order.Order.ID, StatePaid, true, false)
+			assertOneManagerApproval(t, h, order.Order.ID)
+		})
+	}
+}
+
 // PostgreSQL scans and JSON replays can represent the same instant with different
 // locations. Normalize the sole time field on copies; keep all other fields exact.
 func equalReviewOrderStates(a, b operations.OrderState) bool {

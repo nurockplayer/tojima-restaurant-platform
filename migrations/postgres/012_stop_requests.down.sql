@@ -1,5 +1,7 @@
 -- Refuse to discard human decisions and their audit history.
 DO $$ BEGIN IF EXISTS(SELECT 1 FROM cancellation_requests) THEN RAISE EXCEPTION 'cannot discard stop request history'; END IF; END $$;
+DROP TRIGGER table_sessions_pending_stop_requests ON table_sessions;
+DROP FUNCTION protect_table_session_pending_stop_requests();
 DROP TABLE cancellation_requests;
 DROP FUNCTION protect_cancellation_request();
 ALTER TABLE operation_order_events DROP CONSTRAINT operation_order_events_event_type_check;

@@ -230,3 +230,36 @@ func TestPostgresP82RefundCreateStatusNeverOverridesRetrieval(t *testing.T) {
 	h.work()
 	assertRefundProjection(t, h, o, "FAILED", "", false)
 }
+
+func TestPostgresP82GuestRefundPaymentStates(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(fmt.Sprintf("partial-%v", partial), func(t *testing.T) {
+			h, o, x := newRefundProjectionFixture(t, partial)
+			grant, err := h.Sessions.DirectJoin(h.ctx, h.Locator, "")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if grant.Session.ID != o.SessionID {
+				t.Fatal("guest joined a different session")
+			}
+			for _, status := range []string{"PROCESSING", "SUCCEEDED"} {
+				if status == "SUCCEEDED" {
+					if _, err := h.provider.SetRefundOutcome(x.ID, "succeeded"); err != nil {
+						t.Fatal(err)
+					}
+				}
+				runProjectionWork(t, h, leaseProjectionWork(t, h, x, false, status))
+				// Staff and persisted state must retain their refund semantics.
+				o = assertRefundProjection(t, h, o, status, "", partial)
+				guest, err := h.Operations.ReadGuestOperations(h.ctx, o.SessionID, grant.Token)
+				wantPayment := operations.Unknown
+				if partial {
+					wantPayment = operations.Paid
+				}
+				if err != nil || len(guest.Orders) != 1 || guest.Orders[0].ID != o.ID || guest.Orders[0].PaymentStatus != wantPayment || guest.Orders[0].FulfillmentStatus != o.FulfillmentStatus {
+					t.Fatalf("%s guest=%+v err=%v", status, guest, err)
+				}
+			}
+		})
+	}
+}
