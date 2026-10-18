@@ -24,6 +24,9 @@ func newGuestHandler(sessions *tablesession.Service, menus *catalog.Service, ord
 	m := NewMenuHandler(menus, nil, nil)
 	o := newOrderingHandler(orders, sessions, menus, paymentConfig)
 	mux := http.NewServeMux()
+	readAPI := OrderingAPI{Orders: orders}
+	mux.HandleFunc("GET /v1/guest/orders/{orderID}/status", readAPI.orderStatus)
+	mux.HandleFunc("POST /v1/guest/sessions/{sessionID}/orders/{orderID}/read-grant", readAPI.requestOrderRead)
 	mux.Handle("/v1/guest/tables/{locator}", s)
 	mux.Handle("/v1/guest/tables/{locator}/join", s)
 	mux.Handle("/v1/guest/tables/{locator}/menu", m)

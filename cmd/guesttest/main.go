@@ -40,7 +40,7 @@ func run() error {
 	defer f.Close(context.Background())
 	mux := http.NewServeMux()
 	mux.Handle("/v1/", httpapi.NewGuestHandler(f.Sessions, f.Menus, f.Orders, f.Operations))
-	mux.Handle("/", http.FileServer(http.Dir(*assets)))
+	mux.Handle("/", guestAssets(*assets))
 	server := &http.Server{Addr: "127.0.0.1:8081", ReadHeaderTimeout: 5 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
@@ -59,4 +59,17 @@ func run() error {
 		return nil
 	}
 	return err
+}
+
+// The fragment is client-only, but its /order entry path must serve the app
+// for a copied link opened directly in this isolated acceptance runtime.
+func guestAssets(root string) http.Handler {
+	mux := http.NewServeMux()
+	order := func(w http.ResponseWriter, r *http.Request) {
+		http.ServeFile(w, r, filepath.Join(root, "index.html"))
+	}
+	mux.HandleFunc("GET /order", order)
+	mux.HandleFunc("GET /order/{$}", order)
+	mux.Handle("/", http.FileServer(http.Dir(root)))
+	return mux
 }

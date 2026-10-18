@@ -1,0 +1,6 @@
+.panel { margin: 1.5rem auto; padding: 1.25rem; max-width: 44rem; border: 1px solid var(--border, #ddd); border-radius: 1rem; background: var(--surface, #fff); overflow-wrap: anywhere; }
+.panel button, .panel a { min-height: 44px; display: inline-flex; align-items: center; padding: .6rem; }
+.panel dl { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
+.panel dd { margin: 0; }
+.panel ul { padding-left: 1.25rem; }
+.panel input { width: 100%; }

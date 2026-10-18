@@ -9,6 +9,9 @@ import { createReplayOperation, guestCartReducer, initialGuestCartState } from '
 import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
+import { MyOrders, RequestOrderLink } from './OrderRead';
+import { rememberOrderGrant } from './my-orders';
+
 type Locale = 'ja' | 'zh';
 const MENU_REFRESH_TTL_MS = 15_000;
 const copy = {
@@ -542,6 +545,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     try {
       const result = await pending.run();
       if ('outcome' in result) {
+        if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
         adoptCart(result.cart);
         setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
         clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
@@ -625,6 +629,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     }
     try {
       const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, payment, key);
+      if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
       adoptCart(result.cart); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
       selectCheckoutOrder(payment === 'STRIPE' ? result.order.order_id : '');
       clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
@@ -767,6 +772,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
       {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
+          <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
           {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
           {order.payment_method === 'STRIPE' && <div className="checkout-status-panel">
@@ -790,5 +796,5 @@ export function App({ demo = false }: DemoSurfaceProps) {
 }
 
 function Shell({ children, demo = false, locale, setLocale, t }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
-  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}</main>;
+  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /></main>;
 }

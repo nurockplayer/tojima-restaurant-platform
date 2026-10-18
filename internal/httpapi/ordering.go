@@ -154,6 +154,7 @@ func (a OrderingAPI) preview(w http.ResponseWriter, r *http.Request) {
 	a.respond(w, r, map[string]any{"session_id": p.SessionID, "generation": p.Generation, "version": p.Version, "fingerprint": p.Fingerprint, "quote": safeQuote(p.Quote)}, err)
 }
 func (a OrderingAPI) commit(w http.ResponseWriter, r *http.Request) {
+	orderReadHeaders(w)
 	var body commitCartRequest
 	if !decodeCart(w, r, &body) {
 		return
@@ -182,7 +183,7 @@ func (a OrderingAPI) commit(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "payment_unavailable")
 		return
 	}
-	a.respond(w, r, map[string]any{"outcome": c.Outcome, "order": safeOrder(c.Order), "cart": c.Cart}, err)
+	a.respond(w, r, map[string]any{"outcome": c.Outcome, "order": safeOrder(c.Order), "cart": c.Cart, "order_read_grant": c.OrderReadGrant}, err)
 }
 func (a OrderingAPI) orders(w http.ResponseWriter, r *http.Request) {
 	orders, err := a.Orders.ListOrders(r.Context(), r.PathValue("sessionID"), joinToken(r))

@@ -1,0 +1,174 @@
+# P-83 lane A — individual order read / 個別注文閲覧 / 個別訂單查閱
+
+Lane A implements MOD-05 S8 ORDER_READ on main `46b2391`. Lane B owns
+REVIEW_REQUIRED wording and refund display. Payment/operations transitions and
+original-browser CHECKOUT_RESUME are reused without modification.
+
+## Capability and API contract
+
+- TABLE_JOIN edits/submits the currently OPEN session's shared cart. Existing
+  shared committed-order/menu/operations summaries remain the accepted P-78/P-79
+  contract; they contain no ORDER_READ token. They do not authorize this new
+  individual status endpoint or survive seating change.
+- A new successful commit atomically inserts a 256-bit cryptographically random
+  ORDER_READ grant and returns it only in that commit response. The database
+  stores SHA-256 of its base64url bearer, full server-owned order scope, creation,
+  expiry and optional revocation time. No raw token is persisted or logged.
+- A losing commit or replay returns no read grant. A current TABLE_JOIN holder
+  can explicitly request a fresh, independent grant with
+  `POST /v1/guest/sessions/{sessionID}/orders/{orderID}/read-grant`. This is the
+  chosen sharing design: no automatic fanout to all joined guests. A submitter
+  whose commit response was lost uses this same explicit recovery request while
+  the session remains OPEN. Session/grant locks and a final trusted-time check
+  serialize this issuance with close, expiry and join revocation. No catalog
+  availability or provider call is needed to request a read link.
+- `GET /v1/guest/orders/{orderID}/status` requires the specific ORDER_READ bearer
+  in `Authorization`. Neither an order ID nor TABLE_JOIN nor another order's
+  read bearer authorizes it. Query parameters are rejected. Invalid, absent,
+  expired, revoked and wrong-order credentials all return the same HTTP 403
+  body, without disclosing whether the order exists. Tenant/store are resolved
+  through the grant's full composite foreign key and canonical order/state
+  joins, with enabled tenant/store checks, never client scope fields.
+- The allowlisted response has exactly `version`, `payment_status`,
+  `fulfillment_status`, `total_gross_jpy` (decimal string), `currency: JPY`, and
+  server-computed `is_terminal`. Amount comes from the immutable committed
+  snapshot. Version and both states come from `operation_order_state`, read in
+  the same SQL statement as authorization. No provider/session/payment IDs,
+  internal holds/reasons, audit, Checkout URL or other order is returned.
+- Conservative lane A terminal policy: PAID + SERVED with neither operational
+  hold nor payment review. All other combinations remain nonterminal; refunds
+  and review-specific guest wording are lane B. The client never infers a
+  terminal state from payment/fulfillment text.
+- Status and grant responses (including errors), and commit responses, use
+  `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
+  No new logging is added; request instrumentation must not log Authorization
+  headers or capability response bodies.
+- ORDER_READ is independent of TABLE_JOIN: existing read links survive close
+  until their own expiry/revocation. A later party obtains a new session through
+  the same physical QR and cannot request grants for the previous seating.
+  Deliberately shared links and previously saved links remain bearer authority;
+  an already authorized browser is not converted into an unauthorized browser
+  by close. A lost/expired link cannot be reconstructed from the physical QR.
+- ORDER_READ cannot edit/commit carts, issue another grant, establish Checkout
+  context or replace the independent original submitter cookie proof. No
+  CHECKOUT_RESUME code or payment/operations transitions are changed.
+
+## TTL configuration — EXT-4 remains open
+
+`ordering.DefaultOrderReadTTL` is a **provisional engineering default of 24
+hours**, not Owner-approved guest-history policy. The constructor
+`ordering.NewWithOrderReadTTL` accepts 1 minute through 7 days inclusive and
+rejects values outside that range; existing constructors use the provisional
+default. Composition configures it once, never from guest input. Expiry uses
+trusted database time. `RevokeOrderRead` is an internal token-specific lifecycle
+method with no guest write endpoint. Neither expiry nor revocation changes
+immutable orders, payment, fulfillment or other grants.
+
+**Owner has NOT approved exact days. The default and commercial TTL policy
+await Owner approval (EXT-4). This feature promises no indefinite history.**
+
+## Guest web contract
+
+`/order#order=…&grant=…&expires=…` is a directly addressable, lazily loaded read
+screen. The isolated `guesttest` runtime also serves `/order` directly, tested
+by `TestCopiedOrderLinkDirectEntry`; the operations runtime already has SPA
+fallback. The fragment is not sent in the HTTP request or referrer; JS derives the
+bearer and calls the shared `web/src/shared/http.ts` transport. Copy uses the
+clipboard API and exposes a selectable link when clipboard access fails. The
+screen explains that possessing the time-limited link grants viewing access.
+
+ADR-0006 explicitly makes a new P-83 read/poll screen the first TanStack Query
+consumer. This change pins `@tanstack/react-query` and uses a dedicated QueryClient
+per capability, keyed by order + grant, cleared/cancelled on unmount or grant
+change. Retry, focus/reconnect behavior, cache lifetime and polling are explicit.
+The Query-provided AbortController signal reaches fetch; hide cancels pending
+requests. Even a transport settling after cancellation cannot overwrite a
+resumed view or overlap another request. A visible unresolved view polls every
+30 seconds by default, configurable/clamped to 15–30 seconds; hidden/unmounted
+views have no polling. Returning to visible refreshes immediately, including a
+previously terminal result. Server terminal state stops periodic polling.
+Failed reads retain the last confirmed values and show a stale notice, with no
+invented payment or fulfillment result. This polling is independent of the
+existing 2.5-second shared-cart loop and existing Checkout continuation UI.
+
+The Japanese `マイ注文` / Traditional Chinese `我的訂單` list stores up to 100
+unexpired per-order links in this browser's localStorage. Reads/writes use
+try/catch, including a memory fallback for quota errors when reads still work.
+Malformed and expired entries are omitted. This is a convenience list of bearer
+links, not a user account or guaranteed/durable order history. New commit grants
+are saved automatically; joined guests explicitly save individual order links.
+Both new surface dictionaries have identical key sets checked by TypeScript.
+No router library is needed for this standalone direct-entry surface, with no
+nested navigation/history/URL-state requirements. Styling uses CSS Modules.
+
+## Coverage and verification
+
+`TestPostgresOrderReadGrantBoundary` uses the real isolated-schema PostgreSQL
+fixture and complete payments HTTP runtime. It checks three guests; explicit
+joined-guest issuance; no grants in commit replays; wrong tenant/store/order and
+nonexistent-order uniform denial; exact JPY above 2^53; random distinct grants;
+hash-only database storage; expired/revoked tokens; response allowlist/headers;
+ORDER_READ denial for submit/grant issuance/Checkout context/resume; real cash,
+acceptance and kitchen transitions; terminal/version changes; real close and
+next-party physical-QR isolation; and rejected out-of-bounds TTL configuration.
+The migration test covers 009 up/down/reapply. The runner's explicit version
+list supports gaps, so 008 remains reserved for P-82; integration must insert
+008 before 009 in the list, with renumbering only if the director chooses it.
+
+New Vitest + Testing Library tests cover initial hidden state, 30-second polling,
+immediate resume, a 35-second slow request without overlap, abort on hide and
+unmount, a late response after abort, failure/stale/recovery, server terminal
+behavior, capability changes, fragment/header transport, clipboard, interval
+clamping, persistence, corrupt/expired data and throwing storage. Tests use
+user-event for the copy control. They are added for the director to execute:
+**Vitest is not run by the implementing sandbox**, per lane instructions.
+
+Required handoff checks: `make fmt-check vet build`, real PostgreSQL
+`go test -race -count=1 ./...`, frontend oxlint/tsc/build. The director runs
+`pnpm --dir web check` and sends the exact result for separate independent
+review. Browser/device acceptance, production configuration/hosting, and
+Owner TTL approval remain outside this implementation evidence.
+
+## 日本語
+
+P-83 A は注文ごとの匿名・期限付き ORDER_READ を追加する。新規確定の応答で
+本人に発行し、同じ OPEN 卓の参加者は注文単位で明示的に取得する。DB は hash
+のみ保存し、失効・期限・tenant/store/order の実データ所属を検証する。閉卓後も
+既発行リンクは自身の期限まで有効だが、同じ物理 QR の次の客は前卓の閲覧権限を
+取得できない。支払継続は既存の本人 cookie proof のみであり、読取権限では不可。
+画面は可視時のみ30秒（設定15〜30秒）で取得し、非表示・終了時は中止、再表示時は
+即時確認、失敗時は古い情報の注意を表示する。マイ注文とコピーリンクを提供する。
+PostgreSQL 実試験とフロント試験を追加した。Vitest と独立レビューは director が
+実施する。**24時間は暫定実装値で、具体的日数は Owner 未承認（EXT-4）。無期限の
+履歴を約束しない。** 返金・要確認文言は lane B に残す。
+
+## 繁體中文
+
+P-83 A 加入單筆訂單匿名、限時、唯讀的 ORDER_READ。新送單成功時發給送單者，
+同一 OPEN 桌次的參與者須逐筆明確申請。DB 只存 hash，驗證到期、撤銷與服務端
+tenant/store/order 所屬。關桌後原連結依自身期限有效，但下一組透過相同實體 QR
+加入的客人無法取得前桌權限。續付沿用原送單瀏覽器的 cookie proof，唯讀連結不能
+代替。新畫面只在可見時每30秒（設定限制15〜30秒）輪詢，隱藏或卸載即中止，重新
+可見立即更新，失敗保留已確認值並顯示過期提示。提供我的訂單與複製連結、儲存失敗
+的記憶體備援。已新增真實 PostgreSQL 與前端測試；Vitest 與獨立審查由 director
+執行。**24小時只是暫定工程預設，具體天數仍待 Owner 核准（EXT-4），不承諾永久
+歷史。** 退款顯示與 REVIEW_REQUIRED 文案仍屬 lane B。
+
+## Implementer execution receipt
+
+- `make fmt-check vet build`: PASS, with writable temporary Go build/module
+  caches (the default user caches are read-only in this sandbox).
+- `TEST_DATABASE_URL=… go test -race -count=1 ./...`: PASS against the supplied
+  disposable loopback PostgreSQL. After the direct-link route and expanded
+  migration/TTL assertions, the affected `./cmd/guesttest`,
+  `./migrations/postgres`, and `./internal/httpapi` packages were rerun with
+  `-race -count=1`: PASS.
+- `python3 scripts/migration-smoke.py`: PASS (isolated legacy SQLite smoke).
+- `pnpm --dir web install --frozen-lockfile`, `pnpm --dir web lint`,
+  `pnpm --dir web exec tsc -b --pretty false`, and `pnpm --dir web build`: PASS;
+  final frontend lint/type/build checks used the repository's Node 24.15.0 and
+  pnpm 12.11.2. The new TanStack Query dependency is pinned to 5.104.3.
+- Vitest / `pnpm --dir web check`: NOT RUN by the implementing sandbox as
+  instructed; director execution remains required. No Ego-lite browser/device
+  validation or separate independent review was performed by this lane.
+- No push, PR, deployment or external-state mutation is part of this handoff.

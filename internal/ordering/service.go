@@ -34,6 +34,7 @@ type Service struct {
 	sessions     grantAccess
 	menus        menuAccess
 	commitPolicy OrderCommitPolicy
+	orderReadTTL time.Duration
 	now          func(context.Context, pgx.Tx) (time.Time, error)
 	newID        func() (string, error)
 }
@@ -42,7 +43,7 @@ func New(db *pgxpool.Pool, sessions *tablesession.Service, menus *catalog.Servic
 	if db == nil || sessions == nil || menus == nil {
 		return nil, ErrInvalid
 	}
-	return &Service{db: db, sessions: sessions, menus: menus, now: databaseClock, newID: randomID}, nil
+	return &Service{db: db, sessions: sessions, menus: menus, now: databaseClock, newID: randomID, orderReadTTL: DefaultOrderReadTTL}, nil
 }
 
 // NewWithOrderPolicy wires P-79 payment and fulfillment state into each order
@@ -353,6 +354,10 @@ func (s *Service) Commit(ctx context.Context, input CommitRequest) (CommitResult
 		return CommitResult{}, err
 	}
 	result, err := resultForOrder(ctx, tx, orderID, Committed)
+	if err != nil {
+		return CommitResult{}, err
+	}
+	result.OrderReadGrant, err = s.issueOrderReadTx(ctx, tx, session, orderID)
 	if err != nil {
 		return CommitResult{}, err
 	}
