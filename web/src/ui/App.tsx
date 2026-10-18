@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { guestDisplayKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
 import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
 import { operationsClient } from '../api/operations';
@@ -100,6 +101,9 @@ export function isCurrentMenuRead(
 }
 
 function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
+  const display = guestDisplayKind(order);
+  if (display === 'review') return paidUnderReview[locale];
+  if (display === 'unknown') return locale === 'ja' ? '店舗に確認してください' : '請洽服務人員確認';
   const fulfillment: Record<GuestOrderStatus['fulfillment_status'], string> = locale === 'ja'
     ? { WAITING: '調理開始待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
     : { WAITING: '等待開始製作', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
@@ -775,7 +779,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
           {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
-          {order.payment_method === 'STRIPE' && <div className="checkout-status-panel">
+          {order.payment_method === 'STRIPE' && (!operations || guestDisplayKind(operations) === 'standard') && <div className="checkout-status-panel">
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>
               {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status">{checkoutStateLabel(checkoutStatus.state, locale)}</p>}

@@ -121,7 +121,7 @@ func TestPostgresOrderReadGrantBoundary(t *testing.T) {
 	if read.Header().Get("Cache-Control") != "private, no-store" || read.Header().Get("Referrer-Policy") != "no-referrer" {
 		t.Fatal("unsafe status response headers")
 	}
-	if len(state) != 6 || state["version"] != float64(1) || state["payment_status"] != "UNPAID" || state["fulfillment_status"] != "WAITING" || state["is_terminal"] != false || state["total_gross_jpy"] != "9007199254740993" || state["currency"] != "JPY" {
+	if len(state) != 7 || state["display_state"] != "STANDARD" || state["version"] != float64(1) || state["payment_status"] != "UNPAID" || state["fulfillment_status"] != "WAITING" || state["is_terminal"] != false || state["total_gross_jpy"] != "9007199254740993" || state["currency"] != "JPY" {
 		t.Fatal("status projection differs from the actual state/snapshot")
 	}
 	// Current joined guests opt into an individual grant. Tokens are independent.

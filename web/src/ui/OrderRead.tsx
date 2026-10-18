@@ -4,6 +4,7 @@ import { amountJPY } from '../api/client';
 import { grantFromFragment, orderReadClient, orderReadLink, type OrderReadGrant, type OrderReadStatus } from '../api/order-read';
 import { loadMyOrders, myOrdersChanged, rememberOrderGrant } from './my-orders';
 import styles from './OrderRead.module.css';
+import { guestDisplayKind, paidUnderReview } from './guest-display';
 
 type Locale = 'ja' | 'zh';
 const ja = {
@@ -74,15 +75,21 @@ function Status({ grant, locale, pollMs }: { grant: OrderReadGrant; locale: Loca
     setShared(true); setCopied(false);
     try { await navigator.clipboard.writeText(orderReadLink(grant)); setCopied(true); } catch { /* Show selectable link below. */ }
   };
+  const display = query.data ? guestDisplayKind(query.data) : 'unknown';
   return <section className={styles.panel} aria-label={t.title}>
     <h1>{t.title}</h1><p>{grant.order_id}</p>
     {query.isError && <p role="status">{query.data ? t.stale : t.unavailable}</p>}
     {!query.data && !query.isError && <p role="status">{t.loading}</p>}
-    {query.data && <dl>
-      <dt>{t.payment}</dt><dd>{paymentLabels[locale][query.data.payment_status] ?? t.unknown}</dd>
-      <dt>{t.kitchen}</dt><dd>{kitchenLabels[locale][query.data.fulfillment_status] ?? t.unknown}</dd>
-      <dt>{t.total}</dt><dd>{amountJPY(query.data.total_gross_jpy)}</dd>
-    </dl>}
+    {query.data && <>
+      {display !== 'standard' && <p role="status">{display === 'review' ? paidUnderReview[locale] : t.unknown}</p>}
+      <dl>
+        {display === 'standard' && <>
+          <dt>{t.payment}</dt><dd>{paymentLabels[locale][query.data.payment_status] ?? t.unknown}</dd>
+          <dt>{t.kitchen}</dt><dd>{kitchenLabels[locale][query.data.fulfillment_status] ?? t.unknown}</dd>
+        </>}
+        <dt>{t.total}</dt><dd>{amountJPY(query.data.total_gross_jpy)}</dd>
+      </dl>
+    </>}
     <p>{t.expires}: {new Date(grant.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW', { timeZone: 'Asia/Tokyo', timeZoneName: 'short' })}</p>
     <p>{t.privacy}</p><button type="button" onClick={() => void share()}>{copied ? t.copied : t.copy}</button>
     {shared && <label>{t.link}<input readOnly value={orderReadLink(grant)} onFocus={(e) => e.currentTarget.select()} /></label>}

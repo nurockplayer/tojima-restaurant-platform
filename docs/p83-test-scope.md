@@ -1,8 +1,9 @@
 # P-83 lane A — individual order read / 個別注文閲覧 / 個別訂單查閱
 
-Lane A implements MOD-05 S8 ORDER_READ on main `46b2391`. Lane B owns
-REVIEW_REQUIRED wording and refund display. Payment/operations transitions and
-original-browser CHECKOUT_RESUME are reused without modification.
+Lane A implements MOD-05 S8 ORDER_READ on main `46b2391`. Lane B part 1 owns
+paid-under-review wording. Refund display belongs to lane C / P-82 C.
+Payment/operations transitions and original-browser CHECKOUT_RESUME are reused
+without modification.
 
 ## Capability and API contract
 
@@ -36,15 +37,15 @@ original-browser CHECKOUT_RESUME are reused without modification.
   through the grant's full composite foreign key and canonical order/state
   joins, with enabled tenant/store checks, never client scope fields.
 - The allowlisted response has exactly `version`, `payment_status`,
-  `fulfillment_status`, `total_gross_jpy` (decimal string), `currency: JPY`, and
-  server-computed `is_terminal`. Amount comes from the immutable committed
+  `fulfillment_status`, `display_state`, `total_gross_jpy` (decimal string),
+  `currency: JPY`, and server-computed `is_terminal`. Amount comes from the immutable committed
   snapshot. Version and both states come from `operation_order_state`, read in
   the same SQL statement as authorization. No provider/session/payment IDs,
   internal holds/reasons, audit, Checkout URL or other order is returned.
 - Conservative lane A terminal policy: PAID + SERVED with neither operational
   hold nor payment review. All other combinations remain nonterminal; refunds
-  and review-specific guest wording are lane B. The client never infers a
-  terminal state from payment/fulfillment text.
+  remain separate; lane B part 1 adds review-specific guest wording below. The
+  client never infers a terminal state from payment/fulfillment text.
 - Status and grant responses (including errors), and commit responses, use
   `Cache-Control: private, no-store` and `Referrer-Policy: no-referrer`.
   No new logging is added; request instrumentation must not log Authorization
@@ -155,7 +156,7 @@ P-83 A は注文ごとの匿名・期限付き ORDER_READ を追加する。新�
 即時確認、失敗時は古い情報の注意を表示する。マイ注文とコピーリンクを提供する。
 PostgreSQL 実試験とフロント試験を追加した。Vitest と独立レビューは director が
 実施する。**24時間は暫定実装値で、具体的日数は Owner 未承認（EXT-4）。無期限の
-履歴を約束しない。** 返金・要確認文言は lane B に残す。
+履歴を約束しない。** 要確認文言は下記 P-83 B で追加し、返金表示は lane C / P-82 C に残す。
 
 ## 繁體中文
 
@@ -167,7 +168,7 @@ tenant/store/order 所屬。關桌後原連結依自身期限有效，但下一�
 可見立即更新，失敗保留已確認值並顯示過期提示。提供我的訂單與複製連結、儲存失敗
 的記憶體備援。已新增真實 PostgreSQL 與前端測試；Vitest 與獨立審查由 director
 執行。**24小時只是暫定工程預設，具體天數仍待 Owner 核准（EXT-4），不承諾永久
-歷史。** 退款顯示與 REVIEW_REQUIRED 文案仍屬 lane B。
+歷史。** 付款待店家確認文案由下述 P-83 B 加入，退款顯示仍屬 lane C / P-82 C。
 
 每組 (session, order) 最多可持有5筆未到期且未撤銷的權限，包含新送單時發出的
 1筆。檢查與新增都在既有桌次鎖內執行；超額回傳 HTTP 429
@@ -192,3 +193,80 @@ PostgreSQL 測試涵蓋重複及並行申請，確認不超過上限。
   instructed; director execution remains required. No Ego-lite browser/device
   validation or separate independent review was performed by this lane.
 - No push, PR, deployment or external-state mutation is part of this handoff.
+
+
+## P-83 B (review display)
+
+### English
+
+Part 1 adds the server-derived `display_state` to the existing ORDER_READ status
+allowlist and the in-session guest operations summary. `PAID_UNDER_REVIEW` means
+payment is PAID, `payment_review_required` is true and no durable KDS card exists.
+It renders exactly **お支払いを確認しました。店舗でご注文を確認中です** / **已確認付款，店家正在確認您的訂單**
+in both guest surfaces, without kitchen/preparing or refund text. The status DTO
+remains nonterminal, so visible ORDER_READ polling continues; the existing
+in-session history polling also continues. The Checkout continuation panel is
+suppressed while the summary shows review or an unsupported display state.
+
+`STANDARD` uses the existing payment/kitchen labels only for explicitly supported
+payment and fulfillment values. `UNKNOWN`, unsupported/missing display states,
+refund states and unrecognized raw states use a neutral staff-confirmation
+message. They cannot fall through to a paid/served success label. The server
+projection uses existing columns and KDS-card presence; review flags, hold
+reasons, provider identifiers and other internal fields are never added to the
+guest allowlists. Payment and operations state transitions are unchanged.
+After the separately owned P-82 B manager release, the next read uses the
+existing kitchen state normally. That manager flow is unavailable in this lane;
+its integration acceptance remains with P-82 B. Refund display remains lane C /
+P-82 C.
+
+PostgreSQL coverage reuses the fake payment provider and a signed paid webhook
+after an operational hold. It verifies actual PAID/review/no-card state,
+`PAID_UNDER_REVIEW`, `is_terminal=false`, both guest DTO allowlists, and a real
+paid/released control order. Projection tests cover card/review combinations,
+refunds and future values. Vitest covers both exact translations, neutral
+fallbacks, continued polling and the next kitchen display after release.
+
+### 日本語
+
+P-83 B part 1 は ORDER_READ と同一卓内の注文履歴に、サーバー導出の
+`display_state` を追加する。PAID・支払確認要・KDS カード未作成の場合は
+`PAID_UNDER_REVIEW` とし、**お支払いを確認しました。店舗でご注文を確認中です**
+をそのまま表示する。調理中・返金とは表示しない。`is_terminal=false` のため
+可視時の取得を続け、既存の注文履歴も定期更新を続ける。要確認・未対応状態では
+支払継続パネルを表示しない。未知の表示状態・支払状態・調理状態、未対応の返金は
+成功表示へ落とさず「店舗に確認してください」と表示する。
+内部理由・保留理由・Stripe ID は公開せず、支払・業務の状態遷移は変更しない。
+別担当の P-82 B による KDS 解放後は次回取得で通常の厨房状態を表示する。
+その管理者フローは本 lane では未提供のため統合受入は別途必要。
+返金表示は lane C / P-82 C の範囲とする。
+実 PostgreSQL の署名付き支払 webhook、保留あり／なしの DTO・非終端・漏洩防止、
+Vitest の日中両文言・未知状態・定期取得継続・解放後表示を検証する。
+
+### 繁體中文
+
+P-83 B part 1 為 ORDER_READ 與同桌訂單歷史加入服務端推導的 `display_state`。
+付款為 PAID、需要付款確認且尚無 KDS 卡時回傳 `PAID_UNDER_REVIEW`，兩處皆完整
+顯示 **已確認付款，店家正在確認您的訂單**，不顯示製作中或退款。
+`is_terminal=false` 讓可見頁面持續輪詢，既有同桌歷史也繼續定期更新。
+待確認或未支援狀態不顯示續付面板。未知或缺漏的顯示狀態、未知付款／製作狀態及
+尚未支援的退款皆顯示「請洽服務人員確認」，不降級成已付款／已送達的成功文案。
+不公開內部原因、保留原因或 Stripe ID，不變更付款與營運狀態轉移。
+另由 P-82 B 負責的管理員釋放 KDS 後，下次讀取恢復普通廚房狀態；本 lane 尚無
+該管理員流程，須另做整合驗收。退款顯示屬 lane C / P-82 C。
+真實 PostgreSQL 測試使用假付款供應者與簽章付款 webhook，涵蓋營運保留、正常釋放、
+DTO 白名單與非終止狀態；Vitest 涵蓋日中完整文案、中立回退、輪詢持續及釋放後顯示。
+
+### Lane B part 1 execution receipt
+
+- Base: accepted lane A `c402789`, local branch `codex/p83-b-review-display`.
+- `TEST_DATABASE_URL=postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disable
+  go test -race -count=1 ./internal/... ./migrations/postgres`: PASS, all packages,
+  with temporary writable Go build/module caches.
+- `make fmt-check vet build`: PASS.
+- `pnpm --dir web install --frozen-lockfile`, `pnpm --dir web lint`,
+  `pnpm --dir web exec tsc -b --pretty false`: PASS, Node 24.15.0 / pnpm 12.11.2.
+- `pnpm --dir web exec vitest run src/ui/OrderRead.test.tsx src/ui/App.test.tsx`:
+  PASS, 59 tests. `pnpm --dir web test`: PASS, 144 tests across 10 files.
+- No P-82 B manager-release integration, Ego-lite browser/device acceptance or
+  separate Oracle review is claimed. No push, PR or deployment.

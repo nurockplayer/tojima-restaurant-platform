@@ -49,6 +49,7 @@ type OrderReadStatus struct {
 	Version           int64  `json:"version"`
 	PaymentStatus     string `json:"payment_status"`
 	FulfillmentStatus string `json:"fulfillment_status"`
+	DisplayState      string `json:"display_state"`
 	TotalGrossJPY     int64  `json:"total_gross_jpy"`
 	Currency          string `json:"currency"`
 	IsTerminal        bool   `json:"is_terminal"`
@@ -135,17 +136,20 @@ func (s *Service) ReadOrderStatus(ctx context.Context, orderID, token string) (O
 	}
 	hash := sha256.Sum256([]byte(token))
 	var out OrderReadStatus
+	var review, kdsCardExists bool
 	err := s.db.QueryRow(ctx, `SELECT st.version,st.payment_status,st.fulfillment_status,o.total_gross_jpy,'JPY',
-  st.payment_status='PAID' AND st.fulfillment_status='SERVED' AND NOT st.operational_hold AND NOT st.payment_review_required
+  st.payment_status='PAID' AND st.fulfillment_status='SERVED' AND NOT st.operational_hold AND NOT st.payment_review_required,
+  st.payment_review_required,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
   FROM order_read_grants g
   JOIN table_orders o USING(order_id,session_id,tenant_id,store_id,table_id)
   JOIN operation_order_state st USING(order_id,session_id,tenant_id,store_id,table_id)
   JOIN stores so USING(tenant_id,store_id) JOIN tenants t USING(tenant_id)
   WHERE g.token_hash=$1 AND g.order_id=$2 AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp()
-  AND so.enabled AND t.enabled`, hash[:], orderID).Scan(&out.Version, &out.PaymentStatus, &out.FulfillmentStatus, &out.TotalGrossJPY, &out.Currency, &out.IsTerminal)
+  AND so.enabled AND t.enabled`, hash[:], orderID).Scan(&out.Version, &out.PaymentStatus, &out.FulfillmentStatus, &out.TotalGrossJPY, &out.Currency, &out.IsTerminal, &review, &kdsCardExists)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return OrderReadStatus{}, ErrDenied
 	}
+	out.DisplayState = GuestDisplayState(out.PaymentStatus, out.FulfillmentStatus, review, kdsCardExists)
 	return out, err
 }
 

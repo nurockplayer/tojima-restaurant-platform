@@ -7,7 +7,7 @@ import { MyOrders, OrderPage, OrderStatusView, orderPollInterval } from './Order
 import { loadMyOrders, rememberOrderGrant } from './my-orders';
 
 const grant: OrderReadGrant = { order_id: 'a'.repeat(32), order_read_token: 'A'.repeat(43), expires_at: '2099-10-19T00:00:00Z' };
-const state = { version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '9007199254740993', currency: 'JPY', is_terminal: false };
+const state = { display_state: 'STANDARD', version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '9007199254740993', currency: 'JPY', is_terminal: false };
 function json(value: unknown, status = 200) { return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } }); }
 async function flush(ms = 1) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 async function visibility(value: 'visible' | 'hidden') {
@@ -26,6 +26,37 @@ beforeEach(() => {
 afterEach(() => { cleanup(); window.history.replaceState({}, '', '/'); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('read-only order status', () => {
+  it.each([
+    ['ja', 'お支払いを確認しました。店舗でご注文を確認中です'],
+    ['zh', '已確認付款，店家正在確認您的訂單'],
+  ] as const)('shows the exact paid review message in %s, keeps polling, and shows kitchen state after release', async (locale, message) => {
+    let released = false;
+    const fetcher = vi.fn(async () => json({ ...state, payment_status: 'PAID', display_state: released ? 'STANDARD' : 'PAID_UNDER_REVIEW', fulfillment_status: released ? 'PREPARING' : 'WAITING', is_terminal: false }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    expect(screen.getByRole('status').textContent).toBe(message);
+    expect(screen.queryByText(/調理中|製作中|返金|退款/)).toBeNull();
+    await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('status').textContent).toBe(message);
+    released = true;
+    await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(message)).toBeNull();
+    expect(screen.getByText(locale === 'ja' ? '調理中' : '製作中')).toBeTruthy();
+  });
+
+  it.each([
+    { display_state: 'FUTURE_SUCCESS', payment_status: 'PAID', fulfillment_status: 'SERVED' },
+    { display_state: 'UNKNOWN', payment_status: 'REFUNDED', fulfillment_status: 'SERVED' },
+    { display_state: 'STANDARD', payment_status: 'FUTURE_PAYMENT', fulfillment_status: 'SERVED' },
+    { display_state: 'STANDARD', payment_status: 'PAID', fulfillment_status: 'FUTURE_KITCHEN' },
+    { display_state: undefined, payment_status: 'PAID', fulfillment_status: 'SERVED' },
+  ])('uses a neutral fallback for unsupported state $display_state / $payment_status / $fulfillment_status', async (unsupported) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...state, ...unsupported })));
+    render(<OrderStatusView grant={grant} locale="ja" />); await flush();
+    expect(screen.getByRole('status').textContent).toBe('店舗に確認してください');
+    expect(screen.queryByText(/支払済み|提供済み|返金/)).toBeNull();
+  });
+
   it('starts hidden without a request, refreshes immediately on resume, and polls at 30s only while visible', async () => {
     await visibility('hidden');
     const fetcher = vi.fn(async () => json(state)); vi.stubGlobal('fetch', fetcher);

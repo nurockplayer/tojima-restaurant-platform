@@ -9,6 +9,7 @@ export interface OrderReadStatus {
   version: number;
   payment_status: string;
   fulfillment_status: string;
+  display_state: string;
   total_gross_jpy: string;
   currency: 'JPY';
   is_terminal: boolean;

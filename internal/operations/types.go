@@ -80,6 +80,7 @@ const (
 )
 
 type OrderState struct {
+	kdsCardExists           bool
 	ID                      string            `json:"id"`
 	SessionID               string            `json:"session_id"`
 	TableID                 string            `json:"table_id"`
@@ -169,6 +170,7 @@ type GuestOrderState struct {
 	ID                      string            `json:"id"`
 	PaymentStatus           PaymentStatus     `json:"payment_status"`
 	FulfillmentStatus       FulfillmentStatus `json:"fulfillment_status"`
+	DisplayState            string            `json:"display_state"`
 	RequiresStaffAcceptance bool              `json:"requires_staff_acceptance"`
 	StaffAccepted           bool              `json:"staff_accepted"`
 	CashMode                CashMode          `json:"cash_mode,omitempty"`

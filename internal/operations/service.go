@@ -336,7 +336,7 @@ func readOrders(ctx context.Context, q interface {
 	if releasedOnly {
 		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') AND NOT st.operational_hold AND NOT st.payment_review_required`
 	}
-	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot
+	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
 		FROM table_orders o JOIN dining_tables dt USING(tenant_id,store_id,table_id) LEFT JOIN operation_order_state st USING(order_id) WHERE `+where+` ORDER BY o.created_at,o.order_id`, args...)
 	if err != nil {
 		return nil, err
@@ -350,7 +350,7 @@ func readOrders(ctx context.Context, q interface {
 		var created time.Time
 		var raw []byte
 		var payment, fulfill *string
-		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw); err != nil {
+		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.kdsCardExists); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = created
@@ -464,7 +464,7 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	}
 	out := GuestOperations{Orders: make([]GuestOrderState, 0, len(rows)), CashEnabled: enabled}
 	for _, o := range rows {
-		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, PaymentStatus: o.PaymentStatus, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
+		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, DisplayState: ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), o.PaymentReviewRequired, o.kdsCardExists), PaymentStatus: o.PaymentStatus, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
 	}
 	var trustedAt time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&trustedAt); err != nil {
