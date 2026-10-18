@@ -29,6 +29,8 @@ export interface GuestMenu {
       position: number;
       availability: Availability;
       selectable: boolean;
+      /** Public coarse availability classification; never contains hold audit details. */
+      company_emergency_hold_active?: boolean;
       option_groups: Array<{
         key: string;
         name: string;

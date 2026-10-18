@@ -130,3 +130,56 @@ D1 does not complete P-81. C remains blocked on the approved MOD-01 identity and
 lookup contract. D2/E adds the company control and explicit guest hold display;
 S7 owns expiry/reconciliation of already-issued unpaid Stripe checkouts. Real
 IdP, production runtime, deployment and pilot-store acceptance remain separate.
+
+## D2/E — Company controls and guest hold display
+
+The company published-menu view reads the selected product's current emergency
+hold before offering a transition. Only the company-admin API grants access;
+the store view displays the safe hold flag without a clear control. A transition
+requires a reason and explicit confirmation of the current version and linked
+store scope. An uncertain response retains the original request and idempotency
+key for an explicit retry. Success, replay and conflict require a fresh current
+read. A failed refresh disables further transitions until current state is
+available again; an old replay result is never treated as current authority.
+
+Guests see an already published held product with `販売停止中` / `暫停販售` and
+cannot select it. Existing cart lines stay visible and removable. A hold blocks
+the entire draft from confirmation; a rejected stale preview is discarded and
+menu/cart state is refreshed. After a hold ends, store PAUSED/PENDING and option
+rules still apply, and a new server quote requires new guest confirmation.
+Visible menu reads use a 15-second refresh interval while shared cart reads
+keep the existing 2.5-second interval. Hidden pages stop periodic reads. A
+forced refresh after rejection waits for an in-flight read, discards its stale
+result and fetches current data without overlapping menu requests.
+Only the active boolean is exposed in the public product DTO. Internal reasons,
+actors, timestamps, versions and tenant-wide counts remain private to the
+company-admin endpoint.
+
+Use a separate loopback port for this acceptance runtime when the P-85 demo is
+running on port 8082:
+
+```sh
+cd web
+pnpm install --frozen-lockfile
+pnpm build
+cd ..
+TEST_DATABASE_URL='postgres://postgres@127.0.0.1:32768/tojima_test?sslmode=disable' \
+  go run ./cmd/operationstest -catalog-fixture -port 8083 \
+  -credentials /tmp/tojima-p81-hold-credentials.json
+```
+
+The port flag accepts 1024–65535 and always binds `127.0.0.1`; it does not expose
+a public host option. Open `http://127.0.0.1:8083/catalog` for the synthetic admin
+or manager and use the guest URL from the owner-only credentials file. Use
+separate tabs for shared-cart acceptance. Credentials, database schema and
+runtime lifecycle remain isolated from the P-85 demo. The default port remains
+8082 for existing runbooks.
+
+D2/E validation covers confirmation/reason/CAS, uncertain same-key retry,
+authoritative reload failure, safe store/public projection, Japanese/Chinese
+hold labels, retained/removable cart lines and renewed quote consent. Browser
+acceptance uses the existing catalog fixture, real Go API and isolated
+PostgreSQL state. This does not approve real identities, production deployment,
+a restaurant pilot or provider expiry/reconciliation. P-81 C still requires the
+approved MOD-01 ingredient/recipe contract; P-82/S7 owns already-issued unpaid
+Stripe checkouts.

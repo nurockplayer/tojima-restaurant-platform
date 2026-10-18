@@ -10,12 +10,13 @@ import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
+const MENU_REFRESH_TTL_MS = 15_000;
 const copy = {
   ja: {
     brand: '東島', subtitle: 'TABLE ORDER', table: 'テーブル', pending: '共有カート', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
-    menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中',
+    menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中', emergencyHold: '販売停止中',
     choose: '選択してください', required: '必須', noOption: '選択しない', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
     remove: '削除', quantity: '数量', options: '追加オプション', latest: '最新の共有内容', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
     refresh: '共有内容を更新', preview: '金額を確認する', previewHint: '注文を確定する前に最新の金額と内容をご確認ください。',
@@ -36,7 +37,7 @@ const copy = {
     brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
-    menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中',
+    menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中', emergencyHold: '暫停販售',
     choose: '請選擇', required: '必選', noOption: '不選擇', add: '加入購物車', cartEmpty: '購物車目前是空的。',
     remove: '移除', quantity: '數量', options: '加料選項', latest: '最新共用內容', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
     refresh: '更新共用內容', preview: '確認金額', previewHint: '送出前請確認最新品項和金額。',
@@ -82,6 +83,17 @@ function safeAmount(amount: string | number | undefined): string {
 function isSafeAmount(amount: string | number | undefined): boolean {
   if (typeof amount === 'number') return Number.isSafeInteger(amount);
   return typeof amount === 'string' && /^-?\d+$/.test(amount);
+}
+
+export function isCurrentMenuRead(
+  sequence: number,
+  currentSequence: number,
+  requestSessionID: string,
+  currentSessionID: string | undefined,
+  requestToken: string,
+  currentToken: string | undefined,
+): boolean {
+  return sequence === currentSequence && requestSessionID === currentSessionID && requestToken === currentToken;
 }
 
 function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
@@ -146,6 +158,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
   strings.current = t;
   const cartRequestSequence = useRef(0);
   const orderRequestSequence = useRef(0);
+  const menuRequestSequence = useRef(0);
+  const menuReadsInFlight = useRef(new Set<string>());
+  const menuForcedRefreshes = useRef(new Map<string, { entry: Entry; promise: Promise<void>; resolve: () => void }>());
+  const refreshMenuRef = useRef<((current: Entry, force?: boolean) => Promise<void>) | null>(null);
+  const menuLastReadAt = useRef(new Map<string, number>());
   const checkoutRequestSequence = useRef(0);
   const checkoutViewEpoch = useRef(0);
   const resumeRequestSequence = useRef(0);
@@ -207,29 +224,73 @@ export function App({ demo = false }: DemoSurfaceProps) {
     await Promise.all([refreshCart(current), refreshOrders(current)]);
   }, [refreshCart, refreshOrders]);
 
-  const refreshMenu = useCallback(async (current: Entry) => {
+  const refreshMenu = useCallback(async (current: Entry, force = false) => {
+    const sessionID = current.grant.session.id;
+    const token = current.grant.table_join_token;
+    const readKey = `${sessionID}:${token}`;
+    if (menuReadsInFlight.current.has(readKey)) {
+      if (!force) return;
+      const queued = menuForcedRefreshes.current.get(readKey);
+      if (queued) {
+        queued.entry = current;
+        return queued.promise;
+      }
+      // A forced read must follow the old request, and that old response is now stale.
+      menuRequestSequence.current++;
+      let resolve!: () => void;
+      const promise = new Promise<void>((done) => { resolve = done; });
+      menuForcedRefreshes.current.set(readKey, { entry: current, promise, resolve });
+      return promise;
+    }
+    if (!force && Date.now() - (menuLastReadAt.current.get(readKey) ?? 0) < MENU_REFRESH_TTL_MS) return;
+    if (!isCurrentMenuRead(menuRequestSequence.current, menuRequestSequence.current, sessionID, entryRef.current?.grant.session.id, token, entryRef.current?.grant.table_join_token)) return;
+    const sequence = ++menuRequestSequence.current;
+    menuReadsInFlight.current.add(readKey);
+    const isCurrent = () => isCurrentMenuRead(
+      sequence,
+      menuRequestSequence.current,
+      sessionID,
+      entryRef.current?.grant.session.id,
+      token,
+      entryRef.current?.grant.table_join_token,
+    );
     try {
       const latest = current.locator
         ? await cartClient.menuForTable(current.locator)
-        : await cartClient.menuForSession(current.grant.session.id, current.grant.table_join_token);
-      setEntry((existing) => existing?.grant.session.id === current.grant.session.id ? { ...existing, menu: latest } : existing);
+        : await cartClient.menuForSession(sessionID, token);
+      if (!isCurrent()) return;
+      menuLastReadAt.current.set(readKey, Date.now());
+      setEntry((existing) => existing?.grant.session.id === sessionID && existing.grant.table_join_token === token ? { ...existing, menu: latest } : existing);
     } catch (cause) {
-      if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+      if (!isCurrent()) return;
+      menuLastReadAt.current.set(readKey, Date.now());
+      if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(sessionID);
       else setError((locale === 'ja' ? 'メニューを更新できませんでした。' : '無法更新菜單。'));
+    } finally {
+      menuReadsInFlight.current.delete(readKey);
+      const queued = menuForcedRefreshes.current.get(readKey);
+      if (queued) {
+        menuForcedRefreshes.current.delete(readKey);
+        const followup = refreshMenuRef.current;
+        if (!followup) queued.resolve();
+        else void followup(queued.entry, true).finally(queued.resolve);
+      }
     }
   }, [invalidateGrant, locale]);
+  refreshMenuRef.current = refreshMenu;
 
   const refreshCurrent = async (current: Entry) => {
-    await Promise.all([refresh(current), refreshMenu(current)]);
+    await Promise.all([refresh(current), refreshMenu(current, true)]);
   };
 
   const recoverConflict = async (current: Entry, latest?: Cart) => {
     if (latest) adoptCart(latest);
     else await refresh(current);
-    await refreshMenu(current);
+    await refreshMenu(current, true);
   };
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
+    menuRequestSequence.current++;
     checkoutRequestSequence.current++;
     checkoutViewEpoch.current++;
     resumeRequestSequence.current++;
@@ -245,6 +306,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     }
     sessionStorage.setItem(storageKey(grant.session.id), grant.table_join_token);
     const next = { ...(locator ? { locator } : {}), sessionID: grant.session.id, grant, menu };
+    menuLastReadAt.current.set(`${grant.session.id}:${grant.table_join_token}`, Date.now());
     setEntry(next);
     await refresh(next);
   }, [invalidateGrant, refresh]);
@@ -392,7 +454,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     const schedule = () => {
       if (timer !== undefined) window.clearInterval(timer);
       if (document.visibilityState === 'visible') {
-        if (tab === 'cart') timer = window.setInterval(() => { void refreshCart(entry).catch(() => undefined); }, 2500);
+        if (tab === 'cart') timer = window.setInterval(() => { void refreshCart(entry).catch(() => undefined); void refreshMenu(entry); }, 2500);
         else timer = window.setInterval(() => { void refreshOrders(entry).catch(() => undefined); }, 20000);
       }
     };
@@ -402,7 +464,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
       document.removeEventListener('visibilitychange', schedule);
       if (timer !== undefined) window.clearInterval(timer);
     };
-  }, [entry, tab, refreshCart, refreshOrders]);
+  }, [entry, tab, refreshCart, refreshMenu, refreshOrders]);
 
   useEffect(() => {
     if (entry && tab === 'cart' && document.visibilityState === 'visible') void refreshCart(entry).catch(() => undefined);
@@ -531,7 +593,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     try {
       const latest = await cartClient.preview(entry.grant.session.id, entry.grant.table_join_token, cart);
       if (latest.generation !== cart.generation || latest.version !== cart.version) {
-        await Promise.all([refresh(entry), refreshMenu(entry)]); setError(t.stale); return;
+        await Promise.all([refresh(entry), refreshMenu(entry, true)]); setError(t.stale); return;
       }
       dispatchCart({ type: 'preview-received', requested: cart, preview: latest });
     } catch (cause) {
@@ -540,7 +602,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         setError(t.stale);
       } else if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(entry.grant.session.id);
       else {
-        if (cause instanceof ApiError && cause.body.error === 'unavailable') await refreshMenu(entry);
+        if (cause instanceof ApiError && cause.body.error === 'unavailable') await refreshMenu(entry, true);
         setError(cause instanceof ApiError && cause.body.error === 'unavailable' ? t.unavailableLines : t.error);
       }
     } finally { setBusy(false); }
@@ -578,7 +640,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         clearPreview();
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
         else {
-          if (cause.body.error === 'unavailable' || cause.body.error === 'requote_required') await refreshMenu(entry);
+          if (cause.body.error === 'unavailable' || cause.body.error === 'requote_required') await refreshMenu(entry, true);
           setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.error);
         }
       }
@@ -605,7 +667,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const lineCount = cart?.lines.reduce((sum, line) => sum + line.quantity, 0) ?? 0;
   const previewMatchesCart = !!preview && !!cart && preview.generation === cart.generation && preview.version === cart.version;
-  const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable) ?? false;
+  const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
   return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
@@ -626,16 +688,17 @@ export function App({ demo = false }: DemoSurfaceProps) {
               {category.products.map((product) => {
                 const selected = selections[product.key] ?? [];
                 const amountSafe = isSafeAmount(product.effective_price_minor) && product.option_groups.every((group) => group.options.every((option) => isSafeAmount(option.price_delta_minor)));
-                const allowed = product.selectable && amountSafe && selectionsValid(product.key, selected);
+                const held = product.company_emergency_hold_active === true;
+                const allowed = product.selectable && !held && amountSafe && selectionsValid(product.key, selected);
                 return <article className="product-card" key={product.key}>
                   <div className="product-top"><div><h4>{product.name}</h4>{product.description && <p>{product.description}</p>}</div><strong className="price">{safeAmount(product.effective_price_minor)}</strong></div>
-                  <span className={`availability ${product.selectable ? 'is-available' : ''}`}>{product.selectable ? t.available : product.availability === 'PENDING_CONFIRMATION' ? t.pendingAvailability : t.unavailable}</span>
+                  <span className={`availability ${product.selectable && !held ? 'is-available' : ''}`}>{held ? t.emergencyHold : product.selectable ? t.available : product.availability === 'PENDING_CONFIRMATION' ? t.pendingAvailability : t.unavailable}</span>
                   {product.option_groups.map((group) => <fieldset className="option-group" key={group.key}>
                     <legend>{group.name} {group.min_select > 0 && <small>{t.required}</small>}</legend>
                     <div className="option-list">{group.options.map((option) => {
                       const checked = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
                       return <label className={`option ${!option.availability || option.availability !== 'AVAILABLE' ? 'option-muted' : ''}`} key={option.key}>
-                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || option.availability !== 'AVAILABLE' || (group.max_select !== 1 && !checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
+                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || held || option.availability !== 'AVAILABLE' || (group.max_select !== 1 && !checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
                         <span>{option.name}</span><small>{safeAmount(option.price_delta_minor)}</small>
                       </label>;
                     })}</div>
@@ -672,12 +735,13 @@ export function App({ demo = false }: DemoSurfaceProps) {
             {!cart || cart.lines.length === 0 ? <div className="empty-state"><div className="empty-icon">＋</div><p>{t.cartEmpty}</p></div> : <div className="cart-lines">
               {cart.lines.map((line: CartLine) => {
                 const product = menuProducts.get(line.product_key);
-                if (!product) return <article className="cart-line unavailable-line" key={line.line_id}><div><strong>{line.product_name || line.product_key}</strong><p>{t.itemMissing}</p><p>{line.options.map((option) => option.option_name).join(' · ')}</p></div><button className="text-button" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></article>;
+                if (!product) return <article className="cart-line unavailable-line" key={line.line_id}><div><strong>{line.product_name || line.product_key}</strong><p>{line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' ? t.emergencyHold : t.itemMissing}</p><p>{line.options.map((option) => option.option_name).join(' · ')}</p></div><button className="text-button" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></article>;
                 const selected = line.options;
-                const lineAvailable = line.product_available && product.selectable && line.options.every((option) => option.available);
+                const held = line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' || product.company_emergency_hold_active === true;
+                const lineAvailable = line.product_available && product.selectable && !held && line.options.every((option) => option.available);
                 return <article className="cart-line" key={line.line_id}>
-                  <div className="cart-line-head"><div><strong>{line.product_name || product.name}</strong><p>{lineAvailable ? t.available : t.unavailable}</p>{selected.length > 0 && <p className="cart-selected-options">{selected.map((option) => `${option.group_name}: ${option.option_name}${option.available ? '' : ` · ${t.unavailable}`}`).join('、')}</p>}</div><button className="text-button danger" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></div>
-                  {product.option_groups.map((group) => <fieldset className="compact-options" key={group.key}><legend>{group.name}</legend>{group.options.map((option) => <label key={option.key}><input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${line.line_id}-${group.key}`} checked={selected.some((item) => item.group_key === group.key && item.option_key === option.key)} disabled={busy || uncertain || !product.selectable || option.availability !== 'AVAILABLE'} onChange={() => {
+                  <div className="cart-line-head"><div><strong>{line.product_name || product.name}</strong><p>{held ? t.emergencyHold : lineAvailable ? t.available : t.unavailable}</p>{selected.length > 0 && <p className="cart-selected-options">{selected.map((option) => `${option.group_name}: ${option.option_name}${option.available ? '' : ` · ${t.unavailable}`}`).join('、')}</p>}</div><button className="text-button danger" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></div>
+                  {product.option_groups.map((group) => <fieldset className="compact-options" key={group.key}><legend>{group.name}</legend>{group.options.map((option) => <label key={option.key}><input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${line.line_id}-${group.key}`} checked={selected.some((item) => item.group_key === group.key && item.option_key === option.key)} disabled={busy || uncertain || !product.selectable || held || option.availability !== 'AVAILABLE'} onChange={() => {
                     const exists = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
                     const groupSelections = selected.filter((item) => item.group_key !== group.key);
                     const sameGroup = selected.filter((item) => item.group_key === group.key);

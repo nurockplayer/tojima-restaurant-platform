@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Cart } from '../api/types';
 import { checkoutNavigation } from '../api/checkout';
-import { App, displayTableLocator } from './App';
+import { App, displayTableLocator, isCurrentMenuRead } from './App';
 
 const table = { mode: 'DIRECT_SCAN', current_session_id: 'session-1', open: true };
 const grant = { table_join_token: 'memory-only-grant', expires_at: '2030-01-01T00:00:00Z', session: { id: 'session-1', mode: 'DIRECT_SCAN' } };
@@ -29,6 +29,194 @@ afterEach(async () => {
 });
 
 describe('guest app mount', () => {
+  it('queues a forced menu read after a periodic read when commit is rejected by a new hold', async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, '', '/?table=forced-menu-refresh');
+    const oldMenu = deferred<Response>();
+    const before: Cart = { session_id: 'session-1', generation: 3, version: 2, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [] }] };
+    const after: Cart = { ...before, version: 3, lines: [{ ...before.lines[0]!, product_available: false, unavailable_code: 'COMPANY_EMERGENCY_HOLD' }] };
+    const preview = { session_id: 'session-1', generation: 3, version: 2, fingerprint: 'preview-1', quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: '定食', base_gross_jpy: '900', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '900', total_net_jpy: '818', total_tax_jpy: '82', buckets: [] } } };
+    let menuReads = 0;
+    let activeMenuReads = 0;
+    let maxActiveMenuReads = 0;
+    const menu = (held: boolean) => ({ currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', effective_price_minor: '900', position: 1, availability: 'AVAILABLE', selectable: !held, company_emergency_hold_active: held, option_groups: [] }] }] });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/forced-menu-refresh')) return json(table);
+      if (url.endsWith('/v1/guest/tables/forced-menu-refresh/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/forced-menu-refresh/menu?amounts=string')) {
+        menuReads++;
+        activeMenuReads++;
+        maxActiveMenuReads = Math.max(maxActiveMenuReads, activeMenuReads);
+        try {
+          const response = menuReads === 2 ? await oldMenu.promise : json(menu(menuReads >= 3));
+          return response;
+        } finally { activeMenuReads--; }
+      }
+      if (url.endsWith('/v1/guest/sessions/session-1/cart/preview')) return json(preview);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart/commit')) return json({ error: 'unavailable', cart: after }, 409);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(before);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => { root?.render(<App demo />); for (let i = 0; i < 30; i++) await Promise.resolve(); });
+    expect(menuReads).toBe(1);
+    const previewButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('金額を確認する'))!;
+    await act(async () => { previewButton.click(); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+    expect(host.textContent).toContain('¥900');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(menuReads).toBe(2);
+    expect(activeMenuReads).toBe(1);
+    const confirmButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('この内容で注文を確定'))!;
+    await act(async () => { confirmButton.click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
+    expect(menuReads).toBe(2);
+
+    await act(async () => { oldMenu.resolve(json(menu(false))); for (let i = 0; i < 40; i++) await Promise.resolve(); });
+    expect(menuReads).toBe(3);
+    expect(activeMenuReads).toBe(0);
+    expect(maxActiveMenuReads).toBe(1);
+    expect(host.textContent).toContain('販売停止中');
+    expect(host.textContent).toContain('注文できない商品があります');
+    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('revalidates the menu only while visible and reflects ON then OFF without clearing store PAUSED state', async () => {
+    vi.useFakeTimers();
+    setVisibilityState('hidden');
+    window.history.replaceState({}, '', '/?table=menu-refresh');
+    let menuReads = 0;
+    const currentCart: Cart = { session_id: 'session-1', generation: 1, version: 0, lines: [] };
+    const menu = (held: boolean, availability: string) => ({
+      currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '料理', position: 1, products: [{
+        key: 'meal', name: '定食', description: '', effective_price_minor: '900', position: 1,
+        availability, selectable: availability === 'AVAILABLE' && !held, company_emergency_hold_active: held, option_groups: [],
+      }] }],
+    });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/menu-refresh')) return json(table);
+      if (url.endsWith('/v1/guest/tables/menu-refresh/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/menu-refresh/menu?amounts=string')) {
+        menuReads++;
+        return json(menu(menuReads === 2, menuReads === 3 ? 'PAUSED' : 'AVAILABLE'));
+      }
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(currentCart);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => {
+      root?.render(<App />);
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    });
+    expect(menuReads).toBe(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(30_000); });
+    expect(menuReads).toBe(1);
+
+    setVisibilityState('visible');
+    await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(15_000); });
+    expect(menuReads).toBe(2);
+    expect(host.textContent).toContain('販売停止中');
+    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(menuReads).toBe(3);
+    const productCard = host.querySelector('.product-card');
+    expect(productCard?.textContent).not.toContain('販売停止中');
+    expect(productCard?.textContent).toContain('現在注文できません');
+    expect(productCard?.querySelector('button')?.hasAttribute('disabled')).toBe(true);
+  });
+
+  it('rejects an older menu response when the active session or grant changes', () => {
+    expect(isCurrentMenuRead(1, 2, 'session-a', 'session-b', 'grant-a', 'grant-b')).toBe(false);
+    expect(isCurrentMenuRead(2, 2, 'session-b', 'session-b', 'grant-b', 'grant-b')).toBe(true);
+    expect(isCurrentMenuRead(2, 3, 'session-b', 'session-b', 'grant-b', 'grant-b')).toBe(false);
+  });
+
+  it('shows a company hold in both menu and retained cart, blocks additions and quote, and still allows removal', async () => {
+    const locator = 'held-table';
+    window.history.replaceState({}, '', `/?table=${locator}`);
+    let currentCart: Cart = { session_id: 'session-1', generation: 3, version: 2, lines: [{ line_id: 'held-line', product_key: 'meal', product_name: '定食', product_available: false, unavailable_code: 'COMPANY_EMERGENCY_HOLD', quantity: 1, options: [] }] };
+    const requested: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input); requested.push(`${init.method ?? 'GET'} ${url}`);
+      if (url.endsWith(`/v1/guest/tables/${locator}`)) return json({ mode: 'DIRECT_SCAN', current_session_id: 'session-1', open: true });
+      if (url.endsWith(`/v1/guest/tables/${locator}/join`)) return json(grant);
+      if (url.endsWith(`/v1/guest/tables/${locator}/menu?amounts=string`)) return json({ currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', effective_price_minor: '900', position: 1, availability: 'AVAILABLE', selectable: false, company_emergency_hold_active: true, option_groups: [] }] }] });
+      if (url.includes('/v1/guest/sessions/session-1/cart/lines/held-line') && init.method === 'DELETE') { currentCart = { ...currentCart, version: 3, lines: [] }; return json(currentCart); }
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(currentCart);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(host.textContent).toContain('販売停止中');
+    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+    expect(host.textContent).toContain('定食');
+    expect(host.querySelector('.cart-line')?.textContent).toContain('販売停止中');
+    const previewButton = [...(host.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('金額を確認する'));
+    expect(previewButton?.hasAttribute('disabled')).toBe(true);
+
+    await clickButton(host, '削除');
+    expect(host.textContent).toContain('カートはまだ空です。');
+    expect(requested.some((call) => call.includes('/cart/preview'))).toBe(false);
+    expect(requested.some((call) => call.startsWith('DELETE ') && call.includes('/cart/lines/held-line'))).toBe(true);
+  });
+
+  it('invalidates an existing preview and reloads the held cart and menu after a hold rejection', async () => {
+    const locator = 'hold-after-preview';
+    window.history.replaceState({}, '', `/?table=${locator}`);
+    const availableCart: Cart = { session_id: 'session-1', generation: 3, version: 2, lines: [{ line_id: 'held-line', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [] }] };
+    const heldCart: Cart = { ...availableCart, version: 3, lines: [{ ...availableCart.lines[0]!, product_available: false, unavailable_code: 'COMPANY_EMERGENCY_HOLD' }] };
+    let menuReads = 0;
+    const preview = { session_id: 'session-1', generation: 3, version: 2, fingerprint: 'old-preview', quote: { lines: [{ line_id: 'held-line', product_key: 'meal', name: '定食', base_gross_jpy: '900', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '900', total_net_jpy: '818', total_tax_jpy: '82', buckets: [] } } };
+    const requested: string[] = [];
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input); requested.push(`${init.method ?? 'GET'} ${url}`);
+      if (url.endsWith(`/v1/guest/tables/${locator}`)) return json({ mode: 'DIRECT_SCAN', current_session_id: 'session-1', open: true });
+      if (url.endsWith(`/v1/guest/tables/${locator}/join`)) return json(grant);
+      if (url.endsWith(`/v1/guest/tables/${locator}/menu?amounts=string`)) {
+        menuReads++;
+        return json({ currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', effective_price_minor: '900', position: 1, availability: 'AVAILABLE', selectable: menuReads === 1, company_emergency_hold_active: menuReads > 1, option_groups: [] }] }] });
+      }
+      if (url.endsWith('/v1/guest/sessions/session-1/cart/preview')) return json(preview);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart/commit')) return json({ error: 'unavailable', cart: heldCart }, 409);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(availableCart);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await clickButton(host, '金額を確認する');
+    expect(host.textContent).toContain('¥900');
+    const cashOption = [...(host.querySelectorAll('label') ?? [])].find((label) => label.textContent?.includes('店頭で現金'))?.querySelector('input');
+    expect(cashOption).not.toBeNull();
+    await act(async () => { cashOption?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await clickButton(host, 'この内容で注文を確定');
+
+    expect(host.textContent).toContain('販売停止中');
+    expect(host.textContent).not.toContain('この内容で注文を確定');
+    expect(host.textContent).toContain('注文できない商品があります');
+    expect(menuReads).toBeGreaterThan(1);
+    expect(requested.some((call) => call.endsWith('/cart/commit'))).toBe(true);
+  });
+
   it('keeps hook order while the real table entry flow resolves into the shared cart', async () => {
     window.history.replaceState({}, '', '/?table=table-1');
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

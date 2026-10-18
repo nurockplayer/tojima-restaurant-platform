@@ -1,11 +1,13 @@
 package main
 
 import (
+	"flag"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -99,13 +101,66 @@ func TestDemoFixtureModeRejectsPaymentsBeforeOtherSetup(t *testing.T) {
 	}
 }
 
+func TestTestPortValidationAndDerivedLoopbackEndpoints(t *testing.T) {
+	for _, port := range []int{1024, 8082, 8083, 65535} {
+		if err := validateTestPort(port); err != nil {
+			t.Errorf("valid port %d rejected: %v", port, err)
+		}
+		want := "127.0.0.1:" + strconv.Itoa(port)
+		if got := testListenAddress(port); got != want {
+			t.Errorf("port %d listen address = %q, want %q", port, got, want)
+		}
+		fixture := &testguest.Fixture{TenantID: "t", StoreID: "s", TableID: "table", Locator: "locator", Schema: "schema"}
+		doc := buildCredentialDocument(fixture, testoperations.CredentialSet{}, true, false, true, "fixture-secret", port)
+		base := "http://" + want
+		if doc.BaseURL != base || doc.StaffURL != base+"/staff" || doc.KitchenURL != base+"/kitchen" || doc.GuestURL != base+"/" || doc.CatalogURL != base+"/catalog" {
+			t.Errorf("port %d credential URLs were not derived from the bound port: %+v", port, doc)
+		}
+		if !doc.PaymentFixture || doc.WebhookFixtureSecret != "fixture-secret" {
+			t.Errorf("port %d changed other credential metadata: %+v", port, doc)
+		}
+		demoDoc := buildCredentialDocument(fixture, testoperations.CredentialSet{}, true, true, false, "", port)
+		if demoDoc.BaseURL != base || demoDoc.CatalogURL != base+"/catalog" || demoDoc.GuestURL != base+"/?table=locator" {
+			t.Errorf("port %d demo credential URLs were not derived from the bound port: %+v", port, demoDoc)
+		}
+	}
+	for _, port := range []int{0, 1, 1023, 65536, -1} {
+		if err := validateTestPort(port); err == nil {
+			t.Errorf("invalid port %d was accepted", port)
+		}
+	}
+}
+
+func TestInvalidPortStopsBeforeFixtureOrCredentials(t *testing.T) {
+	t.Setenv("TEST_DATABASE_URL", "invalid-database-url")
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "index.html"), []byte(`<div id="root"></div>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	credentials := filepath.Join(t.TempDir(), "credentials.json")
+	previousArgs := os.Args
+	previousFlags := flag.CommandLine
+	os.Args = []string{"operationstest", "-port=1023", "-credentials=" + credentials, "-web-dist=" + root}
+	flag.CommandLine = flag.NewFlagSet("operationstest", flag.ContinueOnError)
+	t.Cleanup(func() {
+		os.Args = previousArgs
+		flag.CommandLine = previousFlags
+	})
+	if err := run(); err == nil || !strings.Contains(err.Error(), "-port") {
+		t.Fatalf("invalid port did not fail before other setup: %v", err)
+	}
+	if _, err := os.Stat(credentials); !os.IsNotExist(err) {
+		t.Fatalf("invalid port wrote credentials: stat err=%v", err)
+	}
+}
+
 func TestDemoCredentialDocumentUsesFixtureScopeAndEntryURLs(t *testing.T) {
 	fixture := &testguest.Fixture{
 		TenantID: "demo-synthetic", StoreID: "demo-shironagasukujira", TableID: "table-05",
 		Locator: "demo-shironagasukujira-table-05", Schema: "p85_demo_test",
 	}
 	credentials := testoperations.CredentialSet{Cashier: testoperations.Credential{Role: authz.Staff, Token: "private-token"}}
-	doc := buildCredentialDocument(fixture, credentials, true, true, false, "")
+	doc := buildCredentialDocument(fixture, credentials, true, true, false, "", 8082)
 	if doc.TenantID != fixture.TenantID || doc.StoreID != fixture.StoreID || doc.TableID != fixture.TableID || doc.TableLocator != fixture.Locator {
 		t.Fatalf("credential document hardcoded fixture scope: %+v", doc)
 	}

@@ -5,7 +5,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client';
 import { catalogClient, type CompanyDraft, type StoreCatalog } from '../api/catalog';
-import { CatalogApp } from './CatalogApp';
+import { CatalogApp, isCurrentHoldRead } from './CatalogApp';
 
 let user: ReturnType<typeof userEvent.setup>;
 
@@ -15,6 +15,12 @@ afterEach(() => {
 });
 
 describe('catalog admin UI', () => {
+  it('rejects an older hold read after a newer product selection wins', () => {
+    expect(isCurrentHoldRead(1, 2, 4, 4, 'meal-a', 'meal-b')).toBe(false);
+    expect(isCurrentHoldRead(2, 2, 4, 4, 'meal-b', 'meal-b')).toBe(true);
+    expect(isCurrentHoldRead(2, 2, 4, 5, 'meal-b', 'meal-b')).toBe(false);
+  });
+
   it('shows the demo identity across catalog entry and language changes, and stays hidden in normal mode', async () => {
     user = userEvent.setup();
     const { rerender } = render(<CatalogApp demo />);
@@ -203,6 +209,219 @@ describe('catalog admin UI', () => {
     expect(detach).toHaveBeenCalledWith({ tenantID: 'tenant-1', storeID: 'store-1', token: 'catalog-token' }, 'catalog-token', 4);
   });
 
+  it('loads a published product hold on demand, requires confirmation, and retries an uncertain write with the frozen key and payload', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const holdState = (active: boolean, version: number) => ({ product_key: 'meal', active, version, reason: active ? 'safety review' : 'cleared', published_revision: 4, linked_store_count: 3 });
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold').mockResolvedValueOnce(holdState(false, 2)).mockResolvedValueOnce(holdState(true, 3)).mockResolvedValueOnce(holdState(false, 4));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold')
+      .mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' }))
+      .mockResolvedValueOnce(holdState(true, 3))
+      .mockResolvedValueOnce(holdState(false, 4));
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    await user.click(screen.getByRole('button', { name: '緊急販売停止を確認' }));
+    expect(await screen.findByText('本部緊急停止なし')).toBeTruthy();
+    expect(readHold).toHaveBeenCalledTimes(1);
+    await user.type(screen.getByLabelText('停止理由'), '食品安全の確認');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    expect(screen.getByRole('alertdialog', { name: '販売停止を確定' })).toBeTruthy();
+    expect(writeHold).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+
+    await screen.findByRole('button', { name: '同じ操作を再試行' });
+    expect(writeHold).toHaveBeenCalledTimes(1);
+    const frozen = writeHold.mock.calls[0]![3];
+    expect(frozen).toMatchObject({ active: true, reason: '食品安全の確認', expected_version: 2 });
+    expect(frozen.idempotency_key).toMatch(/^[0-9a-f-]{36}$/i);
+
+    await user.click(screen.getByRole('button', { name: '同じ操作を再試行' }));
+    await screen.findByText('連動店舗で販売停止中');
+    expect(writeHold).toHaveBeenCalledTimes(2);
+    expect(writeHold.mock.calls[1]![3]).toEqual(frozen);
+    expect(readHold).toHaveBeenCalledTimes(2);
+
+    await user.type(screen.getByLabelText('停止理由'), '安全確認が完了');
+    await user.click(screen.getByRole('button', { name: '本部の販売停止を解除' }));
+    await user.click(screen.getByRole('button', { name: '販売停止解除を確定' }));
+    expect(await screen.findByText('本部緊急停止なし')).toBeTruthy();
+    expect(writeHold).toHaveBeenCalledTimes(3);
+    expect(writeHold.mock.calls[2]![3]).toMatchObject({ active: false, reason: '安全確認が完了', expected_version: 3 });
+    expect(writeHold.mock.calls[2]![3].idempotency_key).not.toBe(frozen.idempotency_key);
+    expect(readHold).toHaveBeenCalledTimes(3);
+  });
+
+  it('allows GET-only recovery when a same-key retry succeeds but its authoritative read fails', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const holdState = (active: boolean, version: number) => ({ product_key: 'meal', active, version, reason: active ? 'safety review' : '', published_revision: 4, linked_store_count: 3 });
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold')
+      .mockResolvedValueOnce(holdState(false, 2))
+      .mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' }))
+      .mockResolvedValueOnce(holdState(true, 3));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold')
+      .mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' }))
+      .mockResolvedValueOnce(holdState(true, 3));
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    await user.click(screen.getByRole('button', { name: '緊急販売停止を確認' }));
+    await screen.findByText('本部緊急停止なし');
+    await user.type(screen.getByLabelText('停止理由'), '食品安全の確認');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+    await screen.findByRole('button', { name: '同じ操作を再試行' });
+    const frozen = writeHold.mock.calls[0]![3];
+
+    await user.click(screen.getByRole('button', { name: '同じ操作を再試行' }));
+
+    expect(writeHold).toHaveBeenCalledTimes(2);
+    expect(writeHold.mock.calls[1]![3]).toEqual(frozen);
+    expect(readHold).toHaveBeenCalledTimes(2);
+    expect(await screen.findByRole('button', { name: '現在の状態を再読込' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '同じ操作を再試行' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '連動店舗すべての販売を停止' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '本部の販売停止を解除' })).toBeNull();
+    expect(screen.queryByLabelText('停止理由')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '現在の状態を再読込' }));
+
+    expect(await screen.findByText('連動店舗で販売停止中')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '同じ操作を再試行' })).toBeNull();
+    expect(readHold).toHaveBeenCalledTimes(3);
+    expect(writeHold).toHaveBeenCalledTimes(2);
+    await user.type(screen.getByLabelText('停止理由'), '再確認');
+    expect((screen.getByRole('button', { name: '本部の販売停止を解除' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('reloads the current generation after a CAS conflict and does not automatically reapply the stale transition', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const holdState = (active: boolean, version: number) => ({ product_key: 'meal', active, version, reason: 'review', published_revision: 4, linked_store_count: 3 });
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold').mockResolvedValueOnce(holdState(false, 2)).mockResolvedValueOnce(holdState(true, 3));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold').mockRejectedValue(new ApiError(409, { error: 'stale_version' }));
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    await user.click(screen.getByRole('button', { name: '緊急販売停止を確認' }));
+    await screen.findByText('本部緊急停止なし');
+    await user.type(screen.getByLabelText('停止理由'), '再確認');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+
+    expect(await screen.findByText('連動店舗で販売停止中')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('状態が更新されています');
+    expect(readHold).toHaveBeenCalledTimes(2);
+    expect(writeHold).toHaveBeenCalledTimes(1);
+    expect(writeHold.mock.calls[0]![3].expected_version).toBe(2);
+  });
+
+  it('fails closed when current hold state cannot be reloaded after a successful write', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const holdState = (active: boolean, version: number) => ({ product_key: 'meal', active, version, reason: 'review', published_revision: 4, linked_store_count: 3 });
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold').mockResolvedValueOnce(holdState(false, 2)).mockRejectedValueOnce(new ApiError(503, { error: 'temporarily_unavailable' })).mockResolvedValueOnce(holdState(true, 3));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold').mockResolvedValue(holdState(true, 3));
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    await user.click(screen.getByRole('button', { name: '緊急販売停止を確認' }));
+    await screen.findByText('本部緊急停止なし');
+    await user.type(screen.getByLabelText('停止理由'), '確認');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+
+    expect(await screen.findByRole('button', { name: '現在の状態を再読込' })).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('最新状態を確認できるまで変更できません。');
+    expect(screen.queryByLabelText('停止理由')).toBeNull();
+    expect(writeHold).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '現在の状態を再読込' }));
+    expect(await screen.findByText('連動店舗で販売停止中')).toBeTruthy();
+    expect(readHold).toHaveBeenCalledTimes(3);
+    expect(writeHold).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses request fencing when two published-product hold reads resolve in reverse order', async () => {
+    installContext();
+    const published = draft();
+    published.categories[0]!.products.push({ key: 'soup', name: 'スープ', description: '', base_price_minor: '500', position: 2, active: true, option_groups: [] });
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: published.categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const mealRead = deferred<Awaited<ReturnType<typeof catalogClient.companyProductEmergencyHold>>>();
+    const soupRead = deferred<Awaited<ReturnType<typeof catalogClient.companyProductEmergencyHold>>>();
+    const readHold = vi.spyOn(catalogClient, 'companyProductEmergencyHold').mockImplementation((_tenant, productKey) => {
+      if (productKey === 'meal') return mealRead.promise;
+      if (productKey === 'soup' && readHold.mock.calls.length === 2) return soupRead.promise;
+      if (productKey === 'soup' && readHold.mock.calls.length > 2) return Promise.resolve({ product_key: 'soup', active: true, version: 9, reason: 'review', published_revision: 4, linked_store_count: 2 });
+      return Promise.resolve({ product_key: 'soup', active: false, version: 8, reason: 'latest', published_revision: 4, linked_store_count: 2 });
+    });
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold').mockResolvedValue({ product_key: 'soup', active: true, version: 9, reason: 'review', published_revision: 4, linked_store_count: 2 });
+    await mount();
+
+    await user.click(screen.getByText('現在公開中の内容を表示'));
+    const manageButtons = screen.getAllByRole('button', { name: '緊急販売停止を確認' });
+    await user.click(manageButtons[0]!);
+    await user.click(manageButtons[1]!);
+    await act(async () => { soupRead.resolve({ product_key: 'soup', active: false, version: 7, reason: '', published_revision: 4, linked_store_count: 2 }); await soupRead.promise; });
+    expect(await screen.findByText('連動店舗への緊急販売停止: スープ')).toBeTruthy();
+    await act(async () => { mealRead.resolve({ product_key: 'meal', active: true, version: 3, reason: 'older response', published_revision: 4, linked_store_count: 8 }); await mealRead.promise; });
+    expect(screen.getByText('連動店舗への緊急販売停止: スープ')).toBeTruthy();
+    expect(screen.getByText('本部緊急停止なし')).toBeTruthy();
+    expect(within(screen.getByRole('region', { name: '連動店舗への緊急販売停止' })).getByText('7')).toBeTruthy();
+
+    await user.type(screen.getByLabelText('停止理由'), '確認済み');
+    await user.click(screen.getByRole('button', { name: '連動店舗すべての販売を停止' }));
+    await user.click(screen.getByRole('button', { name: '販売停止を確定' }));
+    await screen.findByText('連動店舗で販売停止中');
+    expect(writeHold).toHaveBeenCalledWith('tenant-1', 'soup', 'catalog-token', expect.objectContaining({ active: true, expected_version: 7, reason: '確認済み' }));
+  });
+
+  it('can clear an active hold for a retired key but never offers to start a hold for that absent product', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockResolvedValue({ revision: 4, categories: draft().categories });
+    vi.spyOn(catalogClient, 'companyDraft').mockResolvedValue(draft());
+    vi.spyOn(catalogClient, 'storeMenu').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    const hold = (active: boolean, version: number) => ({ product_key: 'retired-meal', active, version, reason: 'archived safety review', published_revision: 3, linked_store_count: 0 });
+    vi.spyOn(catalogClient, 'companyProductEmergencyHold').mockResolvedValueOnce(hold(true, 5)).mockResolvedValueOnce(hold(false, 6));
+    const writeHold = vi.spyOn(catalogClient, 'setCompanyProductEmergencyHold').mockResolvedValue(hold(false, 6));
+    await mount();
+
+    await user.type(screen.getByLabelText('商品キー'), 'retired-meal');
+    await user.click(screen.getByRole('button', { name: 'キーで販売停止状態を確認' }));
+    expect(await screen.findByText('連動店舗への緊急販売停止: retired-meal')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '本部の販売停止を解除' })).toBeTruthy();
+    await user.type(screen.getByLabelText('停止理由'), '再確認完了');
+    await user.click(screen.getByRole('button', { name: '本部の販売停止を解除' }));
+    await user.click(screen.getByRole('button', { name: '販売停止解除を確定' }));
+
+    expect(await screen.findByText('本部緊急停止なし')).toBeTruthy();
+    expect(screen.getByText('有効な公開商品ではないため、新たな販売停止は開始できません。既存の停止状態がある場合のみ解除できます。')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '連動店舗すべての販売を停止' })).toBeNull();
+    expect(writeHold).toHaveBeenCalledWith('tenant-1', 'retired-meal', 'catalog-token', expect.objectContaining({ active: false, reason: '再確認完了', expected_version: 5 }));
+  });
+
+  it('lets the scoped store view read a hold indicator but exposes no store-side clear control', async () => {
+    installContext();
+    vi.spyOn(catalogClient, 'companyPublished').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    vi.spyOn(catalogClient, 'companyDraft').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
+    vi.spyOn(catalogClient, 'storeMenu').mockResolvedValue(storeMenu({ can_pause_availability: true, can_confirm_availability: false, can_edit_prices: false, can_detach: false }, 'AVAILABLE', 'LINKED', true));
+    await mount();
+
+    expect(screen.getByText('本部による連動店舗販売停止中')).toBeTruthy();
+    expect(screen.queryByRole('button', { name: '本部の販売停止を解除' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '緊急販売停止を確認' })).toBeNull();
+  });
+
   it('keeps detached availability readable and pauseable for staff while omitting linked price controls', async () => {
     installContext();
     vi.spyOn(catalogClient, 'companyPublished').mockRejectedValue(new ApiError(403, { error: 'forbidden' }));
@@ -316,8 +535,8 @@ function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
 }
 
-function storeMenu(capabilities: Pick<StoreCatalog, 'can_pause_availability' | 'can_confirm_availability' | 'can_edit_prices' | 'can_detach'>, availability: 'PENDING_CONFIRMATION' | 'AVAILABLE' = 'AVAILABLE', mode: StoreCatalog['mode'] = 'LINKED'): StoreCatalog {
-  return { revision: 4, mode, ...capabilities, categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', base_price_minor: '900', effective_price_minor: '900', override_active: false, override_price_minor: null, price_override_version: 2, position: 1, active: true, availability, availability_version: 3, option_groups: [] }] }] };
+function storeMenu(capabilities: Pick<StoreCatalog, 'can_pause_availability' | 'can_confirm_availability' | 'can_edit_prices' | 'can_detach'>, availability: 'PENDING_CONFIRMATION' | 'AVAILABLE' = 'AVAILABLE', mode: StoreCatalog['mode'] = 'LINKED', companyEmergencyHoldActive = false): StoreCatalog {
+  return { revision: 4, mode, ...capabilities, categories: [{ key: 'food', name: '料理', position: 1, products: [{ key: 'meal', name: '定食', description: '', base_price_minor: '900', effective_price_minor: '900', override_active: false, override_price_minor: null, price_override_version: 2, position: 1, active: true, availability, availability_version: 3, company_emergency_hold_active: companyEmergencyHoldActive, option_groups: [] }] }] };
 }
 
 function deferred<T>() {
