@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -157,4 +158,84 @@ func TestPostgresC2BatchRequestAtomicityAndScopes(t *testing.T) {
 	if _, err = f.Operations.RequestStop(ctx, input); !errors.Is(err, operations.ErrStopRequestPending) {
 		t.Fatalf("overlapping line was allowed: %v", err)
 	}
+}
+
+func TestPostgresC2PendingRequestsPreventDirectSessionClosure(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	for _, status := range []string{"REQUESTED", "KITCHEN_CONFIRMED"} {
+		t.Run(status, func(t *testing.T) {
+			f, grant, scope, state, stop := newRequestedStop(t, ctx, dsn, "c2-session-close-"+status)
+			defer f.Close(ctx)
+			if status == "KITCHEN_CONFIRMED" {
+				var err error
+				state, err = f.Operations.ActOnStopRequest(ctx, operations.StopActionRequest{
+					OrderActionRequest: operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: state.ID, Actor: "cook", ExpectedVersion: state.Version, IdempotencyKey: "confirm"},
+					RequestID:          stop.ID, ExpectedRequestVersion: stop.Version, Action: "confirm",
+				})
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if _, err := f.Pool.Exec(ctx, `UPDATE table_sessions SET status='CLOSED',closed_at=clock_timestamp(),closed_by='test',version=version+1 WHERE session_id=$1`, grant.Session.ID); err == nil || !strings.Contains(err.Error(), "unresolved stop request blocks session closure") {
+				t.Fatalf("direct closure was not rejected by pending-request guard for %s: %v", status, err)
+			}
+			var sessionStatus string
+			if err := f.Pool.QueryRow(ctx, `SELECT status FROM table_sessions WHERE session_id=$1`, grant.Session.ID).Scan(&sessionStatus); err != nil || sessionStatus != "OPEN" {
+				t.Fatalf("rejected closure changed session status=%s err=%v", sessionStatus, err)
+			}
+		})
+	}
+}
+
+func TestPostgresC2TerminalOrUnrelatedRequestsDoNotPreventSessionClosure(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	for _, terminal := range []string{"REJECTED", "WITHDRAWN"} {
+		t.Run("terminal "+terminal, func(t *testing.T) {
+			f, grant, scope, state, stop := newRequestedStop(t, ctx, dsn, "c2-session-close-terminal-"+terminal)
+			defer f.Close(ctx)
+			action, actor, reason := "reject", "kitchen", "already plated"
+			if terminal == "WITHDRAWN" {
+				action, actor, reason = "withdraw", "manager", ""
+			}
+			_, err := f.Operations.ActOnStopRequest(ctx, operations.StopActionRequest{
+				OrderActionRequest: operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: state.ID, Actor: actor, ExpectedVersion: state.Version, IdempotencyKey: "terminal", Reason: reason},
+				RequestID:          stop.ID, ExpectedRequestVersion: stop.Version, Action: action,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = f.Pool.Exec(ctx, `UPDATE table_sessions SET status='CLOSED',closed_at=clock_timestamp(),closed_by='test',version=version+1 WHERE session_id=$1`, grant.Session.ID); err != nil {
+				t.Fatalf("terminal request prevented closure: %v", err)
+			}
+		})
+	}
+
+	t.Run("request on another session", func(t *testing.T) {
+		f, grant, scope, _, _ := newRequestedStop(t, ctx, dsn, "c2-session-close-other-request")
+		defer f.Close(ctx)
+		// Create a second table session in the same fixture schema. The original
+		// session has a pending request; this target session has no order.
+		targetSessionID := grant.Session.ID + "-unrelated"
+		if _, err := f.Pool.Exec(ctx, `INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES($1,$2,$3,'Unrelated table',$4)`, scope.TenantID, scope.StoreID, scope.TableID+"-unrelated", "locator-"+targetSessionID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Pool.Exec(ctx, `INSERT INTO table_sessions(session_id,tenant_id,store_id,table_id,status,qr_mode,expires_at,opened_by) SELECT $1,tenant_id,store_id,$2,'OPEN',qr_mode,expires_at,opened_by FROM table_sessions WHERE session_id=$3`, targetSessionID, scope.TableID+"-unrelated", grant.Session.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.Pool.Exec(ctx, `UPDATE table_sessions SET status='CLOSED',closed_at=clock_timestamp(),closed_by='test',version=version+1 WHERE session_id=$1`, targetSessionID); err != nil {
+			t.Fatalf("request on unrelated session prevented closure: %v", err)
+		}
+	})
 }

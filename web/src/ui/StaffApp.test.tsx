@@ -127,10 +127,36 @@ describe('staff operations', () => {
     expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeNull();
     await clickNth(host!, '.confirm-dialog input[type=checkbox]', 0);
     expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeTruthy();
+    expect(host!.querySelector<HTMLButtonElement>('.confirm-dialog button.primary')!.disabled).toBe(true);
     await clickNth(host!, '.confirm-dialog input[type=checkbox]', 1);
     await clickNth(host!, '.confirm-dialog button.primary', 0);
     await waitFor(() => expect(submitted).toBeTruthy());
     expect(submitted).toMatchObject({ expected_version: 3, expected_request_version: 2, non_delivery_confirmed: true, cash_hand_back_confirmed: true });
+  });
+
+  it('finalizes a paid-cash stop for a zero-price line without cash hand-back', async () => {
+    const request = { id: 'stop-free', line_index: 0, quantity: 1, reason: 'Complimentary item', requesting_manager: 'manager-1', kitchen_confirmer: 'cook-1', status: 'KITCHEN_CONFIRMED' as const, version: 2 };
+    const order = staffOrder({ fulfillment_status: 'PREPARING', payment_method: 'CASH', payment_status: 'PAID', lines: [
+      { ...defaultOrder().lines[0]!, line_index: 1, product_name: 'Paid item', quantity: 1, unit_gross_jpy: '1100' },
+      { ...defaultOrder().lines[0]!, line_index: 0, product_name: 'Complimentary item', quantity: 1, unit_gross_jpy: '0', line_gross_jpy: '0', options: [] },
+    ], cancellation_requests: [request] });
+    let submitted: Record<string, unknown> | undefined;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: true, can_serve: true, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/stop-requests/stop-free/finalize')) { submitted = JSON.parse(String(init.body)); return json({ ...order, version: 4 }); }
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await clickNth(host!, '.stop-request-list button', 1);
+    expect(host?.textContent).toContain('Complimentary item');
+    await clickNth(host!, '.confirm-dialog input[type=checkbox]', 0);
+    expect(within(host!).queryByText('現金をお客様へ返金しました（手渡し確認）')).toBeNull();
+    expect(host!.querySelector<HTMLButtonElement>('.confirm-dialog button.primary')!.disabled).toBe(false);
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(submitted).toBeTruthy());
+    expect(submitted).toMatchObject({ expected_version: 3, expected_request_version: 2, non_delivery_confirmed: true, cash_hand_back_confirmed: false });
   });
 
   it('routes uncertain delivery to a manual exception without asking for cash hand-back', async () => {

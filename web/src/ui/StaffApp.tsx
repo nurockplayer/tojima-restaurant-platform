@@ -541,7 +541,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   };
   const stopAction = (order: StaffOrder, requestID: string, action: 'withdraw' | 'confirm' | 'reject' | 'finalize', reason = '', nonDelivery = true) => {
     const item = order.cancellation_requests?.find((request) => request.id === requestID); if (!item) return;
-    const body = { expected_version: order.version, expected_request_version: item.version, ...(reason ? { reason } : {}), ...(action === 'finalize' ? { non_delivery_confirmed: nonDelivery, cash_hand_back_confirmed: nonDelivery && order.payment_method === 'CASH' && order.payment_status === 'PAID' ? cashHandback : false } : {}) };
+    const body = { expected_version: order.version, expected_request_version: item.version, ...(reason ? { reason } : {}), ...(action === 'finalize' ? { non_delivery_confirmed: nonDelivery, cash_hand_back_confirmed: nonDelivery && stopNeedsCashHandback(order, requestID) ? cashHandback : false } : {}) };
     const writeEpoch = epoch.current;
     startWrite(body, (payload, key) => operationsClient.stopRequestAction(context, token, order, requestID, action, payload, key), async () => { setDialog(null); setStopOrder(null); setStopMode(null); await refreshStopData(order); }, async () => { try { await refreshStopData(order); } finally { if (epoch.current === writeEpoch) clearStopDialog(); } });
   };
@@ -587,6 +587,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
     </form>
   </StaffShell>;
 
+  const stopCashHandbackRequired = stopNeedsCashHandback(stopOrder, stopRequestID);
   return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <div className="workspace staff-workspace">
       <header className="welcome"><div><div className="eyebrow">{t.subtitle}</div><h1>{context.storeID}</h1><p>{context.tenantID}</p></div><button className="text-button" onClick={disconnect}>{t.disconnect}</button></header>
@@ -677,7 +678,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       {stopMode === 'reject' && <><label className="field">{t.stopReason}<textarea rows={3} required maxLength={500} value={adjustReason} disabled={busy || uncertain} onChange={(event) => setAdjustReason(event.target.value)} /></label><button className="button primary wide" disabled={busy || uncertain || !adjustReason.trim()} onClick={() => stopAction(stopOrder, stopRequestID, 'reject', adjustReason.trim())}>{t.stopKitchenReject}</button></>}
       {stopMode === 'confirm' && <button className="button primary wide" disabled={busy || uncertain} onClick={() => stopAction(stopOrder, stopRequestID, 'confirm')}>{t.stopKitchenConfirm}</button>}
       {stopMode === 'withdraw' && <button className="button primary wide" disabled={busy || uncertain} onClick={() => stopAction(stopOrder, stopRequestID, 'withdraw')}>{t.stopWithdraw}</button>}
-      {stopMode === 'finalize' && <><label className="cash-handback"><input type="checkbox" checked={deliveryConfirmed} disabled={busy || uncertain} onChange={(event) => setDeliveryConfirmed(event.target.checked)} />{t.nonDelivery}</label>{!deliveryConfirmed && <><p className="notice">{t.uncertainDelivery}</p><label className="field">{t.stopReason}<textarea rows={3} required maxLength={500} value={adjustReason} disabled={busy || uncertain} onChange={(event) => setAdjustReason(event.target.value)} /></label></>}{deliveryConfirmed && stopOrder.payment_method === 'CASH' && stopOrder.payment_status === 'PAID' && <label className="cash-handback"><input type="checkbox" checked={cashHandback} disabled={busy || uncertain} onChange={(event) => setCashHandback(event.target.checked)} />{t.cashHandback}</label>}<button className="button primary wide" disabled={busy || uncertain || (!deliveryConfirmed && !adjustReason.trim()) || deliveryConfirmed && stopOrder.payment_method === 'CASH' && stopOrder.payment_status === 'PAID' && !cashHandback} onClick={() => stopAction(stopOrder, stopRequestID, 'finalize', deliveryConfirmed ? '' : adjustReason.trim(), deliveryConfirmed)}>{deliveryConfirmed ? t.stopFinalized : t.uncertainDelivery}</button></>}
+      {stopMode === 'finalize' && <><label className="cash-handback"><input type="checkbox" checked={deliveryConfirmed} disabled={busy || uncertain} onChange={(event) => setDeliveryConfirmed(event.target.checked)} />{t.nonDelivery}</label>{!deliveryConfirmed && <><p className="notice">{t.uncertainDelivery}</p><label className="field">{t.stopReason}<textarea rows={3} required maxLength={500} value={adjustReason} disabled={busy || uncertain} onChange={(event) => setAdjustReason(event.target.value)} /></label></>}{deliveryConfirmed && stopCashHandbackRequired && <label className="cash-handback"><input type="checkbox" checked={cashHandback} disabled={busy || uncertain} onChange={(event) => setCashHandback(event.target.checked)} />{t.cashHandback}</label>}<button className="button primary wide" disabled={busy || uncertain || (!deliveryConfirmed && !adjustReason.trim()) || deliveryConfirmed && stopCashHandbackRequired && !cashHandback} onClick={() => stopAction(stopOrder, stopRequestID, 'finalize', deliveryConfirmed ? '' : adjustReason.trim(), deliveryConfirmed)}>{deliveryConfirmed ? t.stopFinalized : t.uncertainDelivery}</button></>}
       <button className="button quiet wide" disabled={busy || uncertain} onClick={clearStopDialog}>{t.closeDialog}</button>{uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}{error && <p className="error" role="alert">{error}</p>}</StaffDialog>}
     {dialog === 'adjust' && adjustOrder && <StaffDialog labelledBy="adjust-title" dismissible={!busy && !uncertain} onDismiss={() => { invalidateAdjustmentPreview(); setDialog(null); }}><div className="eyebrow">{t.orders}</div><h2 id="adjust-title">{t.adjustTitle}</h2><p>{adjustOrder.table_name} · #{adjustOrder.generation} · {amountJPY(adjustOrder.effective_total_gross_jpy ?? adjustOrder.total_gross_jpy)}</p>
       <ul className="adjustment-lines">{adjustOrder.lines.map((line, index) => <li key={`${line.product_name}-${index}`}><span>{line.product_name} · {line.quantity}</span><label className="field">{locale === 'ja' ? '取消数量' : '取消數量'}<input type="number" min={0} max={line.quantity} step={1} inputMode="numeric" value={cancelQty[index] ?? 0} disabled={busy || uncertain} onChange={(event) => { const value = Math.max(0, Math.min(line.quantity, Number(event.target.value) || 0)); invalidateAdjustmentPreview(); setCancelQty((current) => current.map((qty, i) => i === index ? value : qty)); }} /></label></li>)}</ul>
@@ -781,6 +782,14 @@ function statusLabel(status: StaffOrder['fulfillment_status'] | StaffTable['stat
 }
 function paymentLabel(status: StaffOrder['payment_status'], t: typeof copy[Locale]) {
   if (status === 'PAID') return t.paid; if (status === 'REFUNDED') return t.refunded; if (status === 'REFUND_PENDING') return t.refundPending; if (status === 'UNPAID') return t.unpaidStatus; if (status === 'PENDING') return t.pending; return t.unknown;
+}
+function stopNeedsCashHandback(order: StaffOrder | null, requestID: string) {
+  if (!order || order.payment_method !== 'CASH' || order.payment_status !== 'PAID') return false;
+  const request = order.cancellation_requests?.find((item) => item.id === requestID);
+  if (!request || request.quantity <= 0) return false;
+  const line = order.lines.find((item, index) => (item.line_index ?? index) === request.line_index);
+  // Refund sign matches calculateAdjustmentMode's quantity × historical unit gross, including options.
+  return line !== undefined && Number(line.unit_gross_jpy) > 0;
 }
 function modeLabel(mode: string, locale: Locale) {
   if (mode === 'DIRECT_SCAN') return locale === 'ja' ? 'QR参加' : '掃碼加入';

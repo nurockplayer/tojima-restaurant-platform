@@ -54,6 +54,13 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = postgres.Up(ctx, target); err != nil {
 		t.Fatalf("idempotent up: %v", err)
 	}
+	var exists bool
+	if err = target.QueryRow(ctx, `SELECT to_regprocedure($1) IS NOT NULL`, schema+`.protect_table_session_pending_stop_requests()`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("012 pending-session-close guard function missing after up: exists=%v err=%v", exists, err)
+	}
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname='table_sessions_pending_stop_requests' AND NOT tgisinternal)`, schema+`.table_sessions`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("012 pending-session-close guard trigger missing after up: exists=%v err=%v", exists, err)
+	}
 	var version int
 	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 12 {
 		t.Fatalf("migration version %d err %v", version, err)
@@ -75,6 +82,15 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	}
 	if err = tx012.Commit(ctx); err != nil {
 		t.Fatal(err)
+	}
+	if err = target.QueryRow(ctx, `SELECT to_regprocedure($1) IS NOT NULL`, schema+`.protect_table_session_pending_stop_requests()`).Scan(&exists); err != nil || exists {
+		t.Fatalf("012 down retained pending-session-close guard function: exists=%v err=%v", exists, err)
+	}
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname='table_sessions_pending_stop_requests' AND NOT tgisinternal)`, schema+`.table_sessions`).Scan(&exists); err != nil || exists {
+		t.Fatalf("012 down retained pending-session-close guard trigger: exists=%v err=%v", exists, err)
+	}
+	if err = target.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_trigger WHERE tgrelid=$1::regclass AND tgname='table_session_snapshot_immutable' AND NOT tgisinternal)`, schema+`.table_sessions`).Scan(&exists); err != nil || !exists {
+		t.Fatalf("012 down removed original snapshot trigger: exists=%v err=%v", exists, err)
 	}
 	var guard012 string
 	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('validate_operation_order_transition()'::regprocedure)`).Scan(&guard012); err != nil {
@@ -146,7 +162,6 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = postgres.Reapply(ctx, target); err != nil {
 		t.Fatalf("down/up reapply: %v", err)
 	}
-	var exists bool
 	if err = target.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, schema+".operation_order_state").Scan(&exists); err != nil || !exists {
 		t.Fatalf("005 operations schema missing after reapply: exists=%v err=%v", exists, err)
 	}
