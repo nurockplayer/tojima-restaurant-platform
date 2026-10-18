@@ -222,7 +222,7 @@ func releaseOrder(ctx context.Context, tx pgx.Tx, orderID, actor string) error {
 func (s *Service) CheckClose(ctx context.Context, tx pgx.Tx, session tablesession.Session) error {
 	var bad int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM table_orders o LEFT JOIN operation_order_state st ON st.order_id=o.order_id
-		WHERE o.session_id=$1 AND (st.order_id IS NULL OR st.payment_status<>'PAID' OR st.fulfillment_status<>'SERVED' OR st.operational_hold OR st.payment_review_required)`, session.ID).Scan(&bad)
+		WHERE o.session_id=$1 AND (st.order_id IS NULL OR NOT ((st.payment_status='PAID' AND st.fulfillment_status='SERVED') OR (st.fulfillment_status='CANCELLED' AND (st.payment_status='REFUNDED' OR (st.payment_method='CASH' AND st.payment_status='UNPAID')))) OR st.operational_hold OR st.payment_review_required OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED'))`, session.ID).Scan(&bad)
 	if err != nil {
 		return err
 	}
@@ -237,7 +237,7 @@ func (s *Service) ListTables(ctx context.Context, scope StoreScope) ([]TableSumm
 		return nil, ErrInvalid
 	}
 	rows, err := s.db.Query(ctx, `SELECT t.table_id,t.name,coalesce(ts.session_id,''),coalesce(ts.status,'IDLE'),coalesce(ts.qr_mode,st.qr_entry_mode),ts.expires_at,
-		coalesce(sum(CASE WHEN os.payment_method='CASH' AND os.payment_status='UNPAID' AND os.fulfillment_status IS DISTINCT FROM 'CANCELLED' THEN o.total_gross_jpy ELSE 0 END),0),count(o.order_id)
+		coalesce(sum(CASE WHEN os.payment_method='CASH' AND os.payment_status='UNPAID' AND os.fulfillment_status IS DISTINCT FROM 'CANCELLED' THEN coalesce(os.effective_total_gross_jpy,o.total_gross_jpy) ELSE 0 END),0),count(o.order_id)
 		FROM dining_tables t JOIN stores st USING(tenant_id,store_id) JOIN tenants n USING(tenant_id)
 		LEFT JOIN table_sessions ts ON ts.tenant_id=t.tenant_id AND ts.store_id=t.store_id AND ts.table_id=t.table_id AND ts.status='OPEN'
 		LEFT JOIN table_orders o ON o.session_id=ts.session_id LEFT JOIN operation_order_state os ON os.order_id=o.order_id
@@ -331,7 +331,11 @@ type orderRow struct {
 }
 
 func readOrders(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly bool) ([]OrderState, error) {
-	rows, err := readOrderRows(ctx, q, scope, sessionID, releasedOnly)
+	return readOrdersMode(ctx, q, scope, sessionID, releasedOnly, false)
+}
+
+func readOrdersMode(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly, reviewOnly bool) ([]OrderState, error) {
+	rows, err := readOrderRows(ctx, q, scope, sessionID, releasedOnly, reviewOnly)
 	if err != nil {
 		return nil, err
 	}
@@ -342,7 +346,7 @@ func readOrders(ctx context.Context, q orderReader, scope TableScope, sessionID 
 	return out, nil
 }
 
-func readOrderRows(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly bool) ([]orderRow, error) {
+func readOrderRows(ctx context.Context, q orderReader, scope TableScope, sessionID string, releasedOnly, reviewOnly bool) ([]orderRow, error) {
 	args := []any{scope.TenantID, scope.StoreID}
 	where := `o.tenant_id=$1 AND o.store_id=$2`
 	if scope.TableID != "" {
@@ -354,9 +358,15 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		where += fmt.Sprintf(" AND o.session_id=$%d", len(args))
 	}
 	if releasedOnly {
-		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND st.fulfillment_status NOT IN ('SERVED','CANCELLED') AND NOT st.operational_hold AND NOT st.payment_review_required`
+		where += ` AND EXISTS (SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id) AND (st.fulfillment_status NOT IN ('SERVED','CANCELLED') OR (st.fulfillment_status='CANCELLED' AND st.order_updated)) AND NOT st.operational_hold AND NOT st.payment_review_required`
 	}
-	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
+	if reviewOnly {
+		where += ` AND ((st.payment_status='PAID' AND st.payment_review_required AND st.fulfillment_status='WAITING' AND st.review_decision='UNRESOLVED' AND NOT EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)) OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED')) AND dt.enabled AND EXISTS(SELECT 1 FROM stores rs JOIN tenants rt USING(tenant_id) WHERE rs.tenant_id=o.tenant_id AND rs.store_id=o.store_id AND rs.enabled AND rs.operating AND rt.enabled)`
+	}
+	rows, err := q.Query(ctx, `SELECT o.order_id,o.session_id,o.table_id,dt.name,o.generation,o.payment_method,st.payment_status,st.fulfillment_status,o.requires_staff_acceptance,coalesce(st.staff_accepted,false),coalesce(st.cash_mode,''),coalesce(st.operational_hold,false),coalesce(st.payment_review_required,false),coalesce(st.version,0),o.total_gross_jpy,o.created_at,o.quote_snapshot,coalesce(st.review_decision,'UNRESOLVED'),coalesce(st.effective_total_gross_jpy,o.total_gross_jpy),coalesce(st.order_updated,false),coalesce(st.cancelled_quantities,'[]'::jsonb),coalesce((SELECT jsonb_agg(jsonb_build_object('id',r.refund_id,'amount_jpy',r.amount_jpy,'status',r.status,'method',r.method,'safe_error_code',
+		CASE WHEN r.status IN ('REQUESTED','PROCESSING') THEN (SELECT w.safe_error_code FROM stripe_payment_work w
+		WHERE w.refund_id=r.refund_id AND w.refund_generation=r.generation AND w.status IN ('READY','LEASED')
+		AND w.safe_error_code IN ('REFUND_DISPATCH_PENDING','HOLD_RECONCILIATION_NEEDED') ORDER BY w.updated_at DESC LIMIT 1) END) ORDER BY r.created_at,r.refund_id) FROM operation_refunds r WHERE r.order_id=o.order_id),'[]'::jsonb),EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
 		FROM table_orders o JOIN dining_tables dt USING(tenant_id,store_id,table_id) LEFT JOIN operation_order_state st USING(order_id) WHERE `+where+` ORDER BY o.created_at,o.order_id`, args...)
 	if err != nil {
 		return nil, err
@@ -368,9 +378,9 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		var cash string
 		var hold bool
 		var created time.Time
-		var raw []byte
+		var raw, cancelledJSON, refundsJSON []byte
 		var payment, fulfill *string
-		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.kdsCardExists); err != nil {
+		if err = rows.Scan(&v.ID, &v.SessionID, &v.TableID, &v.TableName, &v.Generation, &v.PaymentMethod, &payment, &fulfill, &v.RequiresStaffAcceptance, &v.StaffAccepted, &cash, &hold, &v.PaymentReviewRequired, &v.Version, &v.TotalGrossJPY, &created, &raw, &v.ReviewDecision, &v.EffectiveTotalGrossJPY, &v.OrderUpdated, &cancelledJSON, &refundsJSON, &v.kdsCardExists); err != nil {
 			return nil, err
 		}
 		v.CreatedAt = created
@@ -407,8 +417,15 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 		if err = json.Unmarshal(raw, &snap); err != nil {
 			return nil, err
 		}
-		for _, l := range snap.Quote.Lines {
-			line := OrderLine{ProductName: l.Name, Quantity: l.Quantity, UnitGrossJPY: l.BaseGrossJPY, Options: []OrderOption{}}
+		var cancelled []int64
+		if err = json.Unmarshal(cancelledJSON, &cancelled); err != nil {
+			return nil, err
+		}
+		if err = json.Unmarshal(refundsJSON, &v.Refunds); err != nil {
+			return nil, err
+		}
+		for i, l := range snap.Quote.Lines {
+			line := OrderLine{LineIndex: i, OriginalQuantity: l.Quantity, ProductName: l.Name, Quantity: l.Quantity, UnitGrossJPY: l.BaseGrossJPY, Options: []OrderOption{}}
 			for _, o := range l.Options {
 				if o.PriceGrossJPY < 0 || line.UnitGrossJPY > math.MaxInt64-o.PriceGrossJPY {
 					return nil, ErrInvalid
@@ -422,7 +439,13 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 			if l.Quantity < 0 || (line.UnitGrossJPY != 0 && l.Quantity > math.MaxInt64/line.UnitGrossJPY) {
 				return nil, ErrInvalid
 			}
-			line.LineGrossJPY = line.UnitGrossJPY * l.Quantity
+			if len(cancelled) > 0 {
+				if len(cancelled) != len(snap.Quote.Lines) || cancelled[i] < 0 || cancelled[i] > l.Quantity {
+					return nil, ErrInvalid
+				}
+				line.Quantity -= cancelled[i]
+			}
+			line.LineGrossJPY = line.UnitGrossJPY * line.Quantity
 			v.Lines = append(v.Lines, line)
 		}
 		out = append(out, v)
@@ -433,13 +456,21 @@ func readOrderRows(ctx context.Context, q orderReader, scope TableScope, session
 func closeBlockers(orders []OrderState) []string {
 	out := []string{}
 	for _, o := range orders {
-		if o.PaymentStatus != Paid {
+		for _, r := range o.Refunds {
+			if r.Status != "SUCCEEDED" {
+				out = append(out, "REFUND_UNRESOLVED")
+				break
+			}
+		}
+	}
+	for _, o := range orders {
+		if o.PaymentStatus != Paid && !(o.FulfillmentStatus == Cancelled && (o.PaymentStatus == Refunded || (o.PaymentMethod == "CASH" && o.PaymentStatus == Unpaid))) {
 			out = append(out, "UNPAID_OR_UNKNOWN_PAYMENT")
 			break
 		}
 	}
 	for _, o := range orders {
-		if o.FulfillmentStatus != Served {
+		if o.FulfillmentStatus != Served && o.FulfillmentStatus != Cancelled {
 			out = append(out, "UNSERVED_OR_UNKNOWN_FULFILLMENT")
 			break
 		}
@@ -478,13 +509,17 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	} else if err != nil {
 		return GuestOperations{}, err
 	}
-	rows, err := readOrderRows(ctx, tx, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}, sessionID, false)
+	rows, err := readOrderRows(ctx, tx, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}, sessionID, false, false)
 	if err != nil {
 		return GuestOperations{}, err
 	}
 	out := GuestOperations{Orders: make([]GuestOrderState, 0, len(rows)), CashEnabled: enabled}
 	for _, o := range rows {
-		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, DisplayState: ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), o.PaymentReviewRequired, o.kdsCardExists), PaymentStatus: o.PaymentStatus, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
+		payment := o.PaymentStatus
+		if payment != Unpaid && payment != Paid && payment != Pending {
+			payment = Unknown
+		}
+		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, DisplayState: ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), o.PaymentReviewRequired, o.kdsCardExists), PaymentStatus: payment, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
 	}
 	var trustedAt time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&trustedAt); err != nil {
@@ -642,7 +677,7 @@ func (s *Service) SettleCash(ctx context.Context, input CashSettlementRequest) (
 }
 
 func currentCashOrders(ctx context.Context, tx pgx.Tx, scope TableScope, sessionID string) ([]cashOrder, tax.InvoiceRecord, int64, error) {
-	rows, err := tx.Query(ctx, `SELECT o.order_id,o.total_gross_jpy,st.operational_hold,o.tax_snapshot FROM table_orders o JOIN operation_order_state st USING(order_id)
+	rows, err := tx.Query(ctx, `SELECT o.order_id,coalesce(st.effective_total_gross_jpy,o.total_gross_jpy),st.operational_hold,coalesce(st.effective_tax_snapshot,o.tax_snapshot) FROM table_orders o JOIN operation_order_state st USING(order_id)
 		WHERE o.session_id=$1 AND o.tenant_id=$2 AND o.store_id=$3 AND o.table_id=$4 AND st.payment_method='CASH' AND st.payment_status='UNPAID' AND st.fulfillment_status IS DISTINCT FROM 'CANCELLED' ORDER BY o.order_id LIMIT $5`, sessionID, scope.TenantID, scope.StoreID, scope.TableID, maxCashOrders+1)
 	if err != nil {
 		return nil, tax.InvoiceRecord{}, 0, err
@@ -778,8 +813,20 @@ func (s *Service) mutateOrder(ctx context.Context, input OrderActionRequest, act
 		return OrderState{}, err
 	}
 	defer tx.Rollback(ctx)
-	if err = lockSession(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE"); err != nil {
+	sessionStatus, err := lockSessionStatus(ctx, tx, input.Scope, input.SessionID, "FOR UPDATE")
+	if err != nil {
 		return OrderState{}, err
+	}
+	if sessionStatus != "OPEN" {
+		// A manager may fulfill a reviewed late payment without reopening its
+		// historical session or restoring any guest grant. Other actions stay shut.
+		var approved bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_order_state WHERE order_id=$1 AND session_id=$2 AND tenant_id=$3 AND store_id=$4 AND table_id=$5 AND review_decision='APPROVED')`, input.OrderID, input.SessionID, input.Scope.TenantID, input.Scope.StoreID, input.Scope.TableID).Scan(&approved); err != nil {
+			return OrderState{}, err
+		}
+		if action != "FULFILLMENT" || !approved {
+			return OrderState{}, ErrConflict
+		}
 	}
 	var priorDigest []byte
 	err = tx.QueryRow(ctx, `SELECT request_digest FROM operation_action_idempotency WHERE session_id=$1 AND order_id=$2 AND action=$3 AND idempotency_key=$4`, input.SessionID, input.OrderID, action, input.IdempotencyKey).Scan(&priorDigest)
@@ -834,6 +881,13 @@ func (s *Service) mutateOrder(ctx context.Context, input OrderActionRequest, act
 			return OrderState{}, err
 		}
 	} else {
+		var updated bool
+		if err = tx.QueryRow(ctx, `SELECT order_updated FROM operation_order_state WHERE order_id=$1`, input.OrderID).Scan(&updated); err != nil {
+			return OrderState{}, err
+		}
+		if updated {
+			return OrderState{}, ErrUpdateAcknowledgementRequired
+		}
 		var next FulfillmentStatus
 		switch {
 		case status == Accepted && input.Target == Preparing:

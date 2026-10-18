@@ -1,16 +1,22 @@
 import { bearerHeaders, request as httpRequest } from '../shared/http';
 
 export interface StaffContext { tenantID: string; storeID: string }
-export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean }
+export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean; can_approve_fulfillment?: boolean }
 export interface StaffTable { table_id: string; name: string; session_id?: string; status: 'OPEN' | 'CLOSED' | 'IDLE'; mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN'; expires_at?: string; unpaid_cash_jpy: string; order_count: number }
 export interface StaffOrder {
   id: string; session_id: string; table_id: string; table_name: string; generation: number;
-  payment_method: 'CASH' | 'STRIPE'; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN';
+  payment_method: 'CASH' | 'STRIPE'; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN' | 'REFUND_PENDING' | 'REFUNDED';
   fulfillment_status: 'WAITING' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
   requires_staff_acceptance: boolean; staff_accepted: boolean; cash_mode?: 'PREPAID' | 'PAY_LATER'; version: number;
-  total_gross_jpy: string; created_at: string; blocked_reason?: string;
-  lines: Array<{ product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;
+  total_gross_jpy: string; effective_total_gross_jpy?: string; created_at: string; blocked_reason?: string;
+  order_updated?: boolean; refunds?: Array<{ id: string; amount_jpy: string; status: 'REQUESTED' | 'PROCESSING' | 'SUCCEEDED' | 'FAILED'; method: 'CASH' | 'STRIPE'; safe_error_code?: 'REFUND_DISPATCH_PENDING' | 'HOLD_RECONCILIATION_NEEDED' }>;
+  payment_review_required?: boolean; review_reason_codes?: Array<'COMPANY_HOLD' | 'OPERATIONAL_HOLD' | 'SESSION_CLOSED' | 'PAYMENT_REVIEW' | 'REFUND_UNRESOLVED'>;
+  review_decision?: 'UNRESOLVED' | 'APPROVED' | 'CANCELLED';
+  lines: Array<{ line_index?: number; original_quantity?: number; product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;
 }
+export interface AdjustmentLine { line_index: number; cancelled_quantity: number }
+export interface AdjustmentRequest { expected_version: number; reason: string; lines: AdjustmentLine[]; cash_hand_back_confirmed: boolean }
+export interface AdjustmentPreview { expected_version: number; original_total_gross_jpy: string; effective_total_gross_jpy: string; refund_amount_jpy: string; whole_order_cancel: boolean; lines: Array<{ line_index: number; original_quantity: number; cancelled_quantity: number; effective_quantity: number; effective_total_gross_jpy: string }> }
 export interface Receipt {
   id: string; session_id: string; order_ids: string[]; due_jpy: string; tendered_jpy: string; change_jpy: string;
   cashier_id: string; register_session_ref: string; created_at: string;
@@ -38,6 +44,12 @@ export const operationsClient = {
   tables: (context: StaffContext, token: string) => request<{ tables: StaffTable[] }>(`${base(context)}/operations/tables`, token),
   session: (context: StaffContext, token: string, tableID: string, sessionID: string) => request<SessionOperations>(`${base(context)}/tables/${enc(tableID)}/sessions/${enc(sessionID)}/operations`, token),
   kds: (context: StaffContext, token: string, signal?: AbortSignal) => request<{ orders: StaffOrder[] }>(`${base(context)}/operations/kds`, token, { signal }),
+  reviews: (context: StaffContext, token: string) => request<{ orders: StaffOrder[] }>(`${base(context)}/operations/reviews`, token),
+  approveFulfillment: (context: StaffContext, token: string, order: StaffOrder, body: { expected_version: number; reason: string }, key: string) => request<StaffOrder>(`${base(context)}/tables/${enc(order.table_id)}/sessions/${enc(order.session_id)}/orders/${enc(order.id)}/approve-fulfillment`, token, json(body, key)),
+  previewAdjustment: (context: StaffContext, token: string, order: StaffOrder, body: AdjustmentRequest) => request<AdjustmentPreview>(`${orderPath(context, order)}/adjustments/preview`, token, json(body)),
+  adjustOrder: (context: StaffContext, token: string, order: StaffOrder, body: AdjustmentRequest, key: string) => request<StaffOrder>(`${orderPath(context, order)}/adjustments`, token, json(body, key)),
+  retryRefund: (context: StaffContext, token: string, order: StaffOrder, refundID: string, expectedVersion: number, key: string) => request<StaffOrder>(`${orderPath(context, order)}/refunds/${enc(refundID)}/retry`, token, json({ expected_version: expectedVersion }, key)),
+  acknowledgeOrderUpdate: (context: StaffContext, token: string, order: StaffOrder, expectedVersion: number, key: string) => request<StaffOrder>(`${orderPath(context, order)}/acknowledge-update`, token, json({ expected_version: expectedVersion }, key)),
   cashSettings: (context: StaffContext, token: string) => request<CashSettings>(`${base(context)}/operations/cash-settings`, token),
   saveCashSettings: (context: StaffContext, token: string, settings: Omit<CashSettings, 'version'> & { expected_version: number }, key: string) => request<CashSettings>(`${base(context)}/operations/cash-settings`, token, { ...json(settings, key), method: 'PUT' }),
   cashPreview: (context: StaffContext, token: string, tableID: string, sessionID: string) => request<CashPreview>(`${sessionPath(context, tableID, sessionID)}/cash/preview`, token, json({})),
@@ -51,4 +63,5 @@ export const operationsClient = {
 
 function base(context: StaffContext) { return `/v1/staff/tenants/${enc(context.tenantID)}/stores/${enc(context.storeID)}`; }
 function sessionPath(context: StaffContext, tableID: string, sessionID: string) { return `${base(context)}/tables/${enc(tableID)}/sessions/${enc(sessionID)}`; }
+function orderPath(context: StaffContext, order: StaffOrder) { return `${sessionPath(context, order.table_id, order.session_id)}/orders/${enc(order.id)}`; }
 function enc(value: string) { return encodeURIComponent(value); }

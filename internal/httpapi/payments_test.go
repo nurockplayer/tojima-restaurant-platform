@@ -132,18 +132,24 @@ func TestPaymentsAPIWebhookRejectsUnverifiedBodyBeforeEnqueue(t *testing.T) {
 }
 
 func TestPaymentStatusProjectionContainsNoProviderURLOrIdentifiers(t *testing.T) {
-	w := httptest.NewRecorder()
-	writePaymentStatus(w, payments.Status{OrderID: "order-safe", State: payments.StateOpen, CheckoutStatus: "open", PaymentStatus: "unpaid"}, true)
-	var got map[string]any
-	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
-		t.Fatal(err)
-	}
-	if got["order_id"] != "order-safe" || got["resume_available"] != true || got["payment_review_required"] != false {
-		t.Fatalf("incorrect safe status: %v", got)
-	}
-	for _, forbidden := range []string{"url", "checkout_url", "checkout_session_id", "payment_intent_id", "account_id", "proof", "checkout_proof_hash"} {
-		if _, ok := got[forbidden]; ok {
-			t.Fatalf("private field %q in projection: %v", forbidden, got)
+	for _, staff := range []bool{false, true} {
+		w := httptest.NewRecorder()
+		writePaymentStatus(w, payments.Status{OrderID: "order-safe", State: payments.StateOpen, CheckoutStatus: "open", PaymentStatus: "unpaid", SafeErrorCode: "HOLD_RECONCILIATION_NEEDED"}, !staff, staff)
+		var got map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if got["order_id"] != "order-safe" || got["resume_available"] != !staff || got["payment_review_required"] != false {
+			t.Fatalf("incorrect safe status: %v", got)
+		}
+		code, present := got["safe_error_code"]
+		if present != staff || (staff && code != "HOLD_RECONCILIATION_NEEDED") {
+			t.Fatalf("incorrect disposition visibility: staff=%v status=%v", staff, got)
+		}
+		for _, forbidden := range []string{"url", "checkout_url", "checkout_session_id", "payment_intent_id", "account_id", "proof", "checkout_proof_hash"} {
+			if _, ok := got[forbidden]; ok {
+				t.Fatalf("private field %q in projection: %v", forbidden, got)
+			}
 		}
 	}
 }

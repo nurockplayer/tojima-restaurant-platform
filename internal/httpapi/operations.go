@@ -23,6 +23,7 @@ type OperationsAPI struct {
 }
 
 var cashRoles = []authz.Role{authz.Staff, authz.StoreManager}
+var fulfillmentApprovalRoles = []authz.Role{authz.StoreManager}
 var manageRoles = []authz.Role{authz.StoreManager, authz.TenantAdmin}
 var operationReadRoles = []authz.Role{authz.Staff, authz.StoreManager, authz.Kitchen, authz.TenantAdmin}
 
@@ -40,13 +41,19 @@ func NewOperationsHandler(service *operations.Service, sessions *tablesession.Se
 	m.HandleFunc("GET "+base+"/operations/access", a.access)
 	m.HandleFunc("GET "+base+"/operations/tables", a.tables)
 	m.HandleFunc("GET "+base+"/operations/kds", a.kds)
+	m.HandleFunc("GET "+base+"/operations/reviews", a.reviews)
 	m.HandleFunc("GET "+base+"/operations/cash-settings", a.settings)
 	m.HandleFunc("PUT "+base+"/operations/cash-settings", a.setSettings)
 	m.HandleFunc("GET "+session+"/operations", a.detail)
 	m.HandleFunc("POST "+session+"/cash/preview", a.cashPreview)
 	m.HandleFunc("POST "+session+"/cash/settle", a.settle)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/accept", a.accept)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/approve-fulfillment", a.approveFulfillment)
 	m.HandleFunc("POST "+session+"/orders/{orderID}/fulfillment", a.fulfillment)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments/preview", a.previewAdjustment)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/adjustments", a.adjustOrder)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/refunds/{refundID}/retry", a.retryRefund)
+	m.HandleFunc("POST "+session+"/orders/{orderID}/acknowledge-update", a.acknowledgeUpdate)
 	m.HandleFunc("GET /v1/guest/sessions/{sessionID}/operations", a.guest)
 	return noStore(m)
 }
@@ -120,7 +127,7 @@ func (a OperationsAPI) access(w http.ResponseWriter, r *http.Request) {
 	allows := func(roles []authz.Role) bool {
 		return a.Authorizer.Authorize(r.Context(), authz.Request{Actor: actor, Permission: "operations.access", Resource: authz.Scope{TenantID: s.TenantID, StoreID: s.StoreID}, AllowedRoles: roles, MFARequiredRoles: manageRoles}) == nil
 	}
-	writeJSON(w, 200, map[string]bool{"can_cash": allows(cashRoles), "can_serve": allows(cashRoles), "can_kitchen": allows([]authz.Role{authz.Kitchen}), "can_manage": allows(manageRoles)})
+	writeJSON(w, 200, map[string]bool{"can_cash": allows(cashRoles), "can_serve": allows(cashRoles), "can_kitchen": allows([]authz.Role{authz.Kitchen}), "can_manage": allows(manageRoles), "can_approve_fulfillment": allows(fulfillmentApprovalRoles)})
 }
 
 func operationBody(w http.ResponseWriter, r *http.Request, dst any) bool {
@@ -176,6 +183,53 @@ func (a OperationsAPI) kds(w http.ResponseWriter, r *http.Request) {
 	}
 	operationRespond(w, map[string]any{"orders": v}, err)
 }
+
+// The store-wide queue includes historical sessions: a late payment can need
+// review after expiry/close, when it no longer appears in the active table list.
+func (a OperationsAPI) reviews(w http.ResponseWriter, r *http.Request) {
+	scope, _, ok := a.authorize(w, r, "operations.reviews.read", operationReadRoles)
+	if !ok {
+		return
+	}
+	orders, err := a.Operations.ListPaymentReviews(r.Context(), scope)
+	if orders == nil {
+		orders = []operations.OrderState{}
+	}
+	operationRespond(w, map[string]any{"orders": orders}, err)
+}
+
+func (a OperationsAPI) approveFulfillment(w http.ResponseWriter, r *http.Request) {
+	scope, actor, ok := a.tableAuthorize(w, r, "operations.order.approve_fulfillment", fulfillmentApprovalRoles)
+	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedVersion int64  `json:"expected_version"`
+		Reason          string `json:"reason"`
+	}
+	if !operationBody(w, r, &body) {
+		return
+	}
+	result, err := a.Operations.ApproveFulfillment(r.Context(), operations.OrderActionRequest{
+		Scope: scope, SessionID: r.PathValue("sessionID"), OrderID: r.PathValue("orderID"),
+		Actor: actor.SubjectID, ExpectedVersion: body.ExpectedVersion, Reason: body.Reason,
+		IdempotencyKey: r.Header.Get("Idempotency-Key"),
+	})
+	// Distinguish stale consent from an uncertain request or a current HQ hold.
+	switch {
+	case errors.Is(err, operations.ErrConflict):
+		writeError(w, 409, "stale_version")
+	case errors.Is(err, operations.ErrIdempotencyConflict):
+		writeError(w, 409, "idempotency_conflict")
+	case errors.Is(err, operations.ErrCompanyHoldActive):
+		writeError(w, 409, "company_hold_active")
+	case errors.Is(err, operations.ErrReviewNotReady):
+		writeError(w, 409, "review_not_ready")
+	default:
+		operationRespond(w, result, err)
+	}
+}
+
 func (a OperationsAPI) settings(w http.ResponseWriter, r *http.Request) {
 	s, _, ok := a.authorize(w, r, "operations.cash_settings.read", operationReadRoles)
 	if !ok {
@@ -325,6 +379,8 @@ func operationRespond(w http.ResponseWriter, v any, err error) {
 		writeError(w, 403, "forbidden")
 	case errors.Is(err, operations.ErrReconfirm):
 		writeError(w, 409, "reconfirm")
+	case errors.Is(err, operations.ErrUpdateAcknowledgementRequired):
+		writeError(w, 409, "kitchen_acknowledgement_required")
 	case errors.Is(err, operations.ErrCashUnavailable):
 		writeError(w, 409, "cash_unavailable")
 	case errors.Is(err, operations.ErrConflict), errors.Is(err, operations.ErrIdempotencyConflict):

@@ -10,7 +10,7 @@ func GuestDisplayState(payment, fulfillment string, review, kdsCardExists bool) 
 		return "UNKNOWN"
 	}
 	switch fulfillment {
-	case "WAITING", "ACCEPTED", "PREPARING", "READY", "SERVED", "CANCELLED":
+	case "WAITING", "ACCEPTED", "PREPARING", "READY", "SERVED":
 	default:
 		return "UNKNOWN"
 	}

@@ -1,9 +1,10 @@
 # P80 Stripe provider adapter
 
 `internal/stripeprovider` is a small Stripe API transport adapter. It provides
-Checkout Session create/retrieve/expire, PaymentIntent retrieve, and verified
-webhook projection. It does not persist payment attempts, choose a merchant,
-decide whether money is paid, or release an order.
+Checkout Session create/retrieve/expire, PaymentIntent retrieve, exact
+PaymentIntent refunds, refund retrieval, and verified webhook projection. It
+does not persist payment attempts, choose a merchant, decide whether money is
+paid, or release an order.
 
 ## API and configuration
 
@@ -47,6 +48,8 @@ The public methods are:
 - `RetrieveCheckout(ctx, AccountContext, sessionID) (CheckoutResult, error)`
 - `ExpireCheckout(ctx, AccountContext, sessionID, idempotencyKey) (CheckoutResult, error)`
 - `RetrievePaymentIntent(ctx, AccountContext, paymentIntentID) (PaymentIntentResult, error)`
+- `CreateRefund(ctx, CreateRefundRequest) (RefundResult, error)`
+- `RetrieveRefund(ctx, AccountContext, refundID) (RefundResult, error)`
 - `ReadWebhookBody(io.Reader) ([]byte, error)` for bounded HTTP ingress reads
 - `VerifyWebhook(rawBody, signature, activeSecrets, trustedNow) (VerifiedEvent, error)`
 
@@ -55,10 +58,33 @@ oversized ingress. `VerifyWebhook` verifies the exact raw bytes through Stripe's
 accepts current plus previous endpoint secrets during rotation, enforces a
 1 MiB body ceiling and a symmetric five-minute timestamp window (including
 future timestamps), and requires the SDK API version and `livemode=false`.
-Only Checkout Session and PaymentIntent events are projected. The webhook
-projection omits Checkout URLs. Event account, object, amount, currency,
-metadata, and payment state are data for the caller to compare to its durable
-attempt; they do not establish tenant/store authority by themselves.
+Checkout Session, PaymentIntent, `refund.updated`, `refund.failed`, and
+`charge.refunded` events are projected. A charge refund event carries its
+embedded refund objects and correlates each to the charge PaymentIntent. The
+projection preserves all embedded refund metadata and exposes `RefundsHasMore`
+when Stripe's refund list is paginated, so handlers must match the durable
+`refund_id` and retrieve the target refund when they need a current provider
+snapshot. Stripe's event reference describes `charge.refunded` as including
+partial refunds and says `refund.created` carries refund creation details; this
+adapter supports the three requested reconciliation events, while the pinned
+SDK v87 also defines the corresponding event constants.
+The webhook projection omits Checkout URLs. Event account, object, amount,
+currency, metadata, and payment state are data for the caller to compare to its
+durable attempt/refund; they do not establish tenant/store authority by themselves.
+
+`CreateRefund` accepts a positive integer JPY amount under the configured
+ceiling, the original PaymentIntent ID, a stable idempotency key, and server
+owned tenant/store/order/refund references. It sends the explicit connected
+account header, test-only credentials, and all four references as refund
+metadata. Provider transport errors and mismatched create responses return
+`ErrOutcomeUnknown`; callers reconcile by refund ID/metadata or retry only with
+the same immutable request and idempotency key. `RetrieveRefund` is account
+qualified and checks the requested ID, JPY amount/currency, status, and original
+PaymentIntent correlation. The pinned Stripe Refund object has no `livemode`
+field; the adapter therefore relies on the constructor's test-only API key for
+API responses and rejects webhook events whose event envelope is live mode.
+Neither operation decides whether a refund is permitted or whether a pending
+refund counts as success.
 
 Provider errors are static typed sentinels and never wrap SDK responses. Checkout creation transport errors and unsafe/mismatched create responses
 return `ErrOutcomeUnknown`; expiration transport or response errors use the
@@ -86,8 +112,13 @@ The adapter alone makes no exactly-once or payment-fulfillment guarantee.
 round-tripper; it checks request headers and JPY form values, absence of
 Automatic Tax, no retry after an ambiguous response, retrieve/expire behavior,
 and signature rotation, exact-body verification, timestamp bounds, API
-version, live-mode, size, and redaction boundaries. It does not use Stripe
+version, live-mode, size, refund transport and refund-event projection, and
+redaction boundaries. It does not use Stripe
 keys, contact Stripe, or claim a real Stripe Test Mode E2E.
+
+Refund event names and descriptions were checked against Stripe's [event type
+reference](https://docs.stripe.com/api/events/types); the pinned SDK source is
+`github.com/stripe/stripe-go/v87` at v87.0.0.
 
 ## Approved secret placement (2026-10-18)
 

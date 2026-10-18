@@ -1,0 +1,4 @@
+DROP TRIGGER stripe_payment_attempt_hold_expiry_retained ON stripe_payment_attempts;
+DROP FUNCTION protect_company_hold_expiry_request();
+DROP INDEX stripe_payment_attempt_hold_candidates_idx;
+ALTER TABLE stripe_payment_attempts DROP COLUMN company_hold_expire_requested_at;

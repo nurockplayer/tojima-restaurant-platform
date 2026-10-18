@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"strings"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 type workItem struct {
 	ID, Lease, Kind, OrderID string
 	WebhookID                *int64
+	RefundID                 *string
+	RefundEventID            *int64
+	RefundGeneration         *int64
+	Attempts                 int
 }
 
 func (s *Service) processNext(ctx context.Context) (bool, error) {
@@ -25,9 +30,13 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 	}
 	defer tx.Rollback(ctx)
 	var item workItem
-	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id FROM stripe_payment_work
+	// Prefer fresh CREATE/webhook work, but after 30 seconds overdue let EXPIRE
+	// compete by available_at. New arrivals cannot indefinitely overtake it.
+	// Retry backoff resets available_at, so a recurring expiry gets no head start.
+	err = tx.QueryRow(ctx, `SELECT work_id,work_type,coalesce(order_id,''),webhook_row_id,refund_id,refund_event_row_id,refund_generation,attempts+1 FROM stripe_payment_work
 		WHERE (status='READY' AND available_at<=clock_timestamp()) OR (status='LEASED' AND lease_until<=clock_timestamp())
-		ORDER BY available_at,created_at FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID)
+		ORDER BY CASE WHEN work_type='EXPIRE' AND available_at>statement_timestamp()-interval '30 seconds' THEN 1 ELSE 0 END,available_at,created_at
+		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&item.ID, &item.Kind, &item.OrderID, &item.WebhookID, &item.RefundID, &item.RefundEventID, &item.RefundGeneration, &item.Attempts)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -52,6 +61,10 @@ func (s *Service) processNext(ctx context.Context) (bool, error) {
 		err = s.processWebhook(ctx, item)
 	case "EXPIRE":
 		err = s.processExpire(ctx, item)
+	case "REFUND":
+		err = s.processRefund(ctx, item)
+	case "REFUND_WEBHOOK":
+		err = s.processRefundWebhook(ctx, item)
 	default:
 		err = ErrInvalid
 	}
@@ -66,6 +79,7 @@ type createRow struct {
 	amount, generation                                                                 int64
 	retry                                                                              time.Time
 	checkout, paymentIntent                                                            string
+	holdExpire                                                                         bool
 }
 
 func (s *Service) processCreate(ctx context.Context, w workItem) error {
@@ -164,10 +178,10 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	}
 	var state string
 	var currentSession string
-	var review, hold bool
+	var review, hold, companyHold bool
 	var sessionActive bool
-	err = tx.QueryRow(ctx, `SELECT a.state,a.session_id,coalesce(os.payment_review_required,true),coalesce(os.operational_hold,true),ts.status='OPEN' AND ts.expires_at>clock_timestamp()
-		FROM stripe_payment_attempts a LEFT JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id WHERE a.order_id=$1 FOR UPDATE OF a`, a.order).Scan(&state, &currentSession, &review, &hold, &sessionActive)
+	err = tx.QueryRow(ctx, `SELECT a.state,a.session_id,coalesce(os.payment_review_required,true),coalesce(os.operational_hold,true),a.company_hold_expire_requested_at IS NOT NULL,ts.status='OPEN' AND ts.expires_at>clock_timestamp()
+		FROM stripe_payment_attempts a LEFT JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=a.session_id WHERE a.order_id=$1 FOR UPDATE OF a`, a.order).Scan(&state, &currentSession, &review, &hold, &companyHold, &sessionActive)
 	if err != nil {
 		return err
 	}
@@ -191,8 +205,12 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	if !now.Before(x.ExpiresAt) && x.Status == stripeprovider.CheckoutOpen {
 		newState = StateExpired
 	}
-	if hold || review || !sessionActive {
+	if hold || review || companyHold || !sessionActive {
 		newState = StateUnknown
+	}
+	// A late create response must not resurrect an already reconciled session.
+	if state == string(StateExpired) || state == string(StateFailed) {
+		newState = AttemptState(state)
 	}
 	if x.PaymentStatus == stripeprovider.PaymentPaid {
 		_, err = s.ops.ApplyStripePaidTx(ctx, tx, operations.VerifiedStripePayment{OrderID: a.order, SessionID: a.session, TenantID: a.tenant, StoreID: a.store, TableID: a.table, AmountJPY: a.amount, Currency: stripeprovider.CurrencyJPY, PaymentIntent: x.PaymentIntentID})
@@ -215,7 +233,13 @@ func (s *Service) persistCheckout(ctx context.Context, w workItem, a createRow, 
 	if err = s.appendAttemptEvent(ctx, tx, a.order, "CREATE_RESULT:"+x.SessionID, state, string(newState), "provider"); err != nil {
 		return err
 	}
-	if newState == StateUnknown && x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid {
+	// A preserved terminal attempt cannot offer continuation, even while its
+	// table session remains active. Expiry follows the observed payable Checkout
+	// and availability, independently of the resulting attempt state. Company
+	// holds already own retained EXPIRE work; keep the legacy key otherwise.
+	needsExpire := x.Status == stripeprovider.CheckoutOpen && x.PaymentStatus == stripeprovider.PaymentUnpaid &&
+		(hold || review || companyHold || !sessionActive || !now.Before(x.ExpiresAt) || state == string(StateFailed) || state == string(StateExpired))
+	if needsExpire && !companyHold {
 		if err = s.enqueueWork(ctx, tx, "EXPIRE", a.order, nil, "expire:"+a.attempt+":"+x.SessionID); err != nil {
 			return err
 		}
@@ -320,6 +344,9 @@ func bytesEqual(a, b []byte) bool {
 func (s *Service) enqueueVerifiedWebhook(ctx context.Context, event stripeprovider.VerifiedEvent) (bool, error) {
 	if event.ID == "" || event.AccountID == "" || event.APIVersion != stripeprovider.APIVersion || event.LiveMode || event.CreatedAt.IsZero() {
 		return false, stripeprovider.ErrWebhook
+	}
+	if event.Refund != nil || len(event.Refunds) > 0 {
+		return s.enqueueRefundWebhook(ctx, event)
 	}
 	var tenant, store, order, attempt, checkoutID, paymentIntentID, checkoutStatus, paymentStatus, piStatus string
 	var amount int64
@@ -428,6 +455,106 @@ func (s *Service) enqueueVerifiedWebhook(ctx context.Context, event stripeprovid
 	return true, nil
 }
 
+func (s *Service) enqueueRefundWebhook(ctx context.Context, event stripeprovider.VerifiedEvent) (bool, error) {
+	refunds := append([]stripeprovider.RefundResult(nil), event.Refunds...)
+	if event.Refund != nil {
+		refunds = []stripeprovider.RefundResult{*event.Refund}
+	}
+	if len(refunds) == 0 {
+		return false, stripeprovider.ErrWebhook
+	}
+	if event.Type == "charge.refunded" {
+		if !strings.HasPrefix(event.ObjectID, "ch_") {
+			return false, stripeprovider.ErrWebhook
+		}
+	} else if event.Refund == nil || event.ObjectID != event.Refund.ID {
+		return false, stripeprovider.ErrWebhook
+	}
+	sort.Slice(refunds, func(i, j int) bool { return refunds[i].Metadata["refund_id"] < refunds[j].Metadata["refund_id"] })
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	accepted := false
+	for _, x := range refunds {
+		refundID := x.Metadata["refund_id"]
+		// Charge events contain a bounded embedded list, potentially including
+		// dashboard/other-application refunds. Only manager-created local refunds
+		// have our correlation metadata; ignore unrelated entries, never create one.
+		if event.Type == "charge.refunded" && refundID == "" {
+			continue
+		}
+		if x.AccountID != event.AccountID || x.ID == "" || refundID == "" || x.AmountJPY <= 0 || x.Currency != stripeprovider.CurrencyJPY || x.LiveMode || x.PaymentIntentID == "" ||
+			x.Metadata["tenant_id"] == "" || x.Metadata["store_id"] == "" || x.Metadata["order_id"] == "" ||
+			!(event.Type == "charge.refunded" || event.Type == "refund.updated" || event.Type == "refund.failed") {
+			return false, stripeprovider.ErrWebhook
+		}
+		var order, tenant, store, account, pi, boundID string
+		var amount int64
+		var refundGeneration int64
+		err = tx.QueryRow(ctx, `SELECT r.order_id,a.tenant_id,a.store_id,a.stripe_account_id,coalesce(a.payment_intent_id,''),r.amount_jpy,r.generation,coalesce(r.provider_refund_id,'')
+			FROM operation_refunds r JOIN stripe_payment_attempts a USING(order_id) WHERE r.refund_id=$1`, refundID).
+			Scan(&order, &tenant, &store, &account, &pi, &amount, &refundGeneration, &boundID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, ErrNotFound
+		}
+		if err != nil {
+			return false, err
+		}
+		if order != x.Metadata["order_id"] || tenant != x.Metadata["tenant_id"] || store != x.Metadata["store_id"] || account != event.AccountID || pi != x.PaymentIntentID || amount != x.AmountJPY {
+			return false, ErrDenied
+		}
+		// Ingress must use the same lock order as adjustment/retry workers;
+		// taking refund SHARE before attempt UPDATE can deadlock a manager.
+		if err = lockPaymentSessionAny(ctx, tx, order); err != nil {
+			return false, err
+		}
+		if _, err = tx.Exec(ctx, `SELECT 1 FROM stripe_payment_attempts WHERE order_id=$1 FOR UPDATE`, order); err != nil {
+			return false, err
+		}
+		if _, err = tx.Exec(ctx, `SELECT 1 FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, order); err != nil {
+			return false, err
+		}
+		if err = tx.QueryRow(ctx, `SELECT generation,coalesce(provider_refund_id,'') FROM operation_refunds WHERE refund_id=$1 FOR UPDATE`, refundID).Scan(&refundGeneration, &boundID); err != nil {
+			return false, err
+		}
+		var wasUsed bool
+		if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_refund_attempt_history WHERE refund_id=$1 AND provider_refund_id=$2)`, refundID, x.ID).Scan(&wasUsed); err != nil {
+			return false, err
+		}
+		if wasUsed {
+			continue
+		} // acknowledged stale generation; never bind it again
+		if boundID != "" && boundID != x.ID {
+			return false, ErrDenied
+		}
+		var eventRowID int64
+		err = tx.QueryRow(ctx, `INSERT INTO stripe_refund_webhook_events(stripe_account_id,stripe_event_id,refund_id,generation,provider_object_id,event_type,amount_jpy,payment_intent_id,provider_status,api_version,livemode,event_created_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,false,$11) ON CONFLICT(stripe_account_id,stripe_event_id,refund_id) DO NOTHING RETURNING event_row_id`, event.AccountID, event.ID, refundID, refundGeneration, x.ID, event.Type, x.AmountJPY, x.PaymentIntentID, x.Status, event.APIVersion, event.CreatedAt.UTC()).Scan(&eventRowID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			continue
+		}
+		if err != nil {
+			return false, err
+		}
+		key := "refund-webhook:" + event.AccountID + ":" + event.ID + ":" + refundID
+		workID, err := s.randomID()
+		if err != nil {
+			return false, err
+		}
+		_, err = tx.Exec(ctx, `INSERT INTO stripe_payment_work(work_id,dedupe_key,work_type,order_id,refund_id,refund_event_row_id,refund_generation) VALUES($1,$2,'REFUND_WEBHOOK',$3,$4,$5,$6) ON CONFLICT(dedupe_key) DO NOTHING`, workID, key, order, refundID, eventRowID, refundGeneration)
+		if err != nil {
+			return false, err
+		}
+		accepted = true
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return accepted, nil
+}
+
 func supportedEvent(t string) bool {
 	switch t {
 	case "checkout.session.completed", "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed", "checkout.session.expired", "payment_intent.succeeded", "payment_intent.payment_failed", "payment_intent.processing":
@@ -531,6 +658,14 @@ func (s *Service) processWebhook(ctx context.Context, w workItem) error {
 		if err != nil {
 			return err
 		}
+	} else if existingCheckout == "" && e.checkout != "" {
+		// A terminal state must not discard a validated late binding. Retained
+		// EXPIRE work needs this ID to retrieve the outcome after CREATE stops.
+		// Save only the binding and Checkout status; preserve payment/state rules.
+		_, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET checkout_session_id=$2,payment_intent_id=coalesce(payment_intent_id,NULLIF($3,'')),checkout_status=coalesce(NULLIF($4,''),checkout_status),last_reconciled_at=clock_timestamp(),updated_at=clock_timestamp() WHERE order_id=$1`, e.order, e.checkout, e.pi, e.checkoutStatus)
+		if err != nil {
+			return err
+		}
 	}
 	if _, err = tx.Exec(ctx, `UPDATE stripe_webhook_events SET processed_at=clock_timestamp(),safe_error_code=NULL WHERE webhook_row_id=$1`, e.rowID); err != nil {
 		return err
@@ -547,6 +682,12 @@ func lockPaymentSessionAny(ctx context.Context, tx pgx.Tx, order string) error {
 	if err != nil {
 		return err
 	}
+	// Match HQ hold/admission ordering, including the first hold for a product.
+	var catalogID int64
+	err = tx.QueryRow(ctx, `SELECT catalog_id FROM menu_catalogs WHERE tenant_id=$1 AND owner_kind='COMPANY' FOR SHARE`, tenant).Scan(&catalogID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
 	var found string
 	err = tx.QueryRow(ctx, `SELECT session_id FROM table_sessions WHERE session_id=$1 AND tenant_id=$2 AND store_id=$3 AND table_id=$4 FOR UPDATE`, sid, tenant, store, table).Scan(&found)
 	return err
@@ -554,16 +695,25 @@ func lockPaymentSessionAny(ctx context.Context, tx pgx.Tx, order string) error {
 
 func (s *Service) processExpire(ctx context.Context, w workItem) error {
 	var a createRow
+	var currentState string
 	err := s.db.QueryRow(ctx, `SELECT order_id,attempt_id,session_id,tenant_id,store_id,table_id,provider_mode,stripe_account_id,credential_ref,api_version,
-		request_profile_fingerprint,idempotency_key,amount_jpy,coalesce(checkout_session_id,''),coalesce(payment_intent_id,''),retry_not_after
-		FROM stripe_payment_attempts WHERE order_id=$1`, w.OrderID).Scan(&a.order, &a.attempt, &a.session, &a.tenant, &a.store, &a.table, &a.mode, &a.account, &a.credential, &a.api, &a.profile, &a.key, &a.amount, &a.checkout, &a.paymentIntent, &a.retry)
+		request_profile_fingerprint,idempotency_key,amount_jpy,coalesce(checkout_session_id,''),coalesce(payment_intent_id,''),retry_not_after,company_hold_expire_requested_at IS NOT NULL,state
+		FROM stripe_payment_attempts WHERE order_id=$1`, w.OrderID).Scan(&a.order, &a.attempt, &a.session, &a.tenant, &a.store, &a.table, &a.mode, &a.account, &a.credential, &a.api, &a.profile, &a.key, &a.amount, &a.checkout, &a.paymentIntent, &a.retry, &a.holdExpire, &currentState)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return s.finishWork(ctx, w, false, 0, "MISSING_ATTEMPT")
 	}
 	if err != nil {
 		return err
 	}
+	if currentState == string(StatePaid) || currentState == string(StateReviewRequired) {
+		return s.finishWork(ctx, w, false, 0, "ALREADY_PAID")
+	}
 	if a.checkout == "" {
+		if a.holdExpire {
+			// CREATE may still be in flight or recovering the same idempotency
+			// key. Retain this work until the session binding becomes known.
+			return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "WAITING_FOR_CHECKOUT")
+		}
 		return s.finishWork(ctx, w, false, 0, "NO_CHECKOUT_TO_EXPIRE")
 	}
 	if stopped, err := s.stopExpiredRetryWindow(ctx, w, a); stopped || err != nil {
@@ -609,10 +759,15 @@ func (s *Service) processExpire(ctx context.Context, w workItem) error {
 }
 
 // stopExpiredRetryWindow is checked before each provider call so an EXPIRE
-// work item cannot keep making remote requests after the attempt's immutable
-// create/reconciliation deadline. Once exhausted, UNKNOWN is the safe local
+// non-company work item cannot keep making remote requests after the attempt's
+// immutable create/reconciliation deadline. Once exhausted, UNKNOWN is the safe local
 // state and staff reconciliation remains available; no new Checkout is made.
 func (s *Service) stopExpiredRetryWindow(ctx context.Context, w workItem, a createRow) (bool, error) {
+	// HQ expiry is a retained obligation for an existing Checkout, independent
+	// of the CREATE idempotency deadline. It never creates another session.
+	if a.holdExpire {
+		return false, nil
+	}
 	var open bool
 	if err := s.db.QueryRow(ctx, `SELECT clock_timestamp() < $1`, a.retry).Scan(&open); err != nil {
 		return false, err
@@ -631,7 +786,27 @@ func (s *Service) retryExpireWithinWindow(ctx context.Context, w workItem, a cre
 	if stopped || err != nil {
 		return err
 	}
+	if a.holdExpire {
+		after = holdExpireBackoff(w.Attempts)
+		var elapsed bool
+		if err = s.db.QueryRow(ctx, `SELECT clock_timestamp() >= $1`, a.retry).Scan(&elapsed); err != nil {
+			return err
+		}
+		if elapsed {
+			code = "HOLD_RECONCILIATION_NEEDED"
+		}
+	}
 	return s.finishWork(ctx, w, true, after, code)
+}
+
+// Count durable leases, including restarts, and cap before doubling to avoid
+// overflow. Retained obligations must not continuously compete with new work.
+func holdExpireBackoff(attempts int) time.Duration {
+	delay := 5 * time.Second
+	for i := 1; i < attempts && delay < 5*time.Minute; i++ {
+		delay = min(2*delay, 5*time.Minute)
+	}
+	return delay
 }
 
 func validExpiryObservation(x stripeprovider.CheckoutResult, a createRow) bool {
@@ -683,7 +858,18 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 			return e
 		}
 	}
-	if e = s.completeLeased(ctx, tx, w); e != nil {
+	if a.holdExpire && next == StateProcessing && state != string(StatePaid) && state != string(StateReviewRequired) {
+		cmd, err := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,
+			available_at=clock_timestamp()+$3::interval,
+			safe_error_code=CASE WHEN clock_timestamp()>=$4 THEN 'HOLD_RECONCILIATION_NEEDED' ELSE 'PAYMENT_PROCESSING' END,updated_at=clock_timestamp()
+			WHERE work_id=$1 AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease, intervalString(holdExpireBackoff(w.Attempts)), a.retry)
+		if err != nil {
+			return err
+		}
+		if cmd.RowsAffected() != 1 {
+			return ErrConflict
+		}
+	} else if e = s.completeLeased(ctx, tx, w); e != nil {
 		return e
 	}
 	return tx.Commit(ctx)

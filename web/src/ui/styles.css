@@ -71,6 +71,15 @@ dialog.confirm-dialog::backdrop {
   min-height: 44px;
 }
 
+.confirm-dialog .field textarea {
+  min-height: 88px;
+  width: 100%;
+  border: 1px solid #dfe5de;
+  border-radius: 8px;
+  padding: 12px;
+  font: inherit;
+}
+
 .settings-check {
   min-height: 44px;
 }
@@ -79,3 +88,4 @@ dialog.confirm-dialog::backdrop {
   width: 20px;
   height: 20px;
 }
+.adjustment-lines{list-style:none;padding:0;margin:12px 0}.adjustment-lines li{display:grid;grid-template-columns:1fr minmax(110px,150px);align-items:center;gap:12px;padding:9px 0;border-bottom:1px solid var(--line);font-size:12px}.adjustment-lines .field{margin:0}.adjustment-lines input{min-height:44px}.adjustment-preview,.refund-list{padding:12px;margin:12px 0;border-radius:9px;background:#f2f5f0}.adjustment-preview p{display:flex;justify-content:space-between;margin:6px 0;font-size:12px}.refund-list>strong{display:block;margin-bottom:8px}.refund-list>div{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:5px 0;font-size:11px}.cash-handback{display:flex;align-items:center;gap:9px;margin:12px 0;font-size:12px}.cash-handback input{width:20px;height:20px}.confirm-dialog .adjustment-lines .field input{width:100%}

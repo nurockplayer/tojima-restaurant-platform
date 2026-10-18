@@ -94,6 +94,47 @@ func VerifyWebhook(raw []byte, signature string, activeSecrets []string, now tim
 		}
 		out.ObjectID = result.ID
 		out.PaymentIntent = &result
+	case out.Type == "charge.refunded":
+		var charge stripe.Charge
+		if err := json.Unmarshal(event.Data.Raw, &charge); err != nil || !validStripeObjectID(charge.ID, "ch") || charge.Livemode || charge.Refunds == nil {
+			return VerifiedEvent{}, ErrWebhook
+		}
+		piID := ""
+		if charge.PaymentIntent != nil {
+			piID = charge.PaymentIntent.ID
+		}
+		if !validStripeObjectID(piID, "pi") {
+			return VerifiedEvent{}, ErrWebhook
+		}
+		out.ObjectID = charge.ID
+		out.RefundsHasMore = charge.Refunds.HasMore
+		for _, refund := range charge.Refunds.Data {
+			result, err := refundResult(refund, event.Account)
+			if err != nil {
+				return VerifiedEvent{}, ErrWebhook
+			}
+			if result.PaymentIntentID == "" {
+				result.PaymentIntentID = piID
+			}
+			if result.PaymentIntentID != piID {
+				return VerifiedEvent{}, ErrWebhook
+			}
+			out.Refunds = append(out.Refunds, result)
+		}
+		if len(out.Refunds) == 0 {
+			return VerifiedEvent{}, ErrWebhook
+		}
+	case out.Type == "refund.updated" || out.Type == "refund.failed":
+		var refund stripe.Refund
+		if err := json.Unmarshal(event.Data.Raw, &refund); err != nil {
+			return VerifiedEvent{}, ErrWebhook
+		}
+		result, err := refundResult(&refund, event.Account)
+		if err != nil || result.PaymentIntentID == "" {
+			return VerifiedEvent{}, ErrWebhook
+		}
+		out.ObjectID = result.ID
+		out.Refund = &result
 	default:
 		return VerifiedEvent{}, ErrWebhook
 	}
