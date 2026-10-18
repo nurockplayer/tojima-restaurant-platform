@@ -1,28 +1,50 @@
 package ordering
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestGuestDisplayState(t *testing.T) {
-	for _, tc := range []struct {
-		payment, fulfillment string
-		review, card         bool
-		want                 string
-	}{
-		{"PAID", "WAITING", true, false, "PAID_UNDER_REVIEW"},
-		{"PAID", "PREPARING", true, false, "PAID_UNDER_REVIEW"},
-		{"PAID", "ACCEPTED", false, true, "STANDARD"},
-		{"PAID", "PREPARING", true, true, "STANDARD"},
-		{"PAID", "WAITING", false, false, "STANDARD"},
-		{"UNPAID", "WAITING", true, false, "STANDARD"},
-		{"PENDING", "WAITING", false, false, "STANDARD"},
-		{"UNKNOWN", "SERVED", false, true, "UNKNOWN"},
-		{"REFUND_PENDING", "SERVED", false, true, "UNKNOWN"},
-		{"REFUNDED", "SERVED", false, true, "UNKNOWN"},
-		{"FUTURE_PAYMENT", "SERVED", false, true, "UNKNOWN"},
-		{"PAID", "FUTURE_KITCHEN", false, true, "UNKNOWN"},
-	} {
-		if got := GuestDisplayState(tc.payment, tc.fulfillment, tc.review, tc.card); got != tc.want {
-			t.Errorf("%+v: got %s", tc, got)
+	payments := []string{"UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED"}
+	fulfillments := []string{"WAITING", "ACCEPTED", "PREPARING", "READY", "SERVED", "CANCELLED"}
+
+	for _, payment := range payments {
+		for _, fulfillment := range fulfillments {
+			for _, review := range []bool{false, true} {
+				for _, card := range []bool{false, true} {
+					name := fmt.Sprintf("payment=%s/fulfillment=%s/review=%t/card=%t", payment, fulfillment, review, card)
+					t.Run(name, func(t *testing.T) {
+						want := "STANDARD"
+						if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
+							want = "UNKNOWN"
+						} else if payment == "PAID" && review && !card {
+							want = "PAID_UNDER_REVIEW"
+						}
+						if got := GuestDisplayState(payment, fulfillment, review, card); got != want {
+							t.Errorf("GuestDisplayState(%q, %q, %t, %t) = %q, want %q", payment, fulfillment, review, card, got, want)
+						}
+					})
+				}
+			}
 		}
+	}
+
+	for _, tc := range []struct {
+		name, payment, fulfillment string
+	}{
+		{name: "future payment", payment: "FUTURE_PAYMENT", fulfillment: "SERVED"},
+		{name: "future fulfillment", payment: "PAID", fulfillment: "FUTURE_FULFILLMENT"},
+		{name: "both future", payment: "FUTURE_PAYMENT", fulfillment: "FUTURE_FULFILLMENT"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, review := range []bool{false, true} {
+				for _, card := range []bool{false, true} {
+					if got := GuestDisplayState(tc.payment, tc.fulfillment, review, card); got != "UNKNOWN" {
+						t.Errorf("GuestDisplayState(%q, %q, %t, %t) = %q, want UNKNOWN", tc.payment, tc.fulfillment, review, card, got)
+					}
+				}
+			}
+		})
 	}
 }

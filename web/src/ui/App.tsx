@@ -35,6 +35,7 @@ const copy = {
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
     error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
     selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
+    operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。',
     noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
   },
   zh: {
@@ -56,6 +57,7 @@ const copy = {
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
     error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
     selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
+    operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。',
     noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
 } satisfies Record<Locale, Record<string, string>>;
@@ -100,10 +102,10 @@ export function isCurrentMenuRead(
   return sequence === currentSequence && requestSessionID === currentSessionID && requestToken === currentToken;
 }
 
-function guestOrderLabel(order: GuestOrderStatus, locale: Locale): string {
-  const display = guestDisplayKind(order);
+function guestOrderLabel(order: GuestOrderStatus | undefined, locale: Locale): string {
+  const display = order ? guestDisplayKind(order) : 'unknown';
   if (display === 'review') return paidUnderReview[locale];
-  if (display === 'unknown') return locale === 'ja' ? '店舗に確認してください' : '請洽服務人員確認';
+  if (!order || display === 'unknown') return locale === 'ja' ? '店舗に確認してください' : '請洽服務人員確認';
   const fulfillment: Record<GuestOrderStatus['fulfillment_status'], string> = locale === 'ja'
     ? { WAITING: '調理開始待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
     : { WAITING: '等待開始製作', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
@@ -143,6 +145,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const [{ cart, preview }, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
   const [orders, setOrders] = useState<Order[]>([]);
   const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
+  const [operationsStale, setOperationsStale] = useState(false);
   const [checkoutOrderID, setCheckoutOrderID] = useState('');
   const [checkoutPollEpoch, setCheckoutPollEpoch] = useState(0);
   const checkoutOrderRef = useRef('');
@@ -182,6 +185,8 @@ export function App({ demo = false }: DemoSurfaceProps) {
   }, []);
 
   const invalidateGrant = useCallback((sessionID: string) => {
+    orderRequestSequence.current++;
+    setGuestOperations(null); setOperationsStale(false);
     checkoutRequestSequence.current++;
     checkoutViewEpoch.current++;
     resumeRequestSequence.current++;
@@ -216,13 +221,17 @@ export function App({ demo = false }: DemoSurfaceProps) {
       if (sequence === orderRequestSequence.current) setOrders(latest);
       try {
         const operations = await operationsClient.guest(current.grant.session.id, current.grant.table_join_token);
-        if (sequence === orderRequestSequence.current) setGuestOperations(operations);
+        if (sequence === orderRequestSequence.current) {
+          setGuestOperations(operations);
+          setOperationsStale(false);
+        }
       } catch (cause) {
         if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
-        else if (sequence === orderRequestSequence.current) setGuestOperations({ orders: [], cash_enabled: false });
+        else if (sequence === orderRequestSequence.current) setOperationsStale(true);
       }
     } catch (cause) {
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+      else if (sequence === orderRequestSequence.current) setOperationsStale(true);
       throw cause;
     }
   }, [invalidateGrant]);
@@ -298,6 +307,8 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
     menuRequestSequence.current++;
+    orderRequestSequence.current++;
+    setGuestOperations(null); setOperationsStale(false);
     checkoutRequestSequence.current++;
     checkoutViewEpoch.current++;
     resumeRequestSequence.current++;
@@ -775,11 +786,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
       </>}
 
       {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+        {operationsStale && guestOperations && <p className="notice" role="status">{t.operationsStale}</p>}
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
-          {operations && <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>}
-          {order.payment_method === 'STRIPE' && (!operations || guestDisplayKind(operations) === 'standard') && <div className="checkout-status-panel">
+          <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>
+          {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel">
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>
               {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status">{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
