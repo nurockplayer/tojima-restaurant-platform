@@ -485,3 +485,59 @@ func int64JSON(value any) int64 {
 	}
 	return 0
 }
+
+func TestPaymentsHTTPHoldDispositionIsStaffOnlyPostgres(t *testing.T) {
+	h := newPaymentHTTPFixture(t)
+	ctx := context.Background()
+	f := h.fixture
+	grant, err := f.Sessions.DirectJoin(ctx, f.Locator, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cart, err := f.Orders.ReadCart(ctx, grant.Session.ID, grant.Token)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cart, err = f.Orders.Mutate(ctx, ordering.Mutation{SessionID: grant.Session.ID, GrantToken: grant.Token, ExpectedGeneration: cart.Generation, ExpectedVersion: cart.Version, IdempotencyKey: "staff-disposition-line", Kind: ordering.AddLine, ProductKey: "tea", Quantity: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	preview, err := f.Orders.Preview(ctx, grant.Session.ID, grant.Token, cart.Generation, cart.Version)
+	if err != nil {
+		t.Fatal(err)
+	}
+	order, err := f.Orders.Commit(ctx, ordering.CommitRequest{SessionID: grant.Session.ID, GrantToken: grant.Token, ExpectedGeneration: cart.Generation, ExpectedVersion: cart.Version, IdempotencyKey: "staff-disposition-order", PreviewFingerprint: preview.Fingerprint, PaymentMethod: ordering.Stripe, CheckoutProofHash: sha256.Sum256([]byte("staff-disposition-proof")), CheckoutProofExpiresAt: time.Now().Add(20 * time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Menus.SetCompanyProductEmergencyHold(ctx, f.TenantID, "tea", "fixture-admin", true, "safety review", 0, "staff-disposition-hold"); err != nil {
+		t.Fatal(err)
+	}
+	// Seed the retained worker's unresolved disposition; worker/deadline
+	// behavior is covered by payments integration tests. Exercise real routes.
+	if _, err = f.Pool.Exec(ctx, `UPDATE stripe_payment_work SET safe_error_code='HOLD_RECONCILIATION_NEEDED' WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID); err != nil {
+		t.Fatal(err)
+	}
+	staffPath := h.staffPath(f.TableID, grant.Session.ID, "/orders/"+order.Order.ID+"/payment")
+	for _, tc := range []struct {
+		name, method, path, token string
+		staff                     bool
+	}{
+		{"guest", http.MethodGet, "/v1/guest/sessions/" + grant.Session.ID + "/orders/" + order.Order.ID + "/checkout", grant.Token, false},
+		{"staff status", http.MethodGet, staffPath, h.creds.Cashier.Token, true},
+		{"staff reconcile", http.MethodPost, staffPath + "/reconcile", h.creds.Cashier.Token, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := h.request(t, tc.method, tc.path, "", tc.token, nil, "", "")
+			var got map[string]any
+			decodePaymentHTTP(t, response, http.StatusOK, &got)
+			code, present := got["safe_error_code"]
+			if present != tc.staff || (tc.staff && code != "HOLD_RECONCILIATION_NEEDED") {
+				t.Fatalf("incorrect disposition visibility: %v", got)
+			}
+			if !tc.staff {
+				assertPaymentResponsePrivate(t, response.Body.String(), "safe_error_code", "HOLD_RECONCILIATION_NEEDED")
+			}
+		})
+	}
+}

@@ -25,6 +25,11 @@ describe('surface selection', () => {
     expect(surfaceFor('/staffing')).toBe('guest');
   });
 
+  it('routes the fragment-based order page independently of table entry', () => {
+    expect(surfaceFor('/order')).toBe('order');
+    expect(surfaceFor('/order/')).toBe('order');
+  });
+
   it('routes /catalog and /catalog/ to the catalog surface', () => {
     expect(surfaceFor('/catalog')).toBe('catalog');
     expect(surfaceFor('/catalog/')).toBe('catalog');

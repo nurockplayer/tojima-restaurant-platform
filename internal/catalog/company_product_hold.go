@@ -3,7 +3,9 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"math"
@@ -17,6 +19,9 @@ import (
 
 const maxHoldRequestKeyRunes = 128
 const maxHoldReasonRunes = 1000
+
+// Stripe payment attempt events have the strictest downstream actor limit.
+const maxHoldActorRunes = 200
 
 // GetCompanyProductEmergencyHold reads the current hold and its bounded admin
 // summary. A retired product remains readable while it has a hold row so an
@@ -55,7 +60,7 @@ func (s *Service) GetCompanyProductEmergencyHold(ctx context.Context, tenantID, 
 // hold row exists yet. It is acquired before request replay lookup, matching
 // order admission and detach lock ordering.
 func (s *Service) SetCompanyProductEmergencyHold(ctx context.Context, tenantID, productKey, actor string, active bool, reason string, expectedVersion int64, idempotencyKey string) (CompanyProductEmergencyHold, error) {
-	if s == nil || !cleanKey(tenantID) || !catalogKey(productKey) || !cleanKey(actor) || !validHoldReason(reason) || expectedVersion < 0 || !validHoldRequestKey(idempotencyKey) {
+	if s == nil || !cleanKey(tenantID) || !catalogKey(productKey) || !cleanKey(actor) || utf8.RuneCountInString(actor) > maxHoldActorRunes || !validHoldReason(reason) || expectedVersion < 0 || !validHoldRequestKey(idempotencyKey) {
 		return CompanyProductEmergencyHold{}, ErrInvalid
 	}
 	tx, err := s.db.Begin(ctx)
@@ -130,6 +135,11 @@ func (s *Service) SetCompanyProductEmergencyHold(ctx context.Context, tenantID, 
 	}
 	if err != nil {
 		return CompanyProductEmergencyHold{}, err
+	}
+	if active {
+		if err = enqueueHeldCheckoutsTx(ctx, tx, tenantID, productKey, actor); err != nil {
+			return CompanyProductEmergencyHold{}, err
+		}
 	}
 	result, found, err := readCompanyHoldSummary(ctx, tx, tenantID, catalogID, *revision, productKey)
 	if err != nil {
@@ -283,4 +293,64 @@ func validHoldReason(reason string) bool {
 		}
 	}
 	return true
+}
+
+// enqueueHeldCheckoutsTx runs under the company parent UPDATE lock. Admission,
+// detachment and every payment writer acquire that parent first, so this scan
+// cannot miss an admitted attempt or race a payment transition. Session locks
+// precede attempt locks, and are acquired in a stable order across all stores.
+func enqueueHeldCheckoutsTx(ctx context.Context, tx pgx.Tx, tenantID, productKey, actor string) error {
+	rows, err := tx.Query(ctx, `SELECT a.order_id,a.session_id FROM stripe_payment_attempts a
+		JOIN table_orders o USING(order_id)
+		WHERE a.tenant_id=$1 AND o.payment_method='STRIPE'
+		AND a.state NOT IN ('EXPIRED','PAID','REVIEW_REQUIRED')
+		AND a.provider_payment_status IS DISTINCT FROM 'paid'
+		AND a.checkout_status IS DISTINCT FROM 'expired'
+		AND NOT EXISTS(SELECT 1 FROM store_menu_bindings b WHERE b.tenant_id=a.tenant_id AND b.store_id=a.store_id)
+		AND EXISTS(SELECT 1 FROM jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l WHERE l->>'product_key'=$2)
+		ORDER BY a.session_id,a.order_id`, tenantID, productKey)
+	if err != nil {
+		return err
+	}
+	type target struct{ order, session string }
+	var targets []target
+	for rows.Next() {
+		var t target
+		if err = rows.Scan(&t.order, &t.session); err != nil {
+			rows.Close()
+			return err
+		}
+		targets = append(targets, t)
+	}
+	rows.Close()
+	if err = rows.Err(); err != nil {
+		return err
+	}
+	for _, t := range targets {
+		var id string
+		if err = tx.QueryRow(ctx, `SELECT session_id FROM table_sessions WHERE session_id=$1 FOR UPDATE`, t.session).Scan(&id); err != nil {
+			return err
+		}
+		var state string
+		if err = tx.QueryRow(ctx, `UPDATE stripe_payment_attempts SET
+			company_hold_expire_requested_at=coalesce(company_hold_expire_requested_at,clock_timestamp()),
+			continuation_revoked_at=coalesce(continuation_revoked_at,clock_timestamp()),updated_at=clock_timestamp()
+			WHERE order_id=$1 RETURNING state`, t.order).Scan(&state); err != nil {
+			return err
+		}
+		var nonce [16]byte
+		if _, err = rand.Read(nonce[:]); err != nil {
+			return err
+		}
+		key := "company-hold-expire:" + t.order
+		if _, err = tx.Exec(ctx, `INSERT INTO stripe_payment_work(work_id,dedupe_key,work_type,order_id)
+			VALUES($1,$2,'EXPIRE',$3) ON CONFLICT(dedupe_key) DO NOTHING`, hex.EncodeToString(nonce[:]), key, t.order); err != nil {
+			return err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO stripe_payment_attempt_events(order_id,event_key,actor_id,before_state,after_state)
+			VALUES($1,$2,$3,$4,$4) ON CONFLICT(order_id,event_key) DO NOTHING`, t.order, key, actor, state); err != nil {
+			return err
+		}
+	}
+	return nil
 }

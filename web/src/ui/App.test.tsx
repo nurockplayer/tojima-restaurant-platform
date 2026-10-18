@@ -336,7 +336,7 @@ describe('guest app mount', () => {
   ])('uses server acceptance requirements for $name', async (scenario) => {
     const mode = scenario.mode as 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN';
     const order = { order_id: 'order-1', session_id: 'session-1', generation: 1, payment_method: scenario.cashMode ? 'CASH' : 'STRIPE', requires_staff_acceptance: scenario.requires, total_gross_jpy: '1100', created_at: '2026-10-18T00:00:00Z' };
-    const guestOperation = { id: 'order-1', payment_status: 'UNPAID', fulfillment_status: scenario.fulfillment, requires_staff_acceptance: scenario.requires, staff_accepted: false, ...(scenario.cashMode ? { cash_mode: scenario.cashMode } : {}) };
+    const guestOperation = { display_state: 'STANDARD', id: 'order-1', payment_status: 'UNPAID', fulfillment_status: scenario.fulfillment, requires_staff_acceptance: scenario.requires, staff_accepted: false, ...(scenario.cashMode ? { cash_mode: scenario.cashMode } : {}) };
     await mountGuestStatus(mode, order, guestOperation);
     await act(async () => {
       [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('注文履歴'))?.click();
@@ -348,6 +348,102 @@ describe('guest app mount', () => {
       await clickButton(host!, '繁中');
       expect(host?.querySelector('.guest-order-status')?.textContent).toBe('等待開始製作 · 尚未付款');
     }
+  });
+
+  it('shows paid review in both history languages and follows the ordinary session poll through release', async () => {
+    const operation = { id: 'order-1', display_state: 'PAID_UNDER_REVIEW', payment_status: 'PAID', fulfillment_status: 'WAITING', requires_staff_acceptance: false, staff_accepted: true };
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation);
+    await clickButton(host!, '注文履歴');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.textContent).not.toMatch(/調理中|返金/);
+    await clickButton(host!, '繁中');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    expect(host?.textContent).not.toMatch(/製作中|退款/);
+    // Reschedule the existing visible history interval onto the fake clock.
+    vi.useFakeTimers();
+    await act(async () => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+    const fetcher = vi.mocked(fetch);
+    const before = fetcher.mock.calls.filter(([url]) => String(url).endsWith('/operations')).length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_001); });
+    expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/operations')).length).toBeGreaterThan(before);
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    operation.display_state = 'STANDARD'; operation.fulfillment_status = 'PREPARING';
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_001); });
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('製作中 · 已付款');
+  });
+
+  it.each(['FUTURE_SUCCESS', 'UNKNOWN', undefined])('keeps unsupported history display state %s neutral despite paid/served raw states', async (display_state) => {
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state, payment_status: 'PAID', fulfillment_status: 'SERVED', requires_staff_acceptance: false, staff_accepted: true });
+    await clickButton(host!, '注文履歴');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('店舗に確認してください');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    await clickButton(host!, '繁中');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('請洽服務人員確認');
+  });
+
+  it.each(['network', '503'] as const)('retains confirmed review through a %s operations poll failure and recovers on the next poll', async (failure) => {
+    let reads = 0;
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), undefined, async () => {
+      reads++;
+      if (reads === 2) {
+        if (failure === 'network') throw new TypeError('Network unavailable');
+        return json({ error: 'temporarily_unavailable' }, 503);
+      }
+      return json({ orders: [{ id: 'order-1', display_state: reads === 1 ? 'PAID_UNDER_REVIEW' : 'STANDARD', payment_status: 'PAID', fulfillment_status: reads === 1 ? 'WAITING' : 'PREPARING', requires_staff_acceptance: false, staff_accepted: true }], cash_enabled: false });
+    });
+    await clickButton(host!, '注文履歴');
+    expect(reads).toBe(1);
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+
+    vi.useFakeTimers();
+    await act(async () => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(2);
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.textContent).toContain('最新の状況を確認できません。表示は前回確認時の内容です。');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/checkout'))).toBe(false);
+
+    await act(async () => { [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('繁中'))!.click(); });
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    expect(host?.textContent).toContain('無法確認最新狀態，目前顯示上次確認的內容。');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
+    expect(reads).toBe(3);
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('製作中 · 已付款');
+    expect(host?.textContent).not.toContain('無法確認最新狀態，目前顯示上次確認的內容。');
+    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
+  });
+
+  it.each(['missing', 'network', '503'] as const)('renders %s initial operations neutrally without checkout controls', async (result) => {
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), undefined, async () => {
+      if (result === 'network') throw new TypeError('Network unavailable');
+      return result === '503' ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [], cash_enabled: false });
+    });
+    await clickButton(host!, '注文履歴');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('店舗に確認してください');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.textContent).not.toContain('表示は前回確認時の内容です');
+    await clickButton(host!, '繁中');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('請洽服務人員確認');
+  });
+
+  it('withholds checkout controls while a confirmed STANDARD snapshot is stale', async () => {
+    let reads = 0;
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), undefined, async () => {
+      reads++;
+      return reads === 2 ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [standardOperation(stripeOrder('order-1'))], cash_enabled: false });
+    });
+    await clickButton(host!, '注文履歴');
+    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
+    await clickButton(host!, '↻');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('調理開始待ち · 支払確認中');
+    expect(host?.textContent).toContain('最新の状況を確認できません。表示は前回確認時の内容です。');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    await clickButton(host!, '↻');
+    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
+    expect(host?.textContent).not.toContain('表示は前回確認時の内容です');
   });
 
   it('refreshes the menu without changing the cart and leaves requoted orders for explicit reconfirmation', async () => {
@@ -509,7 +605,7 @@ describe('guest app mount', () => {
       if (url.endsWith('/sessions/session-1/cart/preview')) return json(quoted);
       if (url.endsWith('/sessions/session-1/cart') && init.method !== 'POST') return json(flow.includes('commit') ? emptyCart : openCart);
       if (url.endsWith('/sessions/session-1/orders') && !url.includes('/checkout')) return json({ orders: flow.includes('commit') ? [order] : [] });
-      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false });
+      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: flow.includes('commit') ? [standardOperation(order)] : [], cash_enabled: false });
       if (url.endsWith('/checkout-context')) { flow.push('bootstrap'); return new Response(null, { status: 204 }); }
       if (url.endsWith('/cart/commit')) { flow.push('commit'); return json({ outcome: 'COMMITTED', order, cart: emptyCart }); }
       if (url.endsWith('/orders/order-created/checkout')) { flow.push('status'); return json(checkoutStatus('order-created', 'CREATE_PENDING', false)); }
@@ -850,6 +946,7 @@ async function mountGuestStatus(
   mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN',
   order: unknown,
   operation: unknown,
+  operationsRoute?: () => Promise<Response>,
 ) {
   window.history.replaceState({}, '', '/?table=table-1');
   const modeTable = { ...table, mode };
@@ -862,7 +959,7 @@ async function mountGuestStatus(
     if (url.endsWith('/v1/guest/tables/table-1/menu?amounts=string')) return json(guestMenu);
     if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(cart);
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [order] });
-    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [operation], cash_enabled: true });
+    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return operationsRoute ? operationsRoute() : json({ orders: [operation], cash_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -878,7 +975,7 @@ async function mountGuestStatus(
 }
 
 async function mountCheckoutOrders(
-  orders: unknown[],
+  orders: ReturnType<typeof stripeOrder>[],
   checkoutRoute: (url: string, init: RequestInit) => Promise<Response>,
 ) {
   window.history.replaceState({}, '', '/?table=table-1');
@@ -889,7 +986,7 @@ async function mountCheckoutOrders(
     if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(guestMenu);
     if (url === '/v1/guest/sessions/session-1/cart') return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
     if (url === '/v1/guest/sessions/session-1/orders') return json({ orders });
-    if (url === '/v1/guest/sessions/session-1/operations') return json({ orders: [], cash_enabled: false });
+    if (url === '/v1/guest/sessions/session-1/operations') return json({ orders: orders.map(standardOperation), cash_enabled: false });
     if (url.includes('/orders/') && url.includes('/checkout')) return checkoutRoute(url, init);
     throw new Error(`Unexpected API request: ${url}`);
   });
@@ -906,6 +1003,10 @@ function stripeOrder(orderID: string) {
     order_id: orderID, session_id: 'session-1', generation: 1, payment_method: 'STRIPE',
     requires_staff_acceptance: false, total_gross_jpy: '1100', created_at: '2026-10-18T00:00:00Z',
   };
+}
+
+function standardOperation(order: ReturnType<typeof stripeOrder>) {
+  return { id: order.order_id, display_state: 'STANDARD', payment_status: 'PENDING', fulfillment_status: 'WAITING', requires_staff_acceptance: false, staff_accepted: true };
 }
 
 function checkoutStatus(orderID: string, state: string, resumeAvailable: boolean) {

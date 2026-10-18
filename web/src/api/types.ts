@@ -136,6 +136,7 @@ export interface Order {
 }
 
 export interface CommitResult {
+  order_read_grant?: import('./order-read').OrderReadGrant | null;
   outcome: 'COMMITTED' | 'ALREADY_COMMITTED';
   order: Order;
   cart: Cart;

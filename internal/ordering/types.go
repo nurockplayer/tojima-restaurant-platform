@@ -162,10 +162,11 @@ const (
 )
 
 type CommitResult struct {
-	Outcome        CommitOutcome `json:"outcome"`
-	Order          Order         `json:"order"`
-	Cart           Cart          `json:"cart"`
-	CurrentPreview *Preview      `json:"current_preview,omitempty"`
+	OrderReadGrant *OrderReadGrant `json:"order_read_grant,omitempty"`
+	Outcome        CommitOutcome   `json:"outcome"`
+	Order          Order           `json:"order"`
+	Cart           Cart            `json:"cart"`
+	CurrentPreview *Preview        `json:"current_preview,omitempty"`
 }
 
 type storedSnapshot struct {

@@ -2,7 +2,7 @@ import { Component, lazy, Suspense } from 'react';
 import type { ComponentType, ReactNode } from 'react';
 import type { DemoSurfaceProps } from './ui/DemoBanner';
 
-export type SurfaceName = 'guest' | 'staff' | 'catalog';
+export type SurfaceName = 'guest' | 'staff' | 'catalog' | 'order';
 
 export function demoEnabled(root: HTMLElement | null): boolean {
   return root?.dataset.demo === 'shironagasukujira';
@@ -11,7 +11,7 @@ export function demoEnabled(root: HTMLElement | null): boolean {
 /** Staff and catalog consoles use explicit routes; every other path keeps the guest flow and its query string. */
 export function surfaceFor(pathname: string): SurfaceName {
   const path = pathname.replace(/\/$/, '');
-  return path === '/staff' || path === '/kitchen' ? 'staff' : path === '/catalog' ? 'catalog' : 'guest';
+  return path === '/order' ? 'order' : path === '/staff' || path === '/kitchen' ? 'staff' : path === '/catalog' ? 'catalog' : 'guest';
 }
 
 export function initialStaffViewFor(pathname: string): 'tables' | 'kds' {
@@ -20,6 +20,7 @@ export function initialStaffViewFor(pathname: string): 'tables' | 'kds' {
 
 // Each surface is its own chunk, so guest phones never download the staff/KDS or catalog consoles.
 const surfaces: Record<SurfaceName, ComponentType<DemoSurfaceProps>> = {
+  order: lazy(() => import('./ui/OrderRead').then((module) => ({ default: module.OrderPage }))),
   guest: lazy(() => import('./ui/App').then((module) => ({ default: module.App }))),
   staff: lazy(() => import('./ui/StaffApp').then((module) => ({ default: module.StaffApp }))),
   catalog: lazy(() => import('./ui/CatalogApp').then((module) => ({ default: module.CatalogApp }))),

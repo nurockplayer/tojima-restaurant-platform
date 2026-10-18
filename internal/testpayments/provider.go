@@ -32,14 +32,132 @@ type Provider struct {
 	nextPayment          stripeprovider.PaymentStatus
 	hasNextOutcome       bool
 	nextCreateHook       func(stripeprovider.CheckoutResult)
+	nextExpireHook       func(stripeprovider.CheckoutResult)
 	nextExpireStatus     stripeprovider.CheckoutStatus
 	nextExpirePayment    stripeprovider.PaymentStatus
 	nextExpireUnknown    bool
 	hasNextExpireOutcome bool
+	refunds              map[string]stripeprovider.RefundResult
+	refundKeys           map[string]string
+	refundDigests        map[string][32]byte
+	nextRefundStatus     string
+	nextRefundUnknown    bool
+	hasNextRefundOutcome bool
+	refundCreates        int
+	refundRetrieves      int
 }
 
 func NewProvider() *Provider {
-	return &Provider{sessions: make(map[string]stripeprovider.CheckoutResult), keys: make(map[string]string), digests: make(map[string][32]byte)}
+	return &Provider{sessions: make(map[string]stripeprovider.CheckoutResult), keys: make(map[string]string), digests: make(map[string][32]byte), refunds: make(map[string]stripeprovider.RefundResult), refundKeys: make(map[string]string), refundDigests: make(map[string][32]byte)}
+}
+
+// CreateRefund is an in-process idempotent refund fixture. A configured
+// unknown response stores the refund first, so retrying the same request
+// returns the existing provider object.
+func (p *Provider) CreateRefund(ctx context.Context, req stripeprovider.CreateRefundRequest) (stripeprovider.RefundResult, error) {
+	if ctx.Err() != nil {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrOutcomeUnknown
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.refundCreates++
+	if req.Account.Mode != stripeprovider.ModeConnectedDirectFixture || req.Account.StripeAccountID == "" || req.AmountJPY <= 0 || req.IdempotencyKey == "" || req.PaymentIntentID == "" {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrInvalid
+	}
+	body, _ := json.Marshal(req)
+	digest := sha256.Sum256(body)
+	key := req.Account.StripeAccountID + ":" + req.IdempotencyKey
+	if id, ok := p.refundKeys[key]; ok {
+		if p.refundDigests[key] != digest {
+			return stripeprovider.RefundResult{}, stripeprovider.ErrInvalid
+		}
+		return cloneRefund(p.refunds[id]), nil
+	}
+	status := "pending"
+	if p.hasNextRefundOutcome {
+		status = p.nextRefundStatus
+	}
+	lateFailure := status == "succeeded_then_failed"
+	if lateFailure {
+		status = "succeeded"
+	}
+	if status == "" {
+		status = "pending"
+	}
+	var nonce [16]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrOutcomeUnknown
+	}
+	id := "re_fixture" + hex.EncodeToString(nonce[:])
+	r := stripeprovider.RefundResult{AccountID: req.Account.StripeAccountID, ID: id, PaymentIntentID: req.PaymentIntentID, AmountJPY: req.AmountJPY, Currency: stripeprovider.CurrencyJPY, Status: status, Metadata: map[string]string{"tenant_id": req.TenantID, "store_id": req.StoreID, "order_id": req.OrderID, "refund_id": req.RefundID}}
+	p.refunds[id], p.refundKeys[key], p.refundDigests[key] = r, id, digest
+	if lateFailure {
+		failed := r
+		failed.Status = "failed"
+		p.refunds[id] = failed
+	}
+	unknown := p.hasNextRefundOutcome && p.nextRefundUnknown
+	p.hasNextRefundOutcome, p.nextRefundUnknown, p.nextRefundStatus = false, false, ""
+	if unknown {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrOutcomeUnknown
+	}
+	return cloneRefund(r), nil
+}
+
+func (p *Provider) RetrieveRefund(ctx context.Context, account stripeprovider.AccountContext, id string) (stripeprovider.RefundResult, error) {
+	if ctx.Err() != nil {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrUnavailable
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.refundRetrieves++
+	r, ok := p.refunds[id]
+	if !ok || account.Mode != stripeprovider.ModeConnectedDirectFixture || r.AccountID != account.StripeAccountID {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrNotFound
+	}
+	return cloneRefund(r), nil
+}
+
+// SetNextRefundOutcome configures the next created fixture as pending (delayed),
+// succeeded, failed, or succeeded_then_failed (success response, later retrieved
+// failure). unknown simulates a lost response after provider write.
+func (p *Provider) SetNextRefundOutcome(status string, unknown bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nextRefundStatus, p.nextRefundUnknown, p.hasNextRefundOutcome = status, unknown, true
+}
+
+// SetRefundOutcome models an asynchronous provider transition such as delayed
+// processing or a retryable failure.
+func (p *Provider) SetRefundOutcome(id, status string) (stripeprovider.RefundResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	r, ok := p.refunds[id]
+	if !ok {
+		return stripeprovider.RefundResult{}, stripeprovider.ErrNotFound
+	}
+	r.Status = status
+	p.refunds[id] = r
+	return cloneRefund(r), nil
+}
+
+func (p *Provider) RefundOperationCounts() (creates, retrieves int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.refundCreates, p.refundRetrieves
+}
+
+// RefundByBusinessID exposes the fake's persisted provider object to durable
+// worker integration tests after simulating a lost CreateRefund response.
+func (p *Provider) RefundByBusinessID(refundID string) (stripeprovider.RefundResult, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, result := range p.refunds {
+		if result.Metadata["refund_id"] == refundID {
+			return cloneRefund(result), true
+		}
+	}
+	return stripeprovider.RefundResult{}, false
 }
 
 func (p *Provider) CreateCheckout(ctx context.Context, req stripeprovider.CreateCheckoutRequest) (stripeprovider.CheckoutResult, error) {
@@ -141,6 +259,11 @@ func (p *Provider) ExpireCheckout(ctx context.Context, account stripeprovider.Ac
 	}
 	r.Status, r.URL = stripeprovider.CheckoutExpired, ""
 	p.sessions[id] = r
+	if p.nextExpireHook != nil {
+		hook := p.nextExpireHook
+		p.nextExpireHook = nil
+		hook(clone(r))
+	}
 	return clone(r), nil
 }
 
@@ -184,6 +307,14 @@ func (p *Provider) SetNextCreateHook(hook func(stripeprovider.CheckoutResult)) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.nextCreateHook = hook
+}
+
+// SetNextExpireHook pauses a successful synthetic expiration before returning
+// its observation, allowing a webhook to commit while that response is in flight.
+func (p *Provider) SetNextExpireHook(hook func(stripeprovider.CheckoutResult)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.nextExpireHook = hook
 }
 
 // SetNextExpireOutcome models a concurrent payment completion while a worker
@@ -248,6 +379,15 @@ func SignedCheckoutEvent(r stripeprovider.CheckoutResult, eventID, eventType, fi
 }
 
 func clone(r stripeprovider.CheckoutResult) stripeprovider.CheckoutResult {
+	metadata := make(map[string]string, len(r.Metadata))
+	for k, v := range r.Metadata {
+		metadata[k] = v
+	}
+	r.Metadata = metadata
+	return r
+}
+
+func cloneRefund(r stripeprovider.RefundResult) stripeprovider.RefundResult {
 	metadata := make(map[string]string, len(r.Metadata))
 	for k, v := range r.Metadata {
 		metadata[k] = v
