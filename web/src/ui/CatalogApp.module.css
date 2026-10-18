@@ -63,7 +63,7 @@
   width: 100%;
   min-width: 0;
   padding: 9px;
-  border: 1px solid #dfe5de;
+  border: 1px solid var(--color-border-control);
   border-radius: 7px;
   background: #fff;
   color: var(--ink);
@@ -93,7 +93,7 @@
   width: 100%;
   min-width: 0;
   padding: 9px;
-  border: 1px solid #dfe5de;
+  border: 1px solid var(--color-border-control);
   border-radius: 7px;
   background: #fff;
   color: var(--ink);
@@ -228,7 +228,7 @@
   width: 100%;
   min-width: 0;
   padding: 9px;
-  border: 1px solid #dfe5de;
+  border: 1px solid var(--color-border-control);
   border-radius: 7px;
   background: #fff;
   color: var(--ink);
@@ -384,20 +384,20 @@
   align-items: center;
   padding: 5px 9px;
   border-radius: 20px;
-  background: #f7eee0;
-  color: #8a6b32;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-ink);
   font-size: 9px;
   white-space: nowrap;
 }
 
 .catalogScope :global(.availability-available) {
-  background: #e9f2eb;
-  color: #387154;
+  background: var(--color-success-bg);
+  color: var(--color-success-ink);
 }
 
 .catalogScope :global(.availability-paused) {
-  background: #f7ece4;
-  color: #a36443;
+  background: var(--color-warning-bg);
+  color: var(--color-warning-ink);
 }
 
 .catalogScope :global(.catalog-price-grid) {
