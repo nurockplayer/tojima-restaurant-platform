@@ -40,8 +40,10 @@ remain separate, and no payment failure cancels the immutable order.
 
 Staff S02 reconciliation retrieves provider state under current membership and
 role checks. It cannot create a new Checkout, transfer a payment URL, switch an
-order to CASH, or mark a payment successful by assertion. Broad hold management,
-review resolution and refunds remain P-82 work.
+order to CASH, or mark a payment successful by assertion. P-82 hold expiry,
+review resolution and full/partial refunds are now integrated, together with
+P-83 ORDER_READ adjustment/refund display. Real Sandbox acceptance is tracked in
+[p80-stripe-test-runtime.md](p80-stripe-test-runtime.md).
 
 The guest Checkout view refreshes on selection and when the page becomes visible,
 then polls every 20 seconds while visible and unresolved. Periodic polling stops

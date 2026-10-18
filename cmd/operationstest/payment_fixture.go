@@ -39,23 +39,38 @@ func configurePaymentFixture(ctx context.Context, f *testguest.Fixture) (*paymen
 		Provider: provider, Account: account,
 		ProfileFingerprint: sha256.Sum256([]byte(stripeprovider.APIVersion + "|keyless-fixture|https://checkout.example.invalid/")),
 	}}
+	service, proofs, err := configurePaymentGraph(ctx, f, resolver, fixtureCredentialRef, "fixture-webhook", "fixture-bootstrap", account)
+	if err != nil {
+		return nil, nil, "", err
+	}
+	webhookKey := make([]byte, 32)
+	if _, err := rand.Read(webhookKey); err != nil {
+		return nil, nil, "", err
+	}
+	return service, proofs, "whsec_fixture_" + hex.EncodeToString(webhookKey), nil
+}
+
+// Both isolated modes use one payment service as the session-close and order
+// policy. P-82 work (including refunds) is dispatched by the same ProcessNext
+// loop; P-83 ORDER_READ comes from this ordering service and the shared HTTP mux.
+func configurePaymentGraph(ctx context.Context, f *testguest.Fixture, resolver payments.ProviderResolver, credentialRef, endpointRef, actor string, account stripeprovider.AccountContext) (*payments.Service, *checkoutproof.Service, error) {
 	service, err := payments.New(f.Pool, f.Operations, resolver, payments.Config{
 		CreateRetryWindow: 20 * time.Hour, ContinuationTTL: 30 * time.Minute, WorkLeaseTTL: 30 * time.Second,
 	})
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
-	_, err = service.SetMerchantConfig(ctx, operations.StoreScope{TenantID: "test-tenant", StoreID: "test-store"}, 0, "fixture-bootstrap", payments.MerchantConfigInput{
+	_, err = service.SetMerchantConfig(ctx, operations.StoreScope{TenantID: f.TenantID, StoreID: f.StoreID}, 0, actor, payments.MerchantConfigInput{
 		Enabled: true, Mode: account.Mode, StripeAccountID: account.StripeAccountID,
-		CredentialRef: fixtureCredentialRef, WebhookEndpointRef: "fixture-webhook", APIVersion: stripeprovider.APIVersion,
+		CredentialRef: credentialRef, WebhookEndpointRef: endpointRef, APIVersion: stripeprovider.APIVersion,
 	})
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
-	pepper, signingKey, webhookKey := make([]byte, 32), make([]byte, 32), make([]byte, 32)
-	for _, dst := range [][]byte{pepper, signingKey, webhookKey} {
-		if _, err = rand.Read(dst); err != nil {
-			return nil, nil, "", err
+	pepper, signingKey := make([]byte, 32), make([]byte, 32)
+	for _, dst := range [][]byte{pepper, signingKey} {
+		if _, err := rand.Read(dst); err != nil {
+			return nil, nil, err
 		}
 	}
 	// These TTLs are explicitly local fixture settings, not production policy.
@@ -64,17 +79,17 @@ func configurePaymentFixture(ctx context.Context, f *testguest.Fixture) (*paymen
 		PINTTL: 15 * time.Minute, PINLockout: time.Minute, PINMaxAttempts: 3, PINLength: 6, PINPepper: pepper,
 	}, service)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	f.Orders, err = ordering.NewWithOrderPolicy(f.Pool, f.Sessions, f.Menus, service)
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
 	proofs, err := checkoutproof.New(checkoutproof.Config{SigningKeys: [][]byte{signingKey}, TTL: 30 * time.Minute})
 	if err != nil {
-		return nil, nil, "", err
+		return nil, nil, err
 	}
-	return service, proofs, "whsec_fixture_" + hex.EncodeToString(webhookKey), nil
+	return service, proofs, nil
 }
 
 func runPaymentFixtureWorker(parent context.Context, service *payments.Service) func() {
