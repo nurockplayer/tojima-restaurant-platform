@@ -1072,6 +1072,11 @@ func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
 			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "READY" || code != "HOLD_RECONCILIATION_NEEDED" {
 				t.Fatalf("retained expiry: %s %s %v", status, code, err)
 			}
+			// Keep EXPIRE ineligible until the late webhook has bound the Checkout;
+			// ready() below explicitly releases it after the binding assertion.
+			if _, err = h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, order.Order.ID); err != nil {
+				t.Fatal(err)
+			}
 			if outcome == "complete-unpaid-then-paid" {
 				x, err = h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentUnpaid)
 				if err != nil {
