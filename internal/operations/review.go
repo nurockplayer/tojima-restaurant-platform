@@ -111,7 +111,7 @@ func (s *Service) ApproveFulfillment(ctx context.Context, input OrderActionReque
 	}
 	var activeHold bool
 	err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM table_orders o CROSS JOIN LATERAL jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l
-		JOIN company_product_emergency_holds h ON h.tenant_id=o.tenant_id AND h.product_key=l->>'product_key' AND h.active
+		JOIN company_product_emergency_holds h ON h.tenant_id=o.tenant_id AND h.company_catalog_id=o.catalog_id AND h.product_key=l->>'product_key' AND h.active
 		WHERE o.order_id=$1)`, input.OrderID).Scan(&activeHold)
 	if err != nil {
 		return OrderState{}, err
@@ -188,7 +188,7 @@ func (s *Service) ListPaymentReviews(ctx context.Context, scope StoreScope) ([]O
 		ids[i] = orders[i].ID
 	}
 	rows, err := tx.Query(ctx, `SELECT o.order_id,ts.status='OPEN' AND ts.expires_at>clock_timestamp(),os.operational_hold,
-		(coalesce(a.company_hold_expire_requested_at IS NOT NULL,false) OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l JOIN company_product_emergency_holds h ON h.tenant_id=o.tenant_id AND h.product_key=l->>'product_key' AND h.active))
+		(coalesce(a.company_hold_expire_requested_at IS NOT NULL,false) OR EXISTS(SELECT 1 FROM jsonb_array_elements(o.quote_snapshot->'quote'->'lines') l JOIN company_product_emergency_holds h ON h.tenant_id=o.tenant_id AND h.company_catalog_id=o.catalog_id AND h.product_key=l->>'product_key' AND h.active))
 		FROM table_orders o JOIN operation_order_state os USING(order_id) JOIN table_sessions ts ON ts.session_id=o.session_id
 		LEFT JOIN stripe_payment_attempts a USING(order_id) WHERE o.order_id=ANY($1::text[])`, ids)
 	if err != nil {
