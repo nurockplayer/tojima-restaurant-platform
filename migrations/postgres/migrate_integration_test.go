@@ -62,9 +62,67 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("012 pending-session-close guard trigger missing after up: exists=%v err=%v", exists, err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 12 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 13 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
+	// 013 must be reversible independently, and Up must upgrade an installed
+	// 012 ledger rather than skipping an amended historical migration.
+	down013, err := os.ReadFile("013_stop_request_state_lock.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rollback013 := func() {
+		t.Helper()
+		tx, err := target.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer tx.Rollback(ctx)
+		if _, err = tx.Exec(ctx, string(down013)); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = tx.Exec(ctx, "DELETE FROM schema_migrations WHERE version=13"); err != nil {
+			t.Fatal(err)
+		}
+		if err = tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var lockedGuard string
+	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('protect_cancellation_request()'::regprocedure)`).Scan(&lockedGuard); err != nil || !strings.Contains(lockedGuard, "FOR SHARE") {
+		t.Fatalf("013 insert guard missing lock: %v", err)
+	}
+	rollback013()
+	var originalGuard string
+	if err = target.QueryRow(ctx, `SELECT prosrc FROM pg_proc WHERE oid='protect_cancellation_request()'::regprocedure`).Scan(&originalGuard); err != nil {
+		t.Fatal(err)
+	}
+	up012, err := os.ReadFile("012_stop_requests.up.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantGuard := strings.Split(strings.Split(string(up012), "CREATE FUNCTION protect_cancellation_request() RETURNS trigger LANGUAGE plpgsql AS $$")[1], "$$;")[0]
+	if originalGuard != wantGuard {
+		t.Fatal("013 down did not restore exactly the 012 request guard")
+	}
+	var ledgerBefore string
+	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m`).Scan(&ledgerBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err = postgres.Up(ctx, target); err != nil {
+		t.Fatalf("012 to 013 upgrade: %v", err)
+	}
+	var upgradedGuard, ledgerAfter string
+	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('protect_cancellation_request()'::regprocedure)`).Scan(&upgradedGuard); err != nil || upgradedGuard != lockedGuard {
+		t.Fatalf("012 upgrade differs from fresh 013 guard: %v", err)
+	}
+	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<=12`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
+		t.Fatalf("013 upgrade changed the 012 ledger: %v", err)
+	}
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 13 {
+		t.Fatalf("upgraded migration version %d err %v", version, err)
+	}
+	rollback013()
 	// Paired C2 rollback restores exactly the C1 transition guard before C1 down.
 	down012, err := os.ReadFile("012_stop_requests.down.sql")
 	if err != nil {
