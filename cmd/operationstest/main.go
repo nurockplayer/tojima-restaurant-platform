@@ -41,6 +41,7 @@ type credentialDocument struct {
 	TableLocator         string                       `json:"table_locator"`
 	Schema               string                       `json:"schema"`
 	Credentials          testoperations.CredentialSet `json:"credentials"`
+	StripeSandbox        bool                         `json:"stripe_sandbox,omitempty"`
 	PaymentFixture       bool                         `json:"payment_fixture,omitempty"`
 	WebhookFixtureSecret string                       `json:"webhook_fixture_secret,omitempty"`
 }
@@ -55,11 +56,24 @@ func main() {
 func run() error {
 	credentialsPath := flag.String("credentials", "", "new owner-only credentials output file (required)")
 	webRoot := flag.String("web-dist", "web/dist", "built staff/guest SPA directory")
+	stripeSandbox := flag.Bool("stripe-sandbox", false, "enable approved isolated Stripe Sandbox direct-charge test mode")
+	stripeTenant := flag.String("stripe-tenant", "", "synthetic Stripe Sandbox tenant: A, B or C")
 	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
 	catalogFixture := flag.Bool("catalog-fixture", false, "enable isolated catalog admin routes and local test credentials")
 	demoShironagasukujira := flag.Bool("demo-shironagasukujira", false, "seed the isolated Shironagasukujira reference-data demo")
 	port := flag.Int("port", 8082, "test-only HTTP port on loopback (1024..65535)")
 	flag.Parse()
+	if err := validateStripeSandboxFlags(*stripeSandbox, *stripeTenant, *withPayments, *demoShironagasukujira, *catalogFixture); err != nil {
+		return err
+	}
+	var sandboxConfig stripeSandboxConfig
+	if *stripeSandbox {
+		var err error
+		sandboxConfig, err = loadStripeSandboxConfig(os.Getenv)
+		if err != nil {
+			return err
+		}
+	}
 	if err := validateTestPort(*port); err != nil {
 		return err
 	}
@@ -84,6 +98,7 @@ func run() error {
 	defer stop()
 	fixture, err := testguest.NewWithOptions(ctx, os.Getenv("TEST_DATABASE_URL"), testguest.Options{
 		CashEnabled: true, CashMode: "PAY_LATER", DemoShironagasukujira: *demoShironagasukujira,
+		StripeSandboxTenant: *stripeTenant,
 	})
 	if err != nil {
 		return fmt.Errorf("create isolated database fixture: %w", err)
@@ -99,6 +114,14 @@ func run() error {
 		}
 	}
 
+	if *stripeSandbox {
+		paymentService, proofs, err = configureStripeSandbox(ctx, fixture, *stripeTenant, sandboxConfig)
+		if err != nil {
+			return errStripeSandboxRuntime
+		}
+		webhookSecret = sandboxConfig.webhookSecret
+	}
+
 	useCatalogFixture := catalogFixtureEnabled(*catalogFixture, *demoShironagasukujira)
 	newCredentials := testoperations.NewCredentialSet
 	if useCatalogFixture {
@@ -108,7 +131,12 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	doc := buildCredentialDocument(fixture, credentials, useCatalogFixture, *demoShironagasukujira, *withPayments, webhookSecret, *port)
+	documentWebhookSecret := webhookSecret
+	if *stripeSandbox {
+		documentWebhookSecret = ""
+	}
+	doc := buildCredentialDocument(fixture, credentials, useCatalogFixture, *demoShironagasukujira, *withPayments, documentWebhookSecret, *port)
+	doc.StripeSandbox = *stripeSandbox
 	ownedFile, err := writeCredentials(*credentialsPath, doc)
 	if err != nil {
 		return err
@@ -117,7 +145,7 @@ func run() error {
 
 	runtime := httpapi.NewOperationsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
 		identity, authz.PolicyAuthorizer{Directory: directory})
-	if *withPayments {
+	if *withPayments || *stripeSandbox {
 		runtime, err = httpapi.NewPaymentsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
 			paymentService, identity, authz.PolicyAuthorizer{Directory: directory}, httpapi.PaymentsHTTPConfig{
 				Proofs: proofs, Origin: doc.BaseURL, AllowLoopbackHTTP: true, WebhookSecrets: []string{webhookSecret},
@@ -141,9 +169,13 @@ func run() error {
 	} else {
 		api.Handle("/", spaHandler(*webRoot))
 	}
+	var serverHandler http.Handler = api
+	if *stripeSandbox {
+		serverHandler = stripeSandboxHostGuard(api, testListenAddress(*port))
+	}
 	server := &http.Server{
 		Addr:              testListenAddress(*port),
-		Handler:           api,
+		Handler:           serverHandler,
 		ReadHeaderTimeout: 5 * time.Second,
 	}
 	listener, err := net.Listen("tcp", server.Addr)
@@ -152,9 +184,13 @@ func run() error {
 	}
 	serverErr := make(chan error, 1)
 	go func() { serverErr <- server.Serve(listener) }()
-	if *withPayments {
+	if *withPayments || *stripeSandbox {
 		defer runPaymentFixtureWorker(ctx, paymentService)()
-		fmt.Fprintln(os.Stdout, "keyless payment fixture enabled; reserved .invalid Checkout URLs cannot accept payments")
+		if *stripeSandbox {
+			fmt.Fprintln(os.Stdout, "isolated Stripe Sandbox test mode enabled; no production acceptance")
+		} else {
+			fmt.Fprintln(os.Stdout, "keyless payment fixture enabled; reserved .invalid Checkout URLs cannot accept payments")
+		}
 	}
 	fmt.Fprintf(os.Stdout, "isolated operations test runtime listening on http://%s; credentials are in the requested 0600 file\n", server.Addr)
 	select {
@@ -204,7 +240,10 @@ func buildCredentialDocument(fixture *testguest.Fixture, credentials testoperati
 		BaseURL: baseURL, StaffURL: baseURL + "/staff", KitchenURL: baseURL + "/kitchen", GuestURL: baseURL + "/",
 		TenantID: fixture.TenantID, StoreID: fixture.StoreID, TableID: fixture.TableID,
 		TableLocator: fixture.Locator, Schema: fixture.Schema, Credentials: credentials,
-		PaymentFixture: paymentFixture, WebhookFixtureSecret: webhookSecret,
+		PaymentFixture: paymentFixture,
+	}
+	if paymentFixture {
+		doc.WebhookFixtureSecret = webhookSecret
 	}
 	if catalogFixture {
 		doc.CatalogURL = baseURL + "/catalog"
