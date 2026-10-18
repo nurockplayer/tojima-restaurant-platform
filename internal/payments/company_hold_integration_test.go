@@ -9,6 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/operations"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
@@ -110,6 +113,40 @@ func (h *holdFixture) work() {
 	if worked, err := h.service.ProcessNext(h.ctx); err != nil || !worked {
 		h.t.Fatalf("worker: worked=%v err=%v", worked, err)
 	}
+}
+
+// workWithExpiryAge fixes queue ages for one real scheduler invocation. Only
+// this fixture's worker pool shadows statement_timestamp; leases and provider
+// deadlines still use the real clock_timestamp. A pause after the age UPDATE
+// cannot move EXPIRE across the scheduler's 30-second priority boundary.
+func (h *holdFixture) workWithExpiryAge(order string, age time.Duration) {
+	h.t.Helper()
+	var now time.Time
+	if err := h.Pool.QueryRow(h.ctx, `SELECT clock_timestamp()`).Scan(&now); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=$1::timestamptz-
+		CASE WHEN order_id=$2 AND work_type='EXPIRE' THEN $3::interval ELSE interval '0 seconds' END
+		WHERE status='READY'`, now, order, age.String()); err != nil {
+		h.t.Fatal(err)
+	}
+	if _, err := h.Pool.Exec(h.ctx, `CREATE OR REPLACE FUNCTION statement_timestamp() RETURNS timestamptz
+		LANGUAGE sql STABLE AS $$ SELECT current_setting('p82.work_clock')::timestamptz $$`); err != nil {
+		h.t.Fatal(err)
+	}
+	cfg := h.Pool.Config()
+	// Explicitly placing pg_catalog last makes the fixture-local clock visible.
+	cfg.ConnConfig.RuntimeParams["search_path"] = pgx.Identifier{h.Schema}.Sanitize() + ",pg_catalog"
+	cfg.ConnConfig.RuntimeParams["p82.work_clock"] = now.Format(time.RFC3339Nano)
+	pool, err := pgxpool.NewWithConfig(h.ctx, cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer pool.Close()
+	original := h.service.db
+	h.service.db = pool
+	defer func() { h.service.db = original }()
+	h.work()
 }
 
 func (h *holdFixture) ready() {
@@ -447,7 +484,8 @@ func TestPostgresP82PendingAndInflightCreation(t *testing.T) {
 				if err := h.Pool.QueryRow(h.ctx, `SELECT status FROM stripe_payment_work WHERE work_type='EXPIRE'`).Scan(&status); err != nil || status != "READY" {
 					t.Fatalf("missing ID work lost: %s %v", status, err)
 				}
-				if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE work_type='CREATE'`); err != nil {
+				// Park retained EXPIRE until ready() releases it after CREATE.
+				if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=CASE WHEN work_type='CREATE' THEN clock_timestamp() ELSE 'infinity'::timestamptz END WHERE status='READY' AND work_type IN ('CREATE','EXPIRE')`); err != nil {
 					t.Fatal(err)
 				}
 				h.work()
@@ -477,7 +515,8 @@ func TestPostgresP82PendingAndInflightCreation(t *testing.T) {
 					t.Fatal(err)
 				}
 				if mode == "lost-response" {
-					if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp() WHERE work_type='CREATE'`); err != nil {
+					// Recovery must finish before ready() releases retained EXPIRE.
+					if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=CASE WHEN work_type='CREATE' THEN clock_timestamp() ELSE 'infinity'::timestamptz END WHERE status='READY' AND work_type IN ('CREATE','EXPIRE')`); err != nil {
 						t.Fatal(err)
 					}
 					h.work()
@@ -701,6 +740,10 @@ func TestPostgresP82HoldAfterCompletedUnpaidOrDecline(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			// Apply the webhook before ready() releases retained EXPIRE.
+			if _, err = h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, order.Order.ID); err != nil {
+				t.Fatal(err)
+			}
 			h.event(x, "paid-after-off", "checkout.session.async_payment_succeeded")
 			h.work()
 			h.assertState(order.Order.ID, StateReviewRequired, true, true)
@@ -857,9 +900,10 @@ func TestPostgresP82RetainedExpiryDoesNotStarveCreateOrWebhook(t *testing.T) {
 	h := newHoldFixture(t)
 	held, _ := h.commit(h.Locator, "teishoku", ordering.Stripe)
 	h.work()
-	h.hold(true, 0) // Older EXPIRE is already due when unrelated work arrives.
+	h.hold(true, 0)
 	other, _ := h.commit(h.Locator, "tea", ordering.Stripe)
-	h.work()
+	// EXPIRE is older but stays fresh, even if setup or execution pauses.
+	h.workWithExpiryAge(held.Order.ID, 5*time.Second)
 	h.assertState(other.Order.ID, StateOpen, false, false)
 	x := h.checkout(other.Order.ID)
 	x, err := h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
@@ -867,7 +911,7 @@ func TestPostgresP82RetainedExpiryDoesNotStarveCreateOrWebhook(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.event(x, "unrelated-payment", "checkout.session.completed")
-	h.work()
+	h.workWithExpiryAge(held.Order.ID, 5*time.Second)
 	h.assertState(other.Order.ID, StatePaid, true, false)
 	var attempts int
 	if err = h.Pool.QueryRow(h.ctx, `SELECT attempts FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, held.Order.ID).Scan(&attempts); err != nil || attempts != 0 {
@@ -917,9 +961,16 @@ func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Keep retained EXPIRE out of the webhook's turn, regardless of its age.
+	if _, err = h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at='infinity' WHERE order_id=$1 AND work_type='EXPIRE' AND status='READY'`, order.Order.ID); err != nil {
+		t.Fatal(err)
+	}
 	h.event(x, "unbound-decline-paid-after-off", "checkout.session.async_payment_succeeded")
 	h.work()
 	h.assertState(order.Order.ID, StateReviewRequired, true, true) // Includes no KDS/outbox release.
+	h.ready()
+	h.work() // Retire the retained obligation after the paid webhook assertion.
+	h.assertState(order.Order.ID, StateReviewRequired, true, true)
 	if creates, sessions := h.provider.Counts(); creates != 2 || sessions != 1 {
 		t.Fatalf("same-key recovery: creates=%d sessions=%d", creates, sessions)
 	}
@@ -1142,14 +1193,11 @@ func TestPostgresP82ExpiryAgesThroughContinuouslyReplenishedQueue(t *testing.T) 
 	for i, age := range []time.Duration{0, 10 * time.Second, 20 * time.Second, 31 * time.Second} {
 		h.commit(h.Locator, "tea", ordering.Stripe)
 		h.event(x, fmt.Sprintf("replenished-%d", i), "checkout.session.completed")
-		if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work SET available_at=clock_timestamp()-$2::interval WHERE order_id=$1 AND work_type='EXPIRE'`, held.Order.ID, age.String()); err != nil {
-			t.Fatal(err)
-		}
 		var creates, webhooks int
 		if err := h.Pool.QueryRow(h.ctx, `SELECT count(*) FILTER(WHERE work_type='CREATE'),count(*) FILTER(WHERE work_type='WEBHOOK') FROM stripe_payment_work WHERE status='READY' AND available_at<=clock_timestamp()`).Scan(&creates, &webhooks); err != nil || creates == 0 || webhooks == 0 {
 			t.Fatalf("missing competing backlog: create=%d webhook=%d err=%v", creates, webhooks, err)
 		}
-		h.work()
+		h.workWithExpiryAge(held.Order.ID, age)
 		var attempts int
 		if err := h.Pool.QueryRow(h.ctx, `SELECT attempts FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, held.Order.ID).Scan(&attempts); err != nil {
 			t.Fatal(err)
