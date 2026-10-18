@@ -117,13 +117,25 @@ func (s *Service) persistReconciliation(ctx context.Context, scope operations.Ta
 	if actualAttempt != a.attempt || amount != a.amount || (currentCheckout != "" && a.checkout != "" && currentCheckout != a.checkout) || (currentPI != "" && a.pi != "" && currentPI != a.pi) {
 		return Status{}, ErrDenied
 	}
-	if currentUpdatedAt.After(a.updatedAt) {
+	if currentUpdatedAt.After(a.updatedAt) && reconcileState(checkout, pi) != StatePaid {
 		// Another webhook/worker committed after this retrieval began. Do not
 		// overwrite its newer observation with a potentially stale response.
+		// A verified paid observation is monotone, including after an unpaid void.
 		_ = tx.Rollback(ctx)
 		return s.readSafeStatus(ctx, scope, a.session, a.order)
 	}
 	next := reconcileState(checkout, pi)
+	if current == string(StateExpired) && next != StatePaid {
+		var voided bool
+		if err = tx.QueryRow(ctx, `SELECT payment_status='VOIDED' AND fulfillment_status='CANCELLED' FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, a.order).Scan(&voided); err != nil {
+			return Status{}, err
+		}
+		// A cancelled intent is still unpaid. Preserve the void's EXPIRED
+		// close proof until a verified payment starts the refund path.
+		if voided {
+			next = StateExpired
+		}
+	}
 	// Paid is monotone. A concurrent webhook may have won while this provider
 	// retrieval was in flight; no later non-paid observation can undo it.
 	if current == string(StatePaid) || current == string(StateReviewRequired) {

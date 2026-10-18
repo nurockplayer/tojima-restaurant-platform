@@ -2,6 +2,7 @@ package operations
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -44,6 +45,12 @@ func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedSt
 	}
 	if payment == "PAID" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 		return false, nil
+	}
+	if payment == "VOIDED" {
+		if fulfillment != string(Cancelled) {
+			return false, ErrNotReady
+		}
+		return s.applyLateStripePaymentTx(ctx, tx, v, amount)
 	}
 	if payment != "PENDING" && payment != "UNKNOWN" {
 		return false, ErrNotReady
@@ -91,6 +98,66 @@ func (s *Service) ApplyStripePaidTx(ctx context.Context, tx pgx.Tx, v VerifiedSt
 		if err = releaseOrder(ctx, tx, v.OrderID, "stripe"); err != nil {
 			return false, err
 		}
+	}
+	return true, nil
+}
+
+func (s *Service) applyLateStripePaymentTx(ctx context.Context, tx pgx.Tx, v VerifiedStripePayment, amount int64) (bool, error) {
+	var version int64
+	var fulfillment string
+	var cancelled []byte
+	var effective *int64
+	if err := tx.QueryRow(ctx, `SELECT st.version,st.fulfillment_status,st.cancelled_quantities,st.effective_total_gross_jpy
+		FROM operation_order_state st JOIN table_orders o USING(order_id) WHERE st.order_id=$1 FOR UPDATE OF st`, v.OrderID).Scan(&version, &fulfillment, &cancelled, &effective); err != nil {
+		return false, err
+	}
+	if fulfillment != string(Cancelled) || effective == nil || *effective != 0 {
+		return false, ErrNotReady
+	}
+	var kds bool
+	if err := tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM operation_kds_cards WHERE order_id=$1)`, v.OrderID).Scan(&kds); err != nil {
+		return false, err
+	}
+	if kds {
+		return false, ErrNotReady
+	}
+	var lines []byte
+	if err := tx.QueryRow(ctx, `SELECT lines FROM order_adjustments WHERE order_id=$1 ORDER BY state_version DESC LIMIT 1`, v.OrderID).Scan(&lines); err != nil {
+		return false, err
+	}
+	newVersion := version + 1
+	verified, err := json.Marshal(map[string]any{"payment_intent_id": v.PaymentIntent, "amount_jpy": v.AmountJPY, "currency": v.Currency})
+	if err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,before_payment_status,after_payment_status,before_fulfillment_status,after_fulfillment_status,state_version,reason,before_state,after_state)
+		VALUES($1,'stripe','STRIPE_PAID_VERIFIED','VOIDED','REFUND_PENDING','CANCELLED','CANCELLED',$2,'late verified Stripe payment','{}'::jsonb,$3::jsonb)`, v.OrderID, newVersion, string(verified)); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx, `INSERT INTO operation_order_events(order_id,actor_id,event_type,before_payment_status,after_payment_status,before_fulfillment_status,after_fulfillment_status,state_version,reason,before_state,after_state)
+		VALUES($1,'stripe','STRIPE_LATE_PAYMENT_REFUND','VOIDED','REFUND_PENDING','CANCELLED','CANCELLED',$2,'late verified Stripe payment','{}'::jsonb,'{}'::jsonb)`, v.OrderID, newVersion); err != nil {
+		return false, err
+	}
+	adjustmentID, err := randomID()
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO order_adjustments(adjustment_id,order_id,actor_id,reason,state_version,original_snapshot,original_tax_snapshot,lines,cancelled_quantities,previous_total_gross_jpy,effective_total_gross_jpy,effective_tax_snapshot,refund_amount_jpy,whole_order_cancel)
+		SELECT $1,$2,'stripe','late verified Stripe payment', $3,o.quote_snapshot,o.tax_snapshot,$4::jsonb,$5::jsonb,$6,0,NULL,$6,true FROM table_orders o WHERE o.order_id=$2`, adjustmentID, v.OrderID, newVersion, string(lines), string(cancelled), amount); err != nil {
+		return false, err
+	}
+	refundID, err := randomID()
+	if err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO operation_refunds(refund_id,adjustment_id,order_id,amount_jpy,method,status,actor_id,provider_key) VALUES($1,$2,$3,$4,'STRIPE','REQUESTED','stripe',$5)`, refundID, adjustmentID, v.OrderID, amount, "p82-refund:"+refundID+":1"); err != nil {
+		return false, err
+	}
+	if err = enqueueRefund(ctx, tx, v.OrderID, refundID, 1); err != nil {
+		return false, err
+	}
+	if _, err = tx.Exec(ctx, `UPDATE operation_order_state SET payment_status='REFUND_PENDING',version=version+1,updated_at=clock_timestamp() WHERE order_id=$1 AND version=$2`, v.OrderID, version); err != nil {
+		return false, err
 	}
 	return true, nil
 }

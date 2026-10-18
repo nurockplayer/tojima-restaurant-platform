@@ -56,7 +56,7 @@ func TestReadOrderStatusTerminalMatrix(t *testing.T) {
 	// Seeded snapshots deliberately bypass operation transitions so ReadOrderStatus
 	// can be checked across the complete projection and terminal matrix. CHECK
 	// constraints stay enabled; payment method and cash mode remain consistent.
-	payments := []string{"UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED"}
+	payments := []string{"UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED", "VOIDED"}
 	fulfillments := []string{"WAITING", "ACCEPTED", "PREPARING", "READY", "SERVED", "CANCELLED"}
 	for _, payment := range payments {
 		for _, fulfillment := range fulfillments {
@@ -108,7 +108,7 @@ func TestReadOrderStatusTerminalMatrix(t *testing.T) {
 								t.Errorf("payment=%s fulfillment=%s hold=%t review=%t card=%t: IsTerminal=%t, want %t", payment, fulfillment, hold, review, card, status.IsTerminal, wantTerminal)
 							}
 							wantDisplay := "STANDARD"
-							if fulfillment == "CANCELLED" {
+							if payment == "VOIDED" || fulfillment == "CANCELLED" {
 								wantDisplay = "CANCELLED"
 							} else if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 								wantDisplay = "UNKNOWN"

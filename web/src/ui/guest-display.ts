@@ -15,7 +15,7 @@ export function guestRefundKind(refund: { status: string; method: string }): 'pr
 // neutral even if their raw payment or kitchen fields appear successful.
 export function guestDisplayKind(status: { display_state: string; payment_status: string; fulfillment_status: string }): 'standard' | 'review' | 'cancelled' | 'unknown' {
   if (status.display_state === 'CANCELLED' && status.fulfillment_status === 'CANCELLED'
-    && ['UNPAID', 'PENDING', 'PAID', 'UNKNOWN', 'REFUND_PENDING', 'REFUNDED'].includes(status.payment_status)) return 'cancelled';
+    && ['UNPAID', 'PENDING', 'PAID', 'UNKNOWN', 'VOIDED', 'REFUND_PENDING', 'REFUNDED'].includes(status.payment_status)) return 'cancelled';
   switch (status.display_state) {
     case 'PAID_UNDER_REVIEW': return 'review';
     case 'STANDARD':

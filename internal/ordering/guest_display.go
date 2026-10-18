@@ -5,11 +5,11 @@ package ordering
 // never inferred from payment or fulfillment labels.
 func GuestDisplayState(payment, fulfillment string, review, kdsCardExists bool) string {
 	switch payment {
-	case "UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED":
+	case "UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED", "VOIDED":
 	default:
 		return "UNKNOWN"
 	}
-	if fulfillment == "CANCELLED" {
+	if payment == "VOIDED" || fulfillment == "CANCELLED" {
 		return "CANCELLED"
 	}
 	if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {

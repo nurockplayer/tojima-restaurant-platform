@@ -222,7 +222,7 @@ func releaseOrder(ctx context.Context, tx pgx.Tx, orderID, actor string) error {
 func (s *Service) CheckClose(ctx context.Context, tx pgx.Tx, session tablesession.Session) error {
 	var bad int
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM table_orders o LEFT JOIN operation_order_state st ON st.order_id=o.order_id
-		WHERE o.session_id=$1 AND (st.order_id IS NULL OR NOT ((st.payment_status='PAID' AND st.fulfillment_status='SERVED') OR (st.fulfillment_status='CANCELLED' AND (st.payment_status='REFUNDED' OR (st.payment_method='CASH' AND st.payment_status='UNPAID')))) OR st.operational_hold OR st.payment_review_required OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED') OR EXISTS(SELECT 1 FROM cancellation_requests c WHERE c.order_id=o.order_id AND c.status IN ('REQUESTED','KITCHEN_CONFIRMED')))`, session.ID).Scan(&bad)
+		WHERE o.session_id=$1 AND (st.order_id IS NULL OR NOT ((st.payment_status='PAID' AND st.fulfillment_status='SERVED') OR (st.fulfillment_status='CANCELLED' AND (st.payment_status='REFUNDED' OR (st.payment_method='CASH' AND st.payment_status='UNPAID') OR (st.payment_method='STRIPE' AND st.payment_status='VOIDED')))) OR st.operational_hold OR st.payment_review_required OR EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED') OR EXISTS(SELECT 1 FROM cancellation_requests c WHERE c.order_id=o.order_id AND c.status IN ('REQUESTED','KITCHEN_CONFIRMED')))`, session.ID).Scan(&bad)
 	if err != nil {
 		return err
 	}
@@ -476,7 +476,7 @@ func closeBlockers(orders []OrderState) []string {
 		}
 	}
 	for _, o := range orders {
-		if o.PaymentStatus != Paid && !(o.FulfillmentStatus == Cancelled && (o.PaymentStatus == Refunded || (o.PaymentMethod == "CASH" && o.PaymentStatus == Unpaid))) {
+		if o.PaymentStatus != Paid && !(o.FulfillmentStatus == Cancelled && (o.PaymentStatus == Refunded || (o.PaymentMethod == "CASH" && o.PaymentStatus == Unpaid) || (o.PaymentMethod == "STRIPE" && o.PaymentStatus == Voided))) {
 			out = append(out, "UNPAID_OR_UNKNOWN_PAYMENT")
 			break
 		}
@@ -540,7 +540,7 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 			return GuestOperations{}, err
 		}
 		o.DisplayState = ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), review, card)
-		if o.PaymentStatus != Unpaid && o.PaymentStatus != Paid && o.PaymentStatus != Pending {
+		if o.PaymentStatus != Unpaid && o.PaymentStatus != Paid && o.PaymentStatus != Pending && o.PaymentStatus != Voided {
 			o.PaymentStatus = Unknown
 		}
 		out.Orders = append(out.Orders, o)

@@ -114,8 +114,8 @@ function guestOrderLabel(order: GuestOrderStatus | undefined, locale: Locale): s
     ? { WAITING: '調理開始待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' }
     : { WAITING: '等待開始製作', ACCEPTED: '待製作', PREPARING: '製作中', READY: '待送餐', SERVED: '已送達', CANCELLED: '已取消' };
   const payment: Record<GuestOrderStatus['payment_status'], string> = locale === 'ja'
-    ? { UNPAID: '未払い', PAID: '支払済み', PENDING: '支払確認中', UNKNOWN: '支払状態を確認中' }
-    : { UNPAID: '尚未付款', PAID: '已付款', PENDING: '付款確認中', UNKNOWN: '付款狀態確認中' };
+    ? { UNPAID: '未払い', PAID: '支払済み', PENDING: '支払確認中', UNKNOWN: '支払状態を確認中', VOIDED: '未払い取消', REFUND_PENDING: '返金処理中', REFUNDED: '返金済み' }
+    : { UNPAID: '尚未付款', PAID: '已付款', PENDING: '付款確認中', UNKNOWN: '付款狀態確認中', VOIDED: '未付款作廢', REFUND_PENDING: '退款處理中', REFUNDED: '已退款' };
   const fulfillmentLabel = order.requires_staff_acceptance && !order.staff_accepted
     ? (locale === 'ja' ? '店員の受付待ち' : '等待店員接單')
     : fulfillment[order.fulfillment_status];
