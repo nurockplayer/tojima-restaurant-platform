@@ -29,6 +29,35 @@ type CancellationRequest struct {
 	ManualExceptionReason string `json:"manual_exception_reason"`
 }
 
+type StopRequestEligibility string
+
+const (
+	StopEligible            StopRequestEligibility = "ELIGIBLE"
+	StopPending             StopRequestEligibility = "PENDING"
+	StopManualException     StopRequestEligibility = "MANUAL_EXCEPTION"
+	StopNoRemainingQuantity StopRequestEligibility = "NO_REMAINING_QUANTITY"
+)
+
+// stopRequestEligibility describes only line eligibility. Order state, holds,
+// permissions and optimistic versions are still checked when requesting a stop.
+func stopRequestEligibility(line OrderLine, requests []CancellationRequest) StopRequestEligibility {
+	if line.Quantity <= 0 {
+		return StopNoRemainingQuantity
+	}
+	for _, request := range requests {
+		if request.LineIndex != line.LineIndex {
+			continue
+		}
+		if request.Status == "REJECTED" || request.ManualExceptionReason != "" {
+			return StopManualException
+		}
+		if request.Status == "REQUESTED" || request.Status == "KITCHEN_CONFIRMED" {
+			return StopPending
+		}
+	}
+	return StopEligible
+}
+
 type StopActionRequest struct {
 	OrderActionRequest
 	RequestID              string
@@ -88,16 +117,13 @@ func (s *Service) RequestStop(ctx context.Context, r AdjustmentRequest) (OrderSt
 			return OrderState{}, ErrInvalid
 		}
 		seen[l.LineIndex] = true
-		for _, existing := range a.order.CancellationRequests {
-			if existing.LineIndex != l.LineIndex {
-				continue
-			}
-			if existing.Status == "REJECTED" || existing.ManualExceptionReason != "" {
-				return OrderState{}, ErrManualException
-			}
-			if existing.Status == "REQUESTED" || existing.Status == "KITCHEN_CONFIRMED" {
-				return OrderState{}, ErrStopRequestPending
-			}
+		switch stopRequestEligibility(a.order.Lines[l.LineIndex], a.order.CancellationRequests) {
+		case StopManualException:
+			return OrderState{}, ErrManualException
+		case StopPending:
+			return OrderState{}, ErrStopRequestPending
+		case StopNoRemainingQuantity:
+			return OrderState{}, ErrInvalid
 		}
 		id, e := randomID()
 		if e != nil {

@@ -82,6 +82,76 @@ func newRequestedStop(t *testing.T, ctx context.Context, dsn, key string) (*test
 	return f, grant, scope, state, state.CancellationRequests[0]
 }
 
+func TestPostgresC2RejectedLineDoesNotBlockOtherLineEligibility(t *testing.T) {
+	dsn := os.Getenv("TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("TEST_DATABASE_URL required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f, err := testguest.NewWithOptions(ctx, dsn, testguest.Options{CashEnabled: true, CashMode: operations.PayLater})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close(ctx)
+	grant, err := f.Sessions.DirectJoin(ctx, f.Locator, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope := operations.TableScope{TenantID: f.TenantID, StoreID: f.StoreID, TableID: grant.Session.Scope.TableID}
+	order := commitTwoLineCashOrder(t, ctx, f, grant, "c2-line-eligibility")
+	state, err := f.Operations.AcceptOrder(ctx, operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: order.ID, Actor: "staff", ExpectedVersion: 1, IdempotencyKey: "accept"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err = f.Operations.AdvanceFulfillment(ctx, operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: order.ID, Actor: "kitchen", ExpectedVersion: state.Version, IdempotencyKey: "prepare", Target: operations.Preparing})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Lines[0].StopRequestEligibility != operations.StopEligible || state.Lines[1].StopRequestEligibility != operations.StopEligible {
+		t.Fatalf("initial eligibility=%+v", state.Lines)
+	}
+	request := operations.AdjustmentRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: order.ID, Actor: "manager", ExpectedVersion: state.Version, IdempotencyKey: "request-A", Reason: "stop tea", Lines: []operations.AdjustmentLine{{LineIndex: 0, CancelledQuantity: 1}}}
+	state, err = f.Operations.RequestStop(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Lines[0].StopRequestEligibility != operations.StopPending || state.Lines[1].StopRequestEligibility != operations.StopEligible {
+		t.Fatalf("pending eligibility=%+v", state.Lines)
+	}
+	stop := state.CancellationRequests[0]
+	state, err = f.Operations.ActOnStopRequest(ctx, operations.StopActionRequest{OrderActionRequest: operations.OrderActionRequest{Scope: scope, SessionID: grant.Session.ID, OrderID: order.ID, Actor: "kitchen", ExpectedVersion: state.Version, IdempotencyKey: "reject-A", Reason: "already plated"}, RequestID: stop.ID, ExpectedRequestVersion: stop.Version, Action: "reject"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Verify the DTO returned by a fresh staff read, not only the write response.
+	detail, err := f.Operations.ReadSession(ctx, scope, grant.Session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(detail.Orders) != 1 {
+		t.Fatalf("orders=%+v", detail.Orders)
+	}
+	state = detail.Orders[0]
+	if state.Lines[0].StopRequestEligibility != operations.StopManualException || state.Lines[1].StopRequestEligibility != operations.StopEligible {
+		t.Fatalf("rejected eligibility=%+v", state.Lines)
+	}
+	request.ExpectedVersion = state.Version
+	request.IdempotencyKey = "retry-A"
+	if _, err = f.Operations.RequestStop(ctx, request); !errors.Is(err, operations.ErrManualException) {
+		t.Fatalf("rejected line reopened: %v", err)
+	}
+	request.IdempotencyKey = "request-B"
+	request.Lines = []operations.AdjustmentLine{{LineIndex: 1, CancelledQuantity: 1}}
+	state, err = f.Operations.RequestStop(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(state.CancellationRequests) != 2 || state.CancellationRequests[1].LineIndex != 1 || state.Lines[0].StopRequestEligibility != operations.StopManualException || state.Lines[1].StopRequestEligibility != operations.StopPending {
+		t.Fatalf("line B request=%+v", state)
+	}
+}
+
 func TestPostgresC2StopRequestBlocksFulfillmentAndFinalizesCashReduction(t *testing.T) {
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {

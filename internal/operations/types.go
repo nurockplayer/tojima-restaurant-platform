@@ -109,13 +109,14 @@ type OrderState struct {
 }
 
 type OrderLine struct {
-	LineIndex        int           `json:"line_index"`
-	OriginalQuantity int64         `json:"original_quantity"`
-	ProductName      string        `json:"product_name"`
-	Quantity         int64         `json:"quantity"`
-	UnitGrossJPY     int64         `json:"unit_gross_jpy"`
-	LineGrossJPY     int64         `json:"line_gross_jpy"`
-	Options          []OrderOption `json:"options"`
+	StopRequestEligibility StopRequestEligibility `json:"stop_request_eligibility"`
+	LineIndex              int                    `json:"line_index"`
+	OriginalQuantity       int64                  `json:"original_quantity"`
+	ProductName            string                 `json:"product_name"`
+	Quantity               int64                  `json:"quantity"`
+	UnitGrossJPY           int64                  `json:"unit_gross_jpy"`
+	LineGrossJPY           int64                  `json:"line_gross_jpy"`
+	Options                []OrderOption          `json:"options"`
 }
 
 type OrderOption struct {

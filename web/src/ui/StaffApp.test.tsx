@@ -26,6 +26,56 @@ afterEach(async () => {
 });
 
 describe('staff operations', () => {
+  it.each([
+    { status: 'REJECTED' as const, eligibility: 'MANUAL_EXCEPTION' as const, manual: 'Already plated', reason: '手動対応が必要です' },
+    { status: 'WITHDRAWN' as const, eligibility: 'MANUAL_EXCEPTION' as const, manual: 'Delivery uncertain', reason: '手動対応が必要です' },
+    { status: 'REQUESTED' as const, eligibility: 'PENDING' as const, reason: '停止依頼中' },
+    { status: 'KITCHEN_CONFIRMED' as const, eligibility: 'PENDING' as const, reason: '停止依頼中' },
+    { status: 'FINALIZED' as const, eligibility: 'NO_REMAINING_QUANTITY' as const, reason: '停止できる数量がありません' },
+  ])('keeps line B requestable when line A is $status and excludes A from submission', async ({ status, eligibility, manual, reason }) => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', lines: [
+      { ...defaultOrder().lines[0]!, line_index: 0, product_name: 'Line A', quantity: status === 'FINALIZED' ? 0 : 1, stop_request_eligibility: eligibility },
+      { ...defaultOrder().lines[0]!, line_index: 1, product_name: 'Line B', stop_request_eligibility: 'ELIGIBLE' },
+    ], cancellation_requests: [{ id: 'stop-A', line_index: 0, quantity: 1, reason: 'Stop A', requesting_manager: 'manager-1', status, version: 2, manual_exception_reason: manual }] });
+    let submitted: unknown;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/operations/reviews')) return json({ orders: [order] });
+      if (url.endsWith('/stop-requests')) { submitted = JSON.parse(String(init.body)); return json(order); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '調理中の商品を止める');
+    const rows = host!.querySelectorAll<HTMLLIElement>('.confirm-dialog .adjustment-lines li');
+    const inputA = rows[0]!.querySelector('input')!;
+    expect(inputA.disabled).toBe(true);
+    expect(rows[0]!.textContent).toContain(reason);
+    const inputB = rows[1]!.querySelector('input')!;
+    expect(inputB.disabled).toBe(false);
+    await act(async () => { await userEvent.type(inputA, '1'); });
+    expect(inputA.value).toBe('0');
+    await setField(rows[1]!, '停止数量', '1');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Stop B');
+    await clickNth(host!, '.confirm-dialog button.primary', 0);
+    await waitFor(() => expect(submitted).toEqual({ expected_version: 3, reason: 'Stop B', lines: [{ line_index: 1, cancelled_quantity: 1 }] }));
+  });
+
+  it('hides the stop request action when the server reports no eligible lines', async () => {
+    const order = staffOrder({ fulfillment_status: 'PREPARING', lines: [
+      { ...defaultOrder().lines[0]!, stop_request_eligibility: 'MANUAL_EXCEPTION' },
+      { ...defaultOrder().lines[0]!, stop_request_eligibility: 'NO_REMAINING_QUANTITY', quantity: 0 },
+    ] });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細');
+    expect(within(host!).queryByRole('button', { name: '調理中の商品を止める' })).toBeNull();
+  });
+
   it('lets a manager request a PREPARING line stop and keeps the write idempotent', async () => {
     const order = staffOrder({ fulfillment_status: 'PREPARING', payment_status: 'PAID', payment_method: 'STRIPE' });
     let saved: unknown;
@@ -1200,7 +1250,7 @@ async function setTextarea(textarea: HTMLTextAreaElement, value: string) {
 
 function staffOrder(overrides: Partial<StaffOrder> = {}): StaffOrder { return { ...defaultOrder(), ...overrides }; }
 function defaultOrder(): StaffOrder {
-  return { id: 'order-1', session_id: 'session-1', table_id: 'table-1', table_name: 'T1', generation: 1, payment_method: 'CASH' as const, payment_status: 'UNPAID' as const, fulfillment_status: 'WAITING' as const, requires_staff_acceptance: false, staff_accepted: true, version: 3, total_gross_jpy: '1210', created_at: '2026-10-18T00:59:00Z', lines: [{ product_name: 'ラーメン', quantity: 1, unit_gross_jpy: '1100', line_gross_jpy: '1210', options: [{ group_name: 'サイズ', option_name: '大盛り', price_delta_minor: '110' }] }] };
+  return { id: 'order-1', session_id: 'session-1', table_id: 'table-1', table_name: 'T1', generation: 1, payment_method: 'CASH' as const, payment_status: 'UNPAID' as const, fulfillment_status: 'WAITING' as const, requires_staff_acceptance: false, staff_accepted: true, version: 3, total_gross_jpy: '1210', created_at: '2026-10-18T00:59:00Z', lines: [{ stop_request_eligibility: 'ELIGIBLE', product_name: 'ラーメン', quantity: 1, unit_gross_jpy: '1100', line_gross_jpy: '1210', options: [{ group_name: 'サイズ', option_name: '大盛り', price_delta_minor: '110' }] }] };
 }
 function paymentStatus(state: string) {
   return { order_id: 'order-1', state, last_reconciled_at: '2026-10-18T12:00:00Z', payment_review_required: state === 'REVIEW_REQUIRED', resume_available: false };

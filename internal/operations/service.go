@@ -431,6 +431,7 @@ func readOrdersMode(ctx context.Context, q interface {
 				line.Quantity -= cancelled[i]
 			}
 			line.LineGrossJPY = line.UnitGrossJPY * line.Quantity
+			line.StopRequestEligibility = stopRequestEligibility(line, v.CancellationRequests)
 			v.Lines = append(v.Lines, line)
 		}
 		out = append(out, v)

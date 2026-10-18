@@ -13,7 +13,7 @@ export interface StaffOrder {
   payment_review_required?: boolean; review_reason_codes?: Array<'COMPANY_HOLD' | 'OPERATIONAL_HOLD' | 'SESSION_CLOSED' | 'PAYMENT_REVIEW' | 'REFUND_UNRESOLVED' | 'STOP_REQUEST_PENDING' | 'STOP_MANUAL_EXCEPTION'>;
   review_decision?: 'UNRESOLVED' | 'APPROVED' | 'CANCELLED';
   cancellation_requests?: CancellationRequest[];
-  lines: Array<{ line_index?: number; original_quantity?: number; product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;
+  lines: Array<{ stop_request_eligibility?: 'ELIGIBLE' | 'PENDING' | 'MANUAL_EXCEPTION' | 'NO_REMAINING_QUANTITY'; line_index?: number; original_quantity?: number; product_name: string; quantity: number; unit_gross_jpy: string; line_gross_jpy: string; options: Array<{ group_name: string; option_name: string; price_delta_minor: string }> }>;
 }
 export interface CancellationRequest { id: string; line_index: number; quantity: number; reason: string; requesting_manager: string; kitchen_confirmer?: string; non_delivery_confirmer?: string; status: 'REQUESTED' | 'KITCHEN_CONFIRMED' | 'FINALIZED' | 'REJECTED' | 'WITHDRAWN'; version: number; manual_exception_reason?: string }
 export interface AdjustmentLine { line_index: number; cancelled_quantity: number }
