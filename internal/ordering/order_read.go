@@ -138,7 +138,8 @@ func (s *Service) ReadOrderStatus(ctx context.Context, orderID, token string) (O
 	var out OrderReadStatus
 	var review, kdsCardExists bool
 	err := s.db.QueryRow(ctx, `SELECT st.version,st.payment_status,st.fulfillment_status,o.total_gross_jpy,'JPY',
-  st.payment_status='PAID' AND st.fulfillment_status='SERVED' AND NOT st.operational_hold AND NOT st.payment_review_required,
+  st.payment_status='PAID' AND st.fulfillment_status='SERVED' AND NOT st.operational_hold AND NOT st.payment_review_required
+    AND NOT EXISTS(SELECT 1 FROM operation_refunds r WHERE r.order_id=o.order_id AND r.status<>'SUCCEEDED'),
   st.payment_review_required,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id)
   FROM order_read_grants g
   JOIN table_orders o USING(order_id,session_id,tenant_id,store_id,table_id)

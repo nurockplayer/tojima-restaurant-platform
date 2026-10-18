@@ -117,6 +117,22 @@ describe('read-only order status', () => {
     expect(fetcher).toHaveBeenCalledTimes(3); expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it('keeps polling a paid, served order until the server confirms refund resolution', async () => {
+    let resolved = false;
+    const fetcher = vi.fn(async () => json({ ...state, is_terminal: resolved, payment_status: 'PAID', fulfillment_status: 'SERVED' }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<OrderStatusView grant={grant} locale="ja" />); await flush();
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    // REQUESTED, PROCESSING and FAILED refunds all retain PAID + SERVED
+    // and is_terminal=false; refund details are deliberately absent from this DTO.
+    for (let expected = 2; expected <= 4; expected++) {
+      await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(expected);
+    }
+    resolved = true;
+    await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(5);
+    await flush(90_000); expect(fetcher).toHaveBeenCalledTimes(5);
+  });
+
   it('stops periodic polling only on the server terminal flag, and still refreshes on resume', async () => {
     const fetcher = vi.fn(async () => json({ ...state, is_terminal: true, payment_status: 'PAID', fulfillment_status: 'SERVED' }));
     vi.stubGlobal('fetch', fetcher);
