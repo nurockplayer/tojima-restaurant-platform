@@ -173,6 +173,47 @@ test("tampered, expired, overlong, and too-far-future sessions cannot reach guid
   assert.equal(fetchCount, 0);
 });
 
+test("unauthenticated API requests and non-GET/HEAD requests return JSON 401 without proxying", async () => {
+  const expired = signedCookie(Math.floor(Date.now() / 1000) - 1);
+  const valid = signedCookie(Math.floor(Date.now() / 1000) + 60);
+  const cookies = [undefined, `__Host-tojima_demo=${expired}`, "__Host-tojima_demo=bad.signature", `__Host-tojima_demo=${valid}; __Host-tojima_demo=${valid}`];
+  let fetchCount = 0;
+  await withFetch(async () => { fetchCount++; return new Response("unexpected proxy"); }, async () => {
+    for (const cookie of cookies) {
+      for (const path of ["/v1/orders?x=1", "/v1/staff/operations/access", "/staff"]) {
+        for (const method of ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+          if (path === "/staff" && ["GET", "HEAD"].includes(method)) continue;
+          const response = await run(path, { method, headers: cookie ? { cookie } : {} });
+          assert.equal(response.status, 401, `${method} ${path}`);
+          assert.equal(response.headers.get("content-type"), "application/json");
+          assert.equal(response.headers.get("cache-control"), "no-store");
+          assert.equal(response.headers.get("location"), null);
+          assert.deepEqual(await response.json(), { error: "demo_session_required" });
+        }
+      }
+    }
+  });
+  assert.equal(fetchCount, 0);
+});
+
+test("unauthenticated GET/HEAD page navigations still redirect to login", async () => {
+  const expired = signedCookie(Math.floor(Date.now() / 1000) - 1);
+  let fetchCount = 0;
+  await withFetch(async () => { fetchCount++; return new Response("unexpected proxy"); }, async () => {
+    for (const cookie of [undefined, `__Host-tojima_demo=${expired}`]) {
+      for (const path of ["/", "/staff", "/kitchen", "/catalog"]) {
+        for (const method of ["GET", "HEAD"]) {
+          const response = await run(path, { method, headers: cookie ? { cookie } : {} });
+          assert.equal(response.status, 303, `${method} ${path}`);
+          assert.equal(response.headers.get("location"), "/__demo/login");
+          assert.equal(response.headers.get("cache-control"), "no-store");
+        }
+      }
+    }
+  });
+  assert.equal(fetchCount, 0);
+});
+
 test("proxy strips gate credentials, preserves all other cookie segments and repeated Set-Cookie, and drops caller Host", async () => {
   const { cookie } = await login();
   let forwarded;

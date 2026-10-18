@@ -166,7 +166,15 @@ async function handleRequest({ request, env }) {
     if (request.method !== "GET") return htmlResponse("<h1>Not found</h1>", 404);
     return await validSession(request, env) ? guidePage() : new Response(null, { status: 303, headers: { location: "/__demo/login", "cache-control": "no-store" } });
   }
-  if (!await validSession(request, env)) return new Response(null, { status: 303, headers: { location: "/__demo/login", "cache-control": "no-store" } });
+  if (!await validSession(request, env)) {
+    if (url.pathname.startsWith("/v1/") || !["GET", "HEAD"].includes(request.method)) {
+      return new Response(JSON.stringify({ error: "demo_session_required" }), {
+        status: 401,
+        headers: { "content-type": "application/json", "cache-control": "no-store" },
+      });
+    }
+    return new Response(null, { status: 303, headers: { location: "/__demo/login", "cache-control": "no-store" } });
+  }
   if (/^\/(?:test|functions)(?:\/|$)/.test(url.pathname) || /^\/(?:package\.json|wrangler\.toml|_headers|_routes\.json)$/.test(url.pathname)) return new Response("Not found", { status: 404 });
   const headers = new Headers(request.headers);
   headers.delete("x-tojima-demo-gate");
