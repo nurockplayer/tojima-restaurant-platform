@@ -156,6 +156,40 @@ func (h *holdFixture) ready() {
 	}
 }
 
+// readyOnly releases one work type and parks the order's other READY work until
+// explicitly released. CREATE-before-EXPIRE setup must not depend on queue age.
+func (h *holdFixture) readyOnly(order, kind string) {
+	h.t.Helper()
+	if _, err := h.Pool.Exec(h.ctx, `UPDATE stripe_payment_work
+		SET available_at=CASE WHEN work_type=$2 THEN clock_timestamp() ELSE 'infinity'::timestamptz END
+		WHERE order_id=$1 AND status='READY'`, order, kind); err != nil {
+		h.t.Fatal(err)
+	}
+}
+
+// workWithRetryClock gives each SQL statement one scheduling timestamp, even
+// if execution pauses between available_at and updated_at evaluations. Only
+// this invocation's worker pool sees the fixture-local clock; subsequent
+// statements still advance normally for deadline and lease checks.
+func (h *holdFixture) workWithRetryClock() {
+	h.t.Helper()
+	if _, err := h.Pool.Exec(h.ctx, `CREATE OR REPLACE FUNCTION clock_timestamp() RETURNS timestamptz
+		LANGUAGE sql VOLATILE AS $$ SELECT pg_catalog.statement_timestamp() $$`); err != nil {
+		h.t.Fatal(err)
+	}
+	cfg := h.Pool.Config()
+	cfg.ConnConfig.RuntimeParams["search_path"] = pgx.Identifier{h.Schema}.Sanitize() + ",pg_catalog"
+	pool, err := pgxpool.NewWithConfig(h.ctx, cfg)
+	if err != nil {
+		h.t.Fatal(err)
+	}
+	defer pool.Close()
+	original := h.service.db
+	h.service.db = pool
+	defer func() { h.service.db = original }()
+	h.work()
+}
+
 // elapseCreateDeadline drives the deadline transition explicitly. The normal
 // one-hour window exceeds the fixture's 90-second context, so setup cannot cross
 // it under load. Only this fixture's isolated schema is changed; restore the
@@ -806,7 +840,8 @@ func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T)
 					t.Fatal(err)
 				}
 			}
-			// Assert persisted scheduling, not a wall-clock sleep for each retry.
+			// workWithRetryClock makes both persisted timestamps use the same
+			// statement clock, so the exact backoff is independent of pauses.
 			assertRetry := func(attempt int, delay time.Duration, code string) {
 				t.Helper()
 				var actualAttempts int
@@ -816,7 +851,7 @@ func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T)
 					FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID).Scan(&actualAttempts, &actualDelay, &status, &actualCode); err != nil {
 					t.Fatal(err)
 				}
-				if actualAttempts != attempt || actualDelay < delay.Seconds()-0.1 || actualDelay > delay.Seconds()+0.1 || status != "READY" || actualCode != code {
+				if actualAttempts != attempt || actualDelay != delay.Seconds() || status != "READY" || actualCode != code {
 					t.Fatalf("retry: attempts=%d delay=%v status=%s code=%s; want %d %v %s", actualAttempts, actualDelay, status, actualCode, attempt, delay, code)
 				}
 				h.assertRetained(order.Order.ID)
@@ -830,12 +865,12 @@ func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T)
 					t.Fatalf("retry ran before available_at: %v %v", worked, err)
 				}
 			}
-			h.work()
+			h.workWithRetryClock()
 			assertRetry(1, 5*time.Second, initialCode)
 			h.elapseCreateDeadline(order.Order.ID)
 			if mode == "waiting-for-checkout" {
 				// CREATE stops at its elapsed deadline; EXPIRE must survive.
-				h.ready()
+				h.readyOnly(order.Order.ID, "CREATE")
 				h.work()
 				var status, code string
 				if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "DONE" || code != "RETRY_WINDOW_ELAPSED" {
@@ -843,8 +878,8 @@ func TestPostgresP82RetainedBackoffBeyondCreateDeadlineAndRecovery(t *testing.T)
 				}
 			}
 			for i, seconds := range []int{10, 20, 40, 80, 160, 300, 300} {
-				h.ready()
-				h.work()
+				h.readyOnly(order.Order.ID, "EXPIRE")
+				h.workWithRetryClock()
 				assertRetry(i+2, time.Duration(seconds)*time.Second, "HOLD_RECONCILIATION_NEEDED")
 			}
 			scope := operations.TableScope{TenantID: h.TenantID, StoreID: h.StoreID, TableID: h.TableID}
@@ -949,7 +984,7 @@ func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
 	h.assertRetained(order.Order.ID)
 	h.hold(false, 1)
 	h.assertRetained(order.Order.ID)
-	h.ready()
+	h.readyOnly(order.Order.ID, "CREATE")
 	h.work() // Same-key CREATE recovery persists the late Checkout after OFF.
 	if got := h.checkout(order.Order.ID); got.SessionID != x.SessionID {
 		t.Fatalf("late CREATE did not recover original Checkout: %+v", got)
@@ -968,7 +1003,7 @@ func TestPostgresP82UnboundFailedBeforeHoldOffAndLateCreatePaid(t *testing.T) {
 	h.event(x, "unbound-decline-paid-after-off", "checkout.session.async_payment_succeeded")
 	h.work()
 	h.assertState(order.Order.ID, StateReviewRequired, true, true) // Includes no KDS/outbox release.
-	h.ready()
+	h.readyOnly(order.Order.ID, "EXPIRE")
 	h.work() // Retire the retained obligation after the paid webhook assertion.
 	h.assertState(order.Order.ID, StateReviewRequired, true, true)
 	if creates, sessions := h.provider.Counts(); creates != 2 || sessions != 1 {
@@ -1113,12 +1148,13 @@ func TestPostgresP82UnboundFailedLateWebhookBeyondCreateDeadline(t *testing.T) {
 			h.hold(false, 1)
 			h.assertRetained(order.Order.ID)
 			h.elapseCreateDeadline(order.Order.ID)
-			h.ready()
+			h.readyOnly(order.Order.ID, "CREATE")
 			h.work() // CREATE exhausts its elapsed deadline without another call.
 			var status, code string
 			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "DONE" || code != "RETRY_WINDOW_ELAPSED" {
 				t.Fatalf("CREATE cutoff: %s %s %v", status, code, err)
 			}
+			h.readyOnly(order.Order.ID, "EXPIRE")
 			h.work() // Retained EXPIRE still waits for the missing Checkout ID.
 			if err = h.Pool.QueryRow(h.ctx, `SELECT status,safe_error_code FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, order.Order.ID).Scan(&status, &code); err != nil || status != "READY" || code != "HOLD_RECONCILIATION_NEEDED" {
 				t.Fatalf("retained expiry: %s %s %v", status, code, err)
