@@ -2,6 +2,7 @@ package operations_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -409,8 +410,49 @@ func TestPostgresLegacyStripeStateFailsClosedAndCashWithoutPolicyIsDenied(t *tes
 	if _, err = legacy.Commit(ctx, ordering.CommitRequest{SessionID: grant.Session.ID, GrantToken: grant.Token, ExpectedGeneration: 1, ExpectedVersion: cart.Version, IdempotencyKey: "legacy-cash", PreviewFingerprint: preview.Fingerprint, PaymentMethod: ordering.Cash}); !errors.Is(err, ordering.ErrPaymentUnavailable) {
 		t.Fatalf("CASH order committed without operations hook: %v", err)
 	}
-	if _, err = legacy.Commit(ctx, ordering.CommitRequest{SessionID: grant.Session.ID, GrantToken: grant.Token, ExpectedGeneration: 1, ExpectedVersion: cart.Version, IdempotencyKey: "legacy-stripe", PreviewFingerprint: preview.Fingerprint, PaymentMethod: ordering.Stripe}); err != nil {
+	request := ordering.CommitRequest{SessionID: grant.Session.ID, GrantToken: grant.Token, ExpectedGeneration: 1, ExpectedVersion: cart.Version, IdempotencyKey: "legacy-stripe", PreviewFingerprint: preview.Fingerprint, PaymentMethod: ordering.Stripe}
+	committed, err := legacy.Commit(ctx, request)
+	if err != nil {
 		t.Fatalf("legacy Stripe order should remain available: %v", err)
+	}
+	if committed.Outcome != ordering.Committed || committed.OrderReadGrant != nil {
+		t.Error("legacy Stripe commit must succeed without returning an unreadable grant")
+	}
+	for _, key := range []string{"legacy-stripe", "legacy-stripe-replay"} {
+		request.IdempotencyKey = key
+		replayed, err := legacy.Commit(ctx, request)
+		if err != nil || replayed.Outcome != ordering.AlreadyCommitted || replayed.Order.ID != committed.Order.ID || replayed.OrderReadGrant != nil {
+			t.Errorf("legacy Stripe replay must return the same order without a grant: err=%v", err)
+		}
+	}
+	// Neither the legacy constructor nor a policy-wired service may issue a
+	// capability for an order that lacks the status projection's state row.
+	for _, service := range []*ordering.Service{legacy, f.Orders} {
+		readGrant, err := service.RequestOrderRead(ctx, grant.Session.ID, grant.Token, committed.Order.ID)
+		if !errors.Is(err, ordering.ErrDenied) || readGrant != nil {
+			t.Errorf("legacy order accepted an explicit read-grant request: err=%v", err)
+		}
+	}
+	var grants, states int
+	if err = f.Pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM order_read_grants WHERE order_id=$1),
+		(SELECT count(*) FROM operation_order_state WHERE order_id=$1)`, committed.Order.ID).Scan(&grants, &states); err != nil {
+		t.Fatal(err)
+	}
+	if grants != 0 || states != 0 {
+		t.Errorf("legacy commit/issuance persisted grants=%d states=%d; want neither", grants, states)
+	}
+	// A grant persisted before this fix must still fail closed: do not invent
+	// fallback payment or fulfillment status for legacy orders.
+	const oldToken = "legacy-order-read-token-0000000000000000000"
+	hash := sha256.Sum256([]byte(oldToken))
+	if _, err = f.Pool.Exec(ctx, `INSERT INTO order_read_grants(token_hash,order_id,session_id,tenant_id,store_id,table_id,created_at,expires_at)
+		SELECT $1,order_id,session_id,tenant_id,store_id,table_id,clock_timestamp(),clock_timestamp()+interval '1 hour'
+		FROM table_orders WHERE order_id=$2`, hash[:], committed.Order.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Orders.ReadOrderStatus(ctx, committed.Order.ID, oldToken); !errors.Is(err, ordering.ErrDenied) {
+		t.Fatalf("legacy status read did not fail closed: %v", err)
 	}
 	state, err := f.Operations.ReadSession(ctx, operations.TableScope{TenantID: grant.Session.Scope.TenantID, StoreID: grant.Session.Scope.StoreID, TableID: grant.Session.Scope.TableID}, grant.Session.ID)
 	if err != nil {

@@ -55,13 +55,16 @@ type OrderReadStatus struct {
 }
 
 func (s *Service) issueOrderReadTx(ctx context.Context, tx pgx.Tx, session tablesession.Session, orderID string) (*OrderReadGrant, error) {
-	// Both callers hold the session row lock until commit. Check scope before
-	// reporting the budget, and serialize counting with every issuance path.
+	// Both callers hold the session row lock until commit. Require the same
+	// scoped operation state as the status projection before issuing a grant.
+	// Check scope before reporting the budget and serialize all issuance paths.
 	var active int
 	err := tx.QueryRow(ctx, `SELECT (SELECT count(*) FROM order_read_grants g
   WHERE g.order_id=o.order_id AND g.session_id=o.session_id
   AND g.revoked_at IS NULL AND g.expires_at>clock_timestamp())
-  FROM table_orders o WHERE o.order_id=$1 AND o.session_id=$2 AND o.tenant_id=$3 AND o.store_id=$4 AND o.table_id=$5`,
+  FROM table_orders o
+  JOIN operation_order_state st USING(order_id,session_id,tenant_id,store_id,table_id)
+  WHERE o.order_id=$1 AND o.session_id=$2 AND o.tenant_id=$3 AND o.store_id=$4 AND o.table_id=$5`,
 		orderID, session.ID, session.Scope.TenantID, session.Scope.StoreID, session.Scope.TableID).Scan(&active)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrDenied
