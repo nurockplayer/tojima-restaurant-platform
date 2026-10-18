@@ -19,6 +19,7 @@ import getpass
 import signal
 import subprocess
 import sys
+import threading
 import time
 import warnings
 
@@ -33,6 +34,68 @@ EVENTS = ",".join((
 API_VERSION = "2026-09-30.endive"
 MODE = "CONNECTED_DIRECT_TEST_FIXTURE"
 PLATFORM_ACCOUNT = "acct_1URlHu1Hm4CZe205"
+LISTENER_READY_TIMEOUT = 120
+
+
+class ListenerReadinessError(ValueError):
+    """Only fixed, secret-free readiness diagnostics may use this error."""
+
+
+class ListenerOutput:
+    """Discard bytes, retaining only readiness/EOF flags and parser state.
+
+    Never assemble a line: the Ready line itself contains the signing secret.
+    Both CLI streams share this pipe; keep draining after readiness as well.
+    """
+
+    def __init__(self, stream):
+        self.ready = threading.Event()
+        self.ended = threading.Event()
+        self.thread = threading.Thread(target=self._drain, args=(stream,), daemon=True)
+        self.thread.start()
+
+    def _drain(self, stream):
+        prefix = b"> Ready! "
+        matched = 0
+        escape = 0
+        try:
+            while byte := stream.read(1):
+                # Ignore ANSI CSI styling without retaining escape text.
+                if escape:
+                    if escape == 1:
+                        escape = 2 if byte == b"[" else 0
+                    elif b"@" <= byte <= b"~":
+                        escape = 0
+                    continue
+                if byte == b"\x1b":
+                    escape = 1
+                elif byte in (b"\r", b"\n"):
+                    matched = 0
+                elif matched >= 0:
+                    if byte[0] != prefix[matched]:
+                        matched = -1
+                    else:
+                        matched += 1
+                        if matched == len(prefix):
+                            self.ready.set()
+                            matched = -1
+        except (OSError, ValueError):
+            # No exception text or pipe content may escape the reader.
+            pass
+        finally:
+            self.ended.set()
+
+    def wait_ready(self, listener):
+        deadline = time.monotonic() + LISTENER_READY_TIMEOUT
+        while True:
+            if listener.poll() is not None or self.ended.is_set():
+                raise ListenerReadinessError("Stripe listener exited before readiness")
+            if self.ready.is_set():
+                return
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise ListenerReadinessError("Stripe listener readiness timeout")
+            self.ready.wait(min(0.05, remaining))
 
 
 def checked_environment(source):
@@ -68,11 +131,11 @@ def stop(child):
         pass
 
 
-def startup_check(runtime, listener, credentials_path, tenant, port):
+def startup_check(runtime, listener, credentials_path, tenant, port, listener_output):
     endpoint = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + 120
     while time.monotonic() < deadline:
-        if runtime.poll() is not None or listener.poll() is not None:
+        if runtime.poll() is not None or listener.poll() is not None or listener_output.ended.is_set():
             raise ValueError("runtime/listener exited before readiness")
         try:
             with urllib.request.urlopen(endpoint + "/healthz", timeout=2) as response:
@@ -99,7 +162,7 @@ def startup_check(runtime, listener, credentials_path, tenant, port):
         except urllib.error.HTTPError as response:
             if response.code != expected:
                 raise ValueError("unexpected HTTP guard status") from None
-    if runtime.poll() is not None or listener.poll() is not None:
+    if runtime.poll() is not None or listener.poll() is not None or listener_output.ended.is_set():
         raise ValueError("runtime/listener did not remain active")
     print("Sandbox startup smoke PASS: exact Host and unsigned-webhook guards; no payment E2E claim", flush=True)
 
@@ -165,22 +228,28 @@ def run(args):
     command = [str(Path(args.runtime_binary).resolve())]
     if args.runtime_binary and not Path(args.runtime_binary).is_file():
         raise ValueError("prebuilt runtime binary is missing")
-    listener = runtime = None
+    listener = runtime = output = None
     try:
         listener = subprocess.Popen(
             [cli, "listen", "--forward-connect-to", endpoint, "--events", EVENTS,
              "--skip-update"], cwd=root, env=cli_env, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             start_new_session=True)
+        output = ListenerOutput(listener.stdout)
+        output.wait_ready(listener)
+        # Go announces its URL on launch, so do not start it before forwarding
+        # is ready. No listener output is relayed, including on failure.
         runtime = subprocess.Popen(
             command + ["-stripe-sandbox", "-stripe-tenant", args.tenant,
              "-port", str(args.port), "-credentials", str(Path(args.credentials).resolve())],
             cwd=root, env=runtime_env, stdin=subprocess.DEVNULL, start_new_session=True)
         print("Isolated Sandbox runtime starting; Stripe CLI output is suppressed", flush=True)
-        startup_check(runtime, listener, args.credentials, args.tenant, args.port)
+        startup_check(runtime, listener, args.credentials, args.tenant, args.port, output)
+        if listener.poll() is not None or output.ended.is_set():
+            raise ListenerReadinessError("Stripe listener stopped during startup")
         if args.startup_check:
             return 0
-        while runtime.poll() is None and listener.poll() is None:
+        while runtime.poll() is None and listener.poll() is None and not output.ended.is_set():
             time.sleep(0.5)
         if runtime.poll() is not None:
             return runtime.returncode
@@ -194,7 +263,13 @@ def run(args):
             try:
                 stop(runtime)
             finally:
-                stop(listener)
+                try:
+                    stop(listener)
+                finally:
+                    if output is not None:
+                        output.thread.join(timeout=1)
+                    if listener is not None and (output is None or not output.thread.is_alive()):
+                        listener.stdout.close()
         finally:
             signal.pthread_sigmask(signal.SIG_SETMASK, previous_mask)
 
@@ -216,6 +291,9 @@ def main():
         return run(args)
     except KeyboardInterrupt:
         return 130
+    except ListenerReadinessError as error:
+        print(str(error), file=sys.stderr)
+        return 1
     except (ValueError, OSError, subprocess.SubprocessError):
         print("Sandbox startup failed; verify the documented secure environment and prerequisites", file=sys.stderr)
         return 1

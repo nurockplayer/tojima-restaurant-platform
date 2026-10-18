@@ -1,9 +1,14 @@
-"""Keyless tests only: no subprocesses, network, credentials or provider calls."""
+"""Keyless tests with local fake CLI subprocesses; no network/provider calls."""
 import importlib.util
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext, redirect_stdout, redirect_stderr
+import io
 from pathlib import Path
 from types import SimpleNamespace
 import re
+import subprocess
+import sys
+import tempfile
+import time
 import unittest
 from unittest import mock
 import warnings
@@ -63,18 +68,26 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(fallback_read, [])
 
     @contextmanager
-    def mocked_run(self):
+    def mocked_run(self, real_listener=None):
         source = dict(self.fixture(), PATH="/usr/bin", HOME="/test/home",
                       STRIPE_API_KEY="sk_test_inherited",
                       STRIPE_WEBHOOK_SECRET="whsec_inherited",
                       TOJIMA_STRIPE_TEST_WEBHOOK_SECRET="whsec_stale",
                       UNRELATED_SECRET="unrelated")
-        listener = mock.Mock(pid=101)
+        listener = real_listener if real_listener is not None else mock.Mock(pid=101)
         runtime = mock.Mock(pid=102)
-        listener.poll.return_value = runtime.poll.return_value = None
+        runtime.poll.return_value = None
+        if real_listener is None:
+            listener.poll.return_value = None
         args = SimpleNamespace(prompt_key=False, port=8083, tenant="A",
                                runtime_binary="/test/runtime", credentials="/test/credentials",
                                startup_check=True)
+        real_killpg = runner.os.killpg
+
+        def kill_real_listener(pid, signum):
+            if real_listener is not None and pid == real_listener.pid:
+                real_killpg(pid, signum)
+
         with (
             mock.patch.dict(runner.os.environ, source, clear=True),
             mock.patch.object(runner.shutil, "which", return_value="/test/stripe"),
@@ -85,10 +98,13 @@ class EnvironmentTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stdout=b"whsec_synthetic123\n"),
             ]) as cli,
             mock.patch.object(runner.subprocess, "Popen", side_effect=[listener, runtime]) as popen,
+            mock.patch.object(runner, "ListenerOutput") if real_listener is None else nullcontext(),
             mock.patch.object(runner, "startup_check") as check,
-            mock.patch.object(runner.os, "killpg") as killpg,
-            mock.patch("builtins.print"),
+            mock.patch.object(runner.os, "killpg", side_effect=kill_real_listener) as killpg,
+            mock.patch("builtins.print") if real_listener is None else nullcontext(),
         ):
+            if real_listener is None:
+                runner.ListenerOutput.return_value.ended.is_set.return_value = False
             yield SimpleNamespace(args=args, source=source, listener=listener, runtime=runtime,
                                   cli=cli, popen=popen, check=check, killpg=killpg)
 
@@ -181,6 +197,141 @@ class EnvironmentTests(unittest.TestCase):
                 mock.call(101, runner.signal.SIGTERM),
             ])
             launch.listener.wait.assert_called_once_with(timeout=10)
+
+    @contextmanager
+    def fake_cli(self, mode, marker):
+        # Deliberately include synthetic secrets on both output streams and
+        # split the Ready prefix across writes. Never invoke the real CLI.
+        script = r'''
+import os, sys, time
+mode, marker = sys.argv[1:]
+os.write(1, b"connecting whsec_fake_listener_secret\n")
+os.write(2, b"error detail sk_test_fake_cli_secret\n")
+if mode == "exit":
+    sys.exit(7)
+if mode in ("ready", "ready_exit"):
+    sys.stdin.buffer.read(1)
+    os.write(2, b"\r\x1b[32m> Rea")
+    time.sleep(0.05)
+    os.write(2, b"dy!\x1b[0m Your webhook signing secret is whsec_fake_listener_secret\n")
+    if mode == "ready_exit":
+        sys.stdin.buffer.read(1)
+        sys.exit(7)
+    # More than pipe capacity; the marker proves draining continued after Ready.
+    for _ in range(8192):
+        os.write(1, b"whsec_fake_listener_secret " * 8 + b"\n")
+    open(marker, "w").close()
+else:
+    os.write(1, b"not > Ready! whsec_fake_listener_secret\n")
+time.sleep(30)
+'''
+        child = subprocess.Popen(
+            [sys.executable, "-u", "-c", script, mode, str(marker)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        try:
+            yield child
+        finally:
+            runner.stop(child)
+            child.stdin.close()
+            child.stdout.close()
+
+    def assert_redacted(self, text):
+        for secret in ("whsec_fake_listener_secret", "sk_test_fake_cli_secret", "whsec_synthetic123"):
+            self.assertNotIn(secret, text)
+
+    def test_slow_ready_gates_runtime_and_keeps_draining(self):
+        with tempfile.TemporaryDirectory() as directory:
+            marker = Path(directory) / "drained"
+            captured = io.StringIO()
+            with self.fake_cli("ready", marker) as child, self.mocked_run(child) as launch:
+                original_wait = runner.ListenerOutput.wait_ready
+
+                def delayed_ready(output, listener):
+                    self.assertFalse(output.ready.is_set())
+                    self.assertEqual(launch.popen.call_count, 1)
+                    launch.check.assert_not_called()
+                    # Release the fake CLI; it still pauses mid-prefix.
+                    started = time.monotonic()
+                    child.stdin.write(b"x")
+                    child.stdin.flush()
+                    original_wait(output, listener)
+                    self.assertGreaterEqual(time.monotonic() - started, 0.04)
+                    self.assertTrue(output.ready.is_set())
+
+                def smoke(*_args):
+                    deadline = time.monotonic() + 5
+                    while not marker.exists() and time.monotonic() < deadline:
+                        time.sleep(0.01)
+                    self.assertTrue(marker.exists(), "listener pipe blocked after Ready")
+
+                launch.check.side_effect = smoke
+                with (
+                    mock.patch.object(runner.ListenerOutput, "wait_ready", delayed_ready),
+                    redirect_stdout(captured), redirect_stderr(captured),
+                ):
+                    self.assertEqual(runner.run(launch.args), 0)
+                launch.check.assert_called_once()
+                self.assertEqual(launch.popen.call_count, 2)
+                listener_options = launch.popen.call_args_list[0].kwargs
+                self.assertEqual(listener_options["stdout"], subprocess.PIPE)
+                self.assertEqual(listener_options["stderr"], subprocess.STDOUT)
+                self.assertIsNotNone(child.poll())
+                self.assertTrue(child.stdout.closed)
+                self.assert_redacted(captured.getvalue())
+
+    def test_never_ready_and_early_exit_fail_closed_without_secrets(self):
+        for mode, message in (("never", "readiness timeout"), ("exit", "exited before readiness")):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                captured = io.StringIO()
+                with self.fake_cli(mode, Path(directory) / "unused") as child, self.mocked_run(child) as launch:
+                    with (
+                        mock.patch.object(runner, "LISTENER_READY_TIMEOUT", 0.3 if mode == "never" else 5),
+                        redirect_stdout(captured), redirect_stderr(captured),
+                        self.assertRaisesRegex(runner.ListenerReadinessError, message) as caught,
+                    ):
+                        runner.run(launch.args)
+                    self.assertEqual(launch.popen.call_count, 1)
+                    launch.check.assert_not_called()
+                    self.assertIsNotNone(child.poll())
+                    self.assertTrue(child.stdout.closed)
+                    self.assert_redacted(captured.getvalue() + str(caught.exception))
+
+    def test_exit_after_ready_stops_runtime_and_fails_startup(self):
+        captured = io.StringIO()
+        with self.fake_cli("ready_exit", "unused") as child, self.mocked_run(child) as launch:
+            child.stdin.write(b"x")
+            child.stdin.flush()
+
+            def exit_during_smoke(*_args):
+                child.stdin.write(b"x")
+                child.stdin.flush()
+                child.wait(timeout=5)
+
+            launch.check.side_effect = exit_during_smoke
+            with (
+                redirect_stdout(captured), redirect_stderr(captured),
+                self.assertRaisesRegex(runner.ListenerReadinessError, "stopped during startup") as caught,
+            ):
+                runner.run(launch.args)
+            launch.killpg.assert_called_once_with(launch.runtime.pid, runner.signal.SIGTERM)
+            launch.runtime.wait.assert_called_once_with(timeout=10)
+            self.assertIsNotNone(child.poll())
+            self.assert_redacted(captured.getvalue() + str(caught.exception))
+
+    def test_main_reports_secret_free_readiness_errors(self):
+        for message in ("Stripe listener readiness timeout", "Stripe listener exited before readiness"):
+            captured = io.StringIO()
+            with (
+                mock.patch.object(runner.argparse.ArgumentParser, "parse_args"),
+                mock.patch.object(runner.signal, "signal"),
+                mock.patch.object(runner, "run", side_effect=runner.ListenerReadinessError(message)),
+                redirect_stdout(captured), redirect_stderr(captured),
+            ):
+                self.assertEqual(runner.main(), 1)
+            self.assertEqual(captured.getvalue(), message + "\n")
+            self.assert_redacted(captured.getvalue())
 
 
 if __name__ == "__main__":
