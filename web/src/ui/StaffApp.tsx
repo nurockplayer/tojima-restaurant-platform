@@ -304,6 +304,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       if (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage) tasks.push(loadTables(context, token));
       if (capabilities.can_kitchen) tasks.push(guardedKds(context, token, true));
       if (capabilities.can_manage) tasks.push(loadSettings(context, token));
+      if (view === 'reviews') tasks.push(loadReviews(context, token));
       const results = await Promise.all(tasks);
       if (!isCurrent(requestEpoch, context, token)) return;
       if (selectedTableID) {
@@ -313,7 +314,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       }
     } catch (cause) { if (isCurrent(requestEpoch, context, token)) setError(explain(cause, locale)); }
     finally { if (isCurrent(requestEpoch, context, token)) setLoading(false); }
-  }, [capabilities, connected, context, currentEpoch, guardedKds, isCurrent, loadDetail, loadSettings, loadTables, locale, selectedTableID, tables, token]);
+  }, [capabilities, connected, context, currentEpoch, guardedKds, isCurrent, loadDetail, loadReviews, loadSettings, loadTables, locale, selectedTableID, tables, token, view]);
 
   useEffect(() => {
     if (!connected || !capabilities?.can_kitchen || view !== 'kds') return;

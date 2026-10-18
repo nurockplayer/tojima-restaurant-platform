@@ -26,6 +26,28 @@ afterEach(async () => {
 });
 
 describe('staff operations', () => {
+  it('refreshes the review queue and navigation count from the shared refresh button', async () => {
+    const first = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['PAYMENT_REVIEW'] });
+    const arriving = staffOrder({ id: 'order-2', payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['OPERATIONAL_HOLD'], lines: [{ product_name: '餃子', quantity: 1, unit_gross_jpy: '500', line_gross_jpy: '500', options: [] }] });
+    let reviewCalls = 0;
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: false, can_approve_fulfillment: true });
+      if (url === `${base}/operations/reviews`) { reviewCalls++; return json({ orders: reviewCalls === 1 ? [first] : [first, arriving] }); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const user = userEvent.setup();
+    await user.click(within(host!).getByRole('button', { name: '要確認' }));
+    await waitFor(() => expect(within(host!).getByRole('button', { name: '要確認 · 1' })).toBeTruthy());
+    expect(host?.textContent).not.toContain('餃子');
+
+    await user.click(within(host!.querySelector('nav')!).getByRole('button', { name: '最新状態に更新' }));
+
+    await waitFor(() => expect(within(host!).getByRole('button', { name: '要確認 · 2' })).toBeTruthy());
+    expect(host?.textContent).toContain('餃子');
+    expect(reviewCalls).toBe(2);
+  });
+
   it('renders paid review orders and retries an uncertain approval with the same key and body', async () => {
     const order = staffOrder({ payment_status: 'PAID', payment_review_required: true, review_decision: 'UNRESOLVED', review_reason_codes: ['COMPANY_HOLD', 'SESSION_CLOSED'] });
     let postCalls = 0;
