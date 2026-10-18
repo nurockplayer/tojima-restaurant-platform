@@ -16,7 +16,9 @@ func TestGuestDisplayState(t *testing.T) {
 					name := fmt.Sprintf("payment=%s/fulfillment=%s/review=%t/card=%t", payment, fulfillment, review, card)
 					t.Run(name, func(t *testing.T) {
 						want := "STANDARD"
-						if fulfillment == "CANCELLED" || payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
+						if fulfillment == "CANCELLED" {
+							want = "CANCELLED"
+						} else if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 							want = "UNKNOWN"
 						} else if payment == "PAID" && review && !card {
 							want = "PAID_UNDER_REVIEW"

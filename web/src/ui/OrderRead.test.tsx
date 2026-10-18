@@ -7,7 +7,7 @@ import { MyOrders, OrderPage, OrderStatusView, orderPollInterval } from './Order
 import { loadMyOrders, rememberOrderGrant } from './my-orders';
 
 const grant: OrderReadGrant = { order_id: 'a'.repeat(32), order_read_token: 'A'.repeat(43), expires_at: '2099-10-19T00:00:00Z' };
-const state = { display_state: 'STANDARD', version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '9007199254740993', currency: 'JPY', is_terminal: false };
+const state = { display_state: 'STANDARD', version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '9007199254740993', effective_total_gross_jpy: '9007199254740993', effective_lines: [], adjusted: false, refunds: [], refunded_total_jpy: '0', currency: 'JPY', is_terminal: false };
 function json(value: unknown, status = 200) { return new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } }); }
 async function flush(ms = 1) { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); }
 async function visibility(value: 'visible' | 'hidden') {
@@ -26,6 +26,44 @@ beforeEach(() => {
 afterEach(() => { cleanup(); window.history.replaceState({}, '', '/'); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe('read-only order status', () => {
+  it.each([
+    ['REQUESTED', 'ja', '返金処理中'], ['PROCESSING', 'ja', '返金処理中'], ['FAILED', 'ja', '返金を確認中です。店舗にお問い合わせください'], ['SUCCEEDED', 'ja', '返金済み ¥330'],
+    ['REQUESTED', 'zh', '退款處理中'], ['PROCESSING', 'zh', '退款處理中'], ['FAILED', 'zh', '退款確認中，請洽店家'], ['SUCCEEDED', 'zh', '已退款 ¥330'],
+  ] as const)('shows %s refund safely in %s', async (refundState, locale, message) => {
+    const fetcher = vi.fn(async () => json({ ...state, payment_status: 'PAID', refunds: [{ status: refundState, amount_jpy: '330', method: 'STRIPE' }] }));
+    vi.stubGlobal('fetch', fetcher);
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    expect(screen.getByRole('status').textContent).toContain(message);
+    if (refundState !== 'SUCCEEDED') expect(screen.queryByText(/返金済み|已退款/)).toBeNull();
+  });
+
+  it.each(['ja', 'zh'] as const)('shows adjusted effective content and original total in %s', async (locale) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...state, total_gross_jpy: '660', effective_total_gross_jpy: '330', effective_lines: [{ product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['茶葉多め'] }], adjusted: true })));
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    expect(screen.getByText('ほうじ茶 × 1')).toBeTruthy();
+    expect(screen.getByText('茶葉多め')).toBeTruthy();
+    expect(screen.getAllByText('¥330').length).toBeGreaterThan(0); expect(screen.getByText('¥660')).toBeTruthy();
+    expect(screen.getAllByText(locale === 'ja' ? '店舗により注文内容が変更されました' : '店家已調整您的訂單').length).toBeGreaterThan(0);
+  });
+
+  it.each(['ja', 'zh'] as const)('distinguishes same-product variants and shows the reduced effective quantity (%s)', async (locale) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...state, total_gross_jpy: '990', effective_total_gross_jpy: '660', adjusted: true, effective_lines: [
+      { product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['無糖'] },
+      { product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['甘さ控えめ'] },
+    ] })));
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    expect(screen.getAllByText('ほうじ茶 × 1')).toHaveLength(2);
+    expect(screen.getByText('無糖')).toBeTruthy(); expect(screen.getByText('甘さ控えめ')).toBeTruthy();
+    expect(screen.getByText('¥660')).toBeTruthy(); expect(screen.getByText('¥990')).toBeTruthy();
+  });
+
+  it.each(['ja', 'zh'] as const)('labels a whole-order cancellation in %s', async (locale) => {
+    vi.stubGlobal('fetch', vi.fn(async () => json({ ...state, display_state: 'CANCELLED', payment_status: 'REFUNDED', fulfillment_status: 'CANCELLED', refunds: [{ status: 'SUCCEEDED', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '330' })));
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    expect(screen.getAllByText(locale === 'ja' ? 'この注文は取り消されました' : '此訂單已取消').length).toBeGreaterThan(0);
+    expect(screen.getByText(locale === 'ja' ? '返金済み ¥330' : '已退款 ¥330')).toBeTruthy();
+  });
+
   it.each([
     ['ja', 'お支払いを確認しました。店舗でご注文を確認中です'],
     ['zh', '已確認付款，店家正在確認您的訂單'],
@@ -46,6 +84,8 @@ describe('read-only order status', () => {
 
   it.each([
     { display_state: 'FUTURE_SUCCESS', payment_status: 'PAID', fulfillment_status: 'SERVED' },
+    { display_state: 'FUTURE_SUCCESS', payment_status: 'PAID', fulfillment_status: 'CANCELLED' },
+    { display_state: 'CANCELLED', payment_status: 'PAID', fulfillment_status: 'SERVED' },
     { display_state: 'UNKNOWN', payment_status: 'REFUNDED', fulfillment_status: 'SERVED' },
     { display_state: 'STANDARD', payment_status: 'FUTURE_PAYMENT', fulfillment_status: 'SERVED' },
     { display_state: 'STANDARD', payment_status: 'PAID', fulfillment_status: 'FUTURE_KITCHEN' },
@@ -117,14 +157,42 @@ describe('read-only order status', () => {
     expect(fetcher).toHaveBeenCalledTimes(3); expect(screen.queryByRole('status')).toBeNull();
   });
 
+  it.each(['ja', 'zh'] as const)('retains effective amount and processing refund during a stale read, then shows server-confirmed success (%s)', async (locale) => {
+    let count = 0;
+    const adjusted = {
+      ...state, payment_status: 'PAID', fulfillment_status: 'SERVED', total_gross_jpy: '660', effective_total_gross_jpy: '330',
+      effective_lines: [{ product_name: 'ほうじ茶', quantity: 1, line_total_jpy: '330', option_names: ['茶葉多め'] }], adjusted: true,
+      refunds: [{ status: 'PROCESSING', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '0',
+    };
+    const fetcher = vi.fn(async () => {
+      count++;
+      if (count === 2) throw new TypeError('offline');
+      return json(count === 1 ? adjusted : { ...adjusted, refunds: [{ status: 'SUCCEEDED', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '330', is_terminal: true });
+    });
+    vi.stubGlobal('fetch', fetcher);
+    render(<OrderStatusView grant={grant} locale={locale} />); await flush();
+    const pending = locale === 'ja' ? '返金処理中' : '退款處理中';
+    const success = locale === 'ja' ? '返金済み ¥330' : '已退款 ¥330';
+    expect(screen.getByText('ほうじ茶 × 1')).toBeTruthy();
+    expect(screen.getByText('茶葉多め')).toBeTruthy();
+    expect(screen.getAllByText('¥330').length).toBeGreaterThan(0); expect(screen.getByText('¥660')).toBeTruthy();
+    expect(screen.getByText(pending)).toBeTruthy();
+    await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(pending)).toBeTruthy(); expect(screen.getByText('¥660')).toBeTruthy();
+    expect(screen.getByText('茶葉多め')).toBeTruthy();
+    expect(screen.getAllByRole('status').some((node) => node.textContent?.includes(locale === 'ja' ? '最新の状況を確認できません' : '無法確認最新狀態'))).toBe(true);
+    await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(3);
+    expect(screen.getByText(success)).toBeTruthy(); expect(screen.queryByText(pending)).toBeNull();
+    expect(screen.getByText('茶葉多め')).toBeTruthy();
+  });
+
   it('keeps polling a paid, served order until the server confirms refund resolution', async () => {
     let resolved = false;
     const fetcher = vi.fn(async () => json({ ...state, is_terminal: resolved, payment_status: 'PAID', fulfillment_status: 'SERVED' }));
     vi.stubGlobal('fetch', fetcher);
     render(<OrderStatusView grant={grant} locale="ja" />); await flush();
     expect(fetcher).toHaveBeenCalledTimes(1);
-    // REQUESTED, PROCESSING and FAILED refunds all retain PAID + SERVED
-    // and is_terminal=false; refund details are deliberately absent from this DTO.
+    // The server keeps is_terminal=false while a refund remains unresolved.
     for (let expected = 2; expected <= 4; expected++) {
       await flush(30_001); expect(fetcher).toHaveBeenCalledTimes(expected);
     }
@@ -171,7 +239,7 @@ describe('read-only order status', () => {
 
   it('changes the capability when another saved fragment link is opened on the same page', async () => {
     let count = 0;
-    const fetcher = vi.fn(async () => json({ ...state, total_gross_jpy: String(++count) }));
+    const fetcher = vi.fn(async () => json({ ...state, total_gross_jpy: String(++count), effective_total_gross_jpy: String(count) }));
     vi.stubGlobal('fetch', fetcher);
     window.history.replaceState({}, '', orderReadLink(grant));
     render(<OrderPage />); await flush();

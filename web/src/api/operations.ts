@@ -28,7 +28,7 @@ export interface SessionOperations { session: { id: string; status: string; mode
 export interface CashSettings { enabled: boolean; mode: 'PREPAID' | 'PAY_LATER'; version: number }
 export interface CashPreview { session_id: string; fingerprint: string; order_ids: string[]; due_jpy: string; tax: Receipt['tax'] }
 export interface OpenedSession { session: { id: string; status: string; mode: string; expires_at?: string }; pin?: string }
-export interface GuestOrderStatus { id: string; display_state: string; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN'; fulfillment_status: StaffOrder['fulfillment_status']; requires_staff_acceptance: boolean; staff_accepted: boolean; cash_mode?: 'PREPAID' | 'PAY_LATER' }
+export interface GuestOrderStatus { id: string; display_state: string; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN'; fulfillment_status: StaffOrder['fulfillment_status']; requires_staff_acceptance: boolean; staff_accepted: boolean; total_gross_jpy: string; effective_total_gross_jpy: string; effective_lines: Array<{ product_name: string; quantity: number; line_total_jpy: string; option_names: string[] }>; adjusted: boolean; refunds: Array<{ status: string; amount_jpy: string; method: 'CASH' | 'STRIPE' }>; refunded_total_jpy: string; cash_mode?: 'PREPAID' | 'PAY_LATER' }
 export interface GuestOperations { orders: GuestOrderStatus[]; cash_enabled: boolean }
 
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {

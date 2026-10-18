@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { guestDisplayKind, paidUnderReview } from './guest-display';
+import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
 import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
 import { operationsClient } from '../api/operations';
@@ -35,7 +35,7 @@ const copy = {
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
     error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
     selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
-    operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。',
+    operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。', amountUnavailable: '最新の注文内容と金額を確認できません。', changed: '店舗により注文内容が変更されました', cancelled: 'この注文は取り消されました', originalTotal: '注文確定時の税込合計', refundPending: '返金処理中', refundFailed: '返金を確認中です。店舗にお問い合わせください', refunded: '返金済み', refundedTotal: '返金合計',
     noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
   },
   zh: {
@@ -57,7 +57,7 @@ const copy = {
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
     error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
     selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
-    operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。',
+    operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。', amountUnavailable: '目前無法確認最新訂單內容與金額。', changed: '店家已調整您的訂單', cancelled: '此訂單已取消', originalTotal: '送單時含稅總額', refundPending: '退款處理中', refundFailed: '退款確認中，請洽店家', refunded: '已退款', refundedTotal: '退款總額',
     noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
 } satisfies Record<Locale, Record<string, string>>;
@@ -90,6 +90,9 @@ function isSafeAmount(amount: string | number | undefined): boolean {
   if (typeof amount === 'number') return Number.isSafeInteger(amount);
   return typeof amount === 'string' && /^-?\d+$/.test(amount);
 }
+function isPositiveAmount(amount: string | undefined): boolean {
+  return typeof amount === 'string' && /^\d+$/.test(amount) && BigInt(amount) > 0n;
+}
 
 export function isCurrentMenuRead(
   sequence: number,
@@ -104,6 +107,7 @@ export function isCurrentMenuRead(
 
 function guestOrderLabel(order: GuestOrderStatus | undefined, locale: Locale): string {
   const display = order ? guestDisplayKind(order) : 'unknown';
+  if (display === 'cancelled') return locale === 'ja' ? 'この注文は取り消されました' : '此訂單已取消';
   if (display === 'review') return paidUnderReview[locale];
   if (!order || display === 'unknown') return locale === 'ja' ? '店舗に確認してください' : '請洽服務人員確認';
   const fulfillment: Record<GuestOrderStatus['fulfillment_status'], string> = locale === 'ja'
@@ -786,11 +790,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
       </>}
 
       {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
-        {operationsStale && guestOperations && <p className="notice" role="status">{t.operationsStale}</p>}
+        {operationsStale && <p className="notice" role="status">{guestOperations ? t.operationsStale : t.amountUnavailable}</p>}
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
-          <p className="guest-order-status">{guestOrderLabel(operations, locale)}</p>
+          <p className="guest-order-status" role="status">{guestOrderLabel(operations, locale)}</p>
           {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel">
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>
@@ -802,8 +806,13 @@ export function App({ demo = false }: DemoSurfaceProps) {
             </>}
             <button className="button small quiet" onClick={() => selectCheckoutOrder(order.order_id)}>{t.checkCheckout}</button>
           </div>}
-          {order.quote?.lines.map((line) => <div className="order-line" key={line.line_id}><span>{line.name} × {line.quantity}{line.options.map((option) => <small className="order-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>{option.name} +{safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}</span><strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong></div>)}
-          <div className="order-total"><span>{t.total}</span><strong>{safeAmount(order.quote?.tax.total_gross_jpy ?? order.total_gross_jpy)}</strong></div><div className="tax-row"><span>{t.tax}</span><span>{safeAmount(order.quote?.tax.total_tax_jpy)}</span></div><small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
+          {operations?.adjusted && <p className="notice" role="status">{t.changed}</p>}
+          {(operations?.effective_lines ?? []).map((line, index) => <div className="order-line" key={`${line.product_name}-${index}`}><span>{line.product_name} × {line.quantity}{(line.option_names ?? []).map((name, optionIndex) => <small className="order-option" key={`${optionIndex}-${name}`}>{name}</small>)}</span><strong>{safeAmount(line.line_total_jpy)}</strong></div>)}
+          {operations ? <div className="order-total"><span>{t.total}</span><strong>{safeAmount(operations.effective_total_gross_jpy)}</strong></div> : <div className="order-total"><span>{t.total}</span><strong>{t.amountUnavailable}</strong></div>}
+          {operations?.adjusted && <div className="tax-row"><span>{t.originalTotal}</span><span>{safeAmount(operations.total_gross_jpy)}</span></div>}
+          {(operations?.refunds ?? []).map((refund, index) => { const kind = guestRefundKind(refund); return <p className="guest-order-status" role="status" key={`${refund.status}-${index}`}>{kind === 'processing' ? t.refundPending : kind === 'succeeded' ? `${t.refunded} ${safeAmount(refund.amount_jpy)}` : t.refundFailed}</p>; })}
+          {operations && isPositiveAmount(operations.refunded_total_jpy) && <div className="tax-row"><span>{t.refundedTotal}</span><span>{safeAmount(operations.refunded_total_jpy)}</span></div>}
+          <small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
         </article>; })}
       </section>}
       <footer className="workspace-footer">{t.brand} <span>·</span> {locale === 'ja' ? 'おいしい時間を、みんなで。' : '與同桌一起享用好味道。'}</footer>

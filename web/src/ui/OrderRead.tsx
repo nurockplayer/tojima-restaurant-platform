@@ -4,26 +4,26 @@ import { amountJPY } from '../api/client';
 import { grantFromFragment, orderReadClient, orderReadLink, type OrderReadGrant, type OrderReadStatus } from '../api/order-read';
 import { loadMyOrders, myOrdersChanged, rememberOrderGrant } from './my-orders';
 import styles from './OrderRead.module.css';
-import { guestDisplayKind, paidUnderReview } from './guest-display';
+import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 
 type Locale = 'ja' | 'zh';
 const ja = {
   title: '注文状況', mine: 'マイ注文', empty: 'このブラウザに保存された注文はありません。', loading: '注文状況を確認しています…',
-  unavailable: '注文状況を確認できません。通信状態をご確認ください。', stale: '最新の状況を確認できません。表示は前回確認時の内容です。', payment: 'お支払い', kitchen: '調理・提供', total: '確定時の税込合計',
+  unavailable: '注文状況を確認できません。通信状態をご確認ください。', amountUnavailable: '最新の注文内容と金額を確認できません。', stale: '最新の状況を確認できません。表示は前回確認時の内容です。', payment: 'お支払い', kitchen: '調理・提供', total: '税込合計', original: '注文確定時の税込合計', changed: '店舗により注文内容が変更されました', cancelled: 'この注文は取り消されました', refundPending: '返金処理中', refundFailed: '返金を確認中です。店舗にお問い合わせください', refunded: '返金済み', refundedTotal: '返金合計',
   unknown: '店舗に確認してください', copy: '共有リンクをコピー', copied: 'コピーしました', link: '共有リンク', expires: '閲覧期限',
   privacy: 'リンクを知っている人はこの注文を閲覧できます。期限付きのリンクです。', saved: 'このブラウザに保存した期限付きリンクです。', invalid: '閲覧リンクを確認してください。',
   request: 'この注文の閲覧リンクを保存', failed: 'リンクを取得できません。現在のテーブルへの参加状況を確認してください。',
 };
 const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
   title: '訂單狀態', mine: '我的訂單', empty: '此瀏覽器尚未儲存訂單。', loading: '正在確認訂單狀態…',
-  unavailable: '無法確認訂單狀態，請確認網路連線。', stale: '無法確認最新狀態，目前顯示上次確認的內容。', payment: '付款', kitchen: '製作與送餐', total: '送單時含稅總額',
+  unavailable: '無法確認訂單狀態，請確認網路連線。', amountUnavailable: '目前無法確認最新訂單內容與金額。', stale: '無法確認最新狀態，目前顯示上次確認的內容。', payment: '付款', kitchen: '製作與送餐', total: '含稅總額', original: '送單時含稅總額', changed: '店家已調整您的訂單', cancelled: '此訂單已取消', refundPending: '退款處理中', refundFailed: '退款確認中，請洽店家', refunded: '已退款', refundedTotal: '退款總額',
   unknown: '請洽服務人員確認', copy: '複製分享連結', copied: '已複製', link: '分享連結', expires: '查閱期限',
   privacy: '持有連結的人可以查閱此筆訂單。連結有使用期限。', saved: '這些是儲存在此瀏覽器的限時連結。', invalid: '請確認查閱連結。',
   request: '儲存此筆訂單的查閱連結', failed: '無法取得連結，請確認是否仍加入目前桌次。',
 } };
 const paymentLabels: Record<Locale, Record<string, string>> = {
-  ja: { UNPAID: '未払い', PENDING: '確認中', PAID: '支払済み', UNKNOWN: '確認中' },
-  zh: { UNPAID: '尚未付款', PENDING: '確認中', PAID: '已付款', UNKNOWN: '確認中' },
+  ja: { UNPAID: '未払い', PENDING: '確認中', PAID: '支払済み', UNKNOWN: '確認中', REFUNDED: '返金済み', REFUND_PENDING: '返金処理中' },
+  zh: { UNPAID: '尚未付款', PENDING: '確認中', PAID: '已付款', UNKNOWN: '確認中', REFUNDED: '已退款', REFUND_PENDING: '退款處理中' },
 };
 const kitchenLabels: Record<Locale, Record<string, string>> = {
   ja: { WAITING: '受付待ち', ACCEPTED: '受付済み', PREPARING: '調理中', READY: '配膳待ち', SERVED: '提供済み', CANCELLED: '取消済み' },
@@ -91,14 +91,19 @@ function Status({ grant, locale, pollMs, onRead }: OrderStatusProps) {
     {query.isError && <p role="status">{query.data ? t.stale : t.unavailable}</p>}
     {!query.data && !query.isError && <p role="status">{t.loading}</p>}
     {query.data && <>
-      {display !== 'standard' && <p role="status">{display === 'review' ? paidUnderReview[locale] : t.unknown}</p>}
+      {display !== 'standard' && <p role="status">{display === 'review' ? paidUnderReview[locale] : display === 'cancelled' ? t.cancelled : t.unknown}</p>}
       <dl>
         {display === 'standard' && <>
           <dt>{t.payment}</dt><dd>{paymentLabels[locale][query.data.payment_status] ?? t.unknown}</dd>
           <dt>{t.kitchen}</dt><dd>{kitchenLabels[locale][query.data.fulfillment_status] ?? t.unknown}</dd>
         </>}
-        <dt>{t.total}</dt><dd>{amountJPY(query.data.total_gross_jpy)}</dd>
+        <dt>{t.total}</dt><dd>{typeof query.data.effective_total_gross_jpy === 'string' && /^\d+$/.test(query.data.effective_total_gross_jpy) ? amountJPY(query.data.effective_total_gross_jpy) : t.amountUnavailable}</dd>
+        {query.data.adjusted && <><dt>{t.original}</dt><dd>{amountJPY(query.data.total_gross_jpy)}</dd></>}
       </dl>
+      {query.data.adjusted && <p role="status">{t.changed}</p>}
+      {(query.data.effective_lines ?? []).length > 0 && <ul aria-label={t.total}>{query.data.effective_lines.map((line, index) => <li key={`${line.product_name}-${index}`}><span>{line.product_name} × {line.quantity}{(line.option_names ?? []).map((name, optionIndex) => <small className="order-option" key={`${optionIndex}-${name}`}>{name}</small>)}</span> <strong>{amountJPY(line.line_total_jpy)}</strong></li>)}</ul>}
+      {(query.data.refunds ?? []).map((refund, index) => { const kind = guestRefundKind(refund); return <p role="status" key={`${refund.status}-${index}`}>{kind === 'processing' ? t.refundPending : kind === 'succeeded' ? `${t.refunded} ${amountJPY(refund.amount_jpy)}` : t.refundFailed}</p>; })}
+      {/^\d+$/.test(query.data.refunded_total_jpy ?? '') && BigInt(query.data.refunded_total_jpy) > 0n && <p>{t.refundedTotal}: {amountJPY(query.data.refunded_total_jpy)}</p>}
     </>}
     <p>{t.expires}: {new Date(grant.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW', { timeZone: 'Asia/Tokyo', timeZoneName: 'short' })}</p>
     <p>{t.privacy}</p><button type="button" onClick={() => void share()}>{copied ? t.copied : t.copy}</button>

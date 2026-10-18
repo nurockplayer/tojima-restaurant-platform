@@ -521,17 +521,32 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	} else if err != nil {
 		return GuestOperations{}, err
 	}
-	rows, err := readOrderRows(ctx, tx, TableScope{TenantID: scope.TenantID, StoreID: scope.StoreID, TableID: scope.TableID}, sessionID, false, false)
+	rows, err := tx.Query(ctx, `SELECT o.order_id,st.payment_status,st.fulfillment_status,
+    o.requires_staff_acceptance,st.staff_accepted,coalesce(st.cash_mode,''),
+    st.payment_review_required,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id),
+    `+ordering.GuestOrderDetailsSQL+`
+    FROM table_orders o JOIN operation_order_state st USING(order_id,session_id,tenant_id,store_id,table_id)
+    WHERE o.session_id=$1 AND o.tenant_id=$2 AND o.store_id=$3 AND o.table_id=$4
+    ORDER BY o.created_at,o.order_id`, sessionID, scope.TenantID, scope.StoreID, scope.TableID)
 	if err != nil {
 		return GuestOperations{}, err
 	}
-	out := GuestOperations{Orders: make([]GuestOrderState, 0, len(rows)), CashEnabled: enabled}
-	for _, o := range rows {
-		payment := o.PaymentStatus
-		if payment != Unpaid && payment != Paid && payment != Pending {
-			payment = Unknown
+	defer rows.Close()
+	out := GuestOperations{Orders: []GuestOrderState{}, CashEnabled: enabled}
+	for rows.Next() {
+		var o GuestOrderState
+		var review, card bool
+		if err = rows.Scan(&o.ID, &o.PaymentStatus, &o.FulfillmentStatus, &o.RequiresStaffAcceptance, &o.StaffAccepted, &o.CashMode, &review, &card, &o.GuestOrderDetails); err != nil {
+			return GuestOperations{}, err
 		}
-		out.Orders = append(out.Orders, GuestOrderState{ID: o.ID, DisplayState: ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), o.PaymentReviewRequired, o.kdsCardExists), PaymentStatus: payment, FulfillmentStatus: o.FulfillmentStatus, RequiresStaffAcceptance: o.RequiresStaffAcceptance, StaffAccepted: o.StaffAccepted, CashMode: o.CashMode})
+		o.DisplayState = ordering.GuestDisplayState(string(o.PaymentStatus), string(o.FulfillmentStatus), review, card)
+		if o.PaymentStatus != Unpaid && o.PaymentStatus != Paid && o.PaymentStatus != Pending {
+			o.PaymentStatus = Unknown
+		}
+		out.Orders = append(out.Orders, o)
+	}
+	if err = rows.Err(); err != nil {
+		return GuestOperations{}, err
 	}
 	var trustedAt time.Time
 	if err = tx.QueryRow(ctx, `SELECT clock_timestamp()`).Scan(&trustedAt); err != nil {

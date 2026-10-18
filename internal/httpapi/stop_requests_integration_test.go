@@ -133,6 +133,50 @@ func TestPostgresP82StopRequestStripePartialRefundAfterApprovedPreparation(t *te
 		t.Fatal(err)
 	}
 	orderID := createP82HTTPOrder(t, pf, grant.Session.ID, grant.Token, "tea", 2, ordering.Stripe, "p82-stop-stripe")
+	readGrant, err := f.Orders.RequestOrderRead(ctx, grant.Session.ID, grant.Token, orderID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guestOps := NewOperationsRuntime(f.Sessions, f.Menus, f.Orders, f.Operations, pf.identity, authz.PolicyAuthorizer{Directory: pf.directory})
+	checkGuestRefund := func(wantStatus string, wantRefunded string) {
+		t.Helper()
+		statusResponse := pf.request(t, http.MethodGet, "/v1/guest/orders/"+orderID+"/status", "", readGrant.Token, nil, "", "")
+		var statusDTO map[string]any
+		decodePaymentHTTP(t, statusResponse, http.StatusOK, &statusDTO)
+		historyRequest := httptest.NewRequest(http.MethodGet, "/v1/guest/sessions/"+grant.Session.ID+"/operations", nil)
+		historyRequest.Header.Set("Authorization", "Bearer "+grant.Token)
+		historyResponse := httptest.NewRecorder()
+		guestOps.ServeHTTP(historyResponse, historyRequest)
+		var history map[string]any
+		if historyResponse.Code != http.StatusOK {
+			t.Fatalf("guest history status=%d body=%s", historyResponse.Code, historyResponse.Body.String())
+		}
+		if err := json.Unmarshal(historyResponse.Body.Bytes(), &history); err != nil {
+			t.Fatal(err)
+		}
+		orderDTO := history["orders"].([]any)[0].(map[string]any)
+		for surface, dto := range map[string]map[string]any{"ORDER_READ": statusDTO, "history": orderDTO} {
+			if surface == "ORDER_READ" {
+				assertExactGuestOrderKeys(t, dto, []string{"version", "payment_status", "fulfillment_status", "display_state", "currency", "is_terminal"})
+			} else {
+				assertExactGuestOrderKeys(t, dto, []string{"id", "payment_status", "fulfillment_status", "display_state", "requires_staff_acceptance", "staff_accepted"})
+			}
+			refunds, ok := dto["refunds"].([]any)
+			if !ok || len(refunds) != 1 {
+				t.Fatalf("%s refunds=%v", surface, dto["refunds"])
+			}
+			refund := refunds[0].(map[string]any)
+			if len(refund) != 3 || refund["status"] != wantStatus || refund["amount_jpy"] != "330" || refund["method"] != "STRIPE" {
+				t.Fatalf("%s guest refund=%v", surface, refund)
+			}
+			if dto["refunded_total_jpy"] != wantRefunded {
+				t.Fatalf("%s refunded total=%v", surface, dto["refunded_total_jpy"])
+			}
+			if _, leaked := refund["refund_id"]; leaked {
+				t.Fatalf("%s leaked refund id", surface)
+			}
+		}
+	}
 	if worked, err := pf.service.ProcessNext(ctx); err != nil || !worked {
 		t.Fatalf("create checkout worked=%v err=%v", worked, err)
 	}
@@ -208,14 +252,37 @@ func TestPostgresP82StopRequestStripePartialRefundAfterApprovedPreparation(t *te
 	if err = f.Pool.QueryRow(ctx, `SELECT r.refund_id,a.payment_intent_id FROM operation_refunds r JOIN stripe_payment_attempts a USING(order_id) WHERE r.order_id=$1`, orderID).Scan(&refundID, &paymentIntent); err != nil {
 		t.Fatal(err)
 	}
-	pf.provider.SetNextRefundOutcome("succeeded", false)
+	pf.provider.SetNextRefundOutcome("pending", false)
 	if worked, err := pf.service.ProcessNext(ctx); err != nil || !worked {
 		t.Fatalf("refund worker worked=%v err=%v", worked, err)
 	}
+	checkGuestRefund("PROCESSING", "0")
 	providerRefund, ok := pf.provider.RefundByBusinessID(refundID)
-	if !ok || providerRefund.PaymentIntentID != paymentIntent || providerRefund.AmountJPY != 330 || providerRefund.Status != "succeeded" {
+	if !ok || providerRefund.PaymentIntentID != paymentIntent || providerRefund.AmountJPY != 330 || providerRefund.Status != "pending" {
 		t.Fatalf("provider refund=%+v payment intent=%q found=%v", providerRefund, paymentIntent, ok)
 	}
+	failedRefund, err := pf.provider.SetRefundOutcome(providerRefund.ID, "failed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = pf.service.EnqueueVerifiedWebhook(ctx, stripeprovider.VerifiedEvent{ID: "evt_p83_guest_refund_failed", Type: "refund.updated", AccountID: failedRefund.AccountID, APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now().UTC(), ObjectID: failedRefund.ID, Refund: &failedRefund}); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := pf.service.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("failed refund webhook worked=%v err=%v", worked, err)
+	}
+	checkGuestRefund("FAILED", "0")
+	refundState := readP82HTTPOrder(t, pf, grant.Session.ID, orderID)
+	retry := request(http.MethodPost, orderPath+"/refunds/"+refundID+"/retry", fmt.Sprintf(`{"expected_version":%d}`, int64JSON(refundState["version"])), pf.creds.Manager.Token, "stop-stripe-refund-retry")
+	if retry.Code != http.StatusOK {
+		t.Fatalf("retry=%d %s", retry.Code, retry.Body.String())
+	}
+	checkGuestRefund("REQUESTED", "0")
+	pf.provider.SetNextRefundOutcome("succeeded", false)
+	if worked, err := pf.service.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("refund retry worker worked=%v err=%v", worked, err)
+	}
+	checkGuestRefund("SUCCEEDED", "330")
 	var status string
 	if err = f.Pool.QueryRow(ctx, `SELECT status FROM operation_refunds WHERE refund_id=$1`, refundID).Scan(&status); err != nil || status != "SUCCEEDED" {
 		t.Fatalf("local refund status=%q err=%v", status, err)

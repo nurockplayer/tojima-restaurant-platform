@@ -87,7 +87,7 @@ func TestPostgresGuestPaidReviewDisplay(t *testing.T) {
 			response := h.request(t, http.MethodGet, "/v1/guest/orders/"+commit.Order.ID+"/status", "", commit.OrderReadGrant.Token, nil, "", "")
 			var status map[string]any
 			decodePaymentHTTP(t, response, http.StatusOK, &status)
-			if len(status) != 7 || status["display_state"] != wantDisplay || status["payment_status"] != "PAID" || status["fulfillment_status"] != wantKitchen || status["is_terminal"] != false || status["total_gross_jpy"] != "330" || status["currency"] != "JPY" || status["version"] == nil {
+			if len(status) != 12 || status["display_state"] != wantDisplay || status["payment_status"] != "PAID" || status["fulfillment_status"] != wantKitchen || status["is_terminal"] != false || status["total_gross_jpy"] != "330" || status["effective_total_gross_jpy"] != "330" || status["adjusted"] != false || status["refunded_total_jpy"] != "0" || status["currency"] != "JPY" || status["version"] == nil {
 				t.Fatalf("unexpected status DTO: %v", status)
 			}
 			shared := h.request(t, http.MethodGet, "/v1/guest/sessions/"+join.Session.ID+"/operations", "", join.Token, nil, "", "")
@@ -99,7 +99,7 @@ func TestPostgresGuestPaidReviewDisplay(t *testing.T) {
 				t.Fatalf("unexpected history: %v", history)
 			}
 			order := history.Orders[0]
-			if len(order) != 6 || order["id"] != commit.Order.ID || order["display_state"] != wantDisplay || order["payment_status"] != "PAID" || order["fulfillment_status"] != wantKitchen || order["requires_staff_acceptance"] == nil || order["staff_accepted"] != true {
+			if len(order) != 12 || order["id"] != commit.Order.ID || order["display_state"] != wantDisplay || order["payment_status"] != "PAID" || order["fulfillment_status"] != wantKitchen || order["requires_staff_acceptance"] == nil || order["staff_accepted"] != true || order["adjusted"] != false || order["effective_total_gross_jpy"] != "330" || order["refunded_total_jpy"] != "0" {
 				t.Fatalf("unexpected history DTO: %v", order)
 			}
 			for _, wire := range []string{response.Body.String(), shared.Body.String()} {

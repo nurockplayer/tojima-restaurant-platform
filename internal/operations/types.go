@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tax"
 )
@@ -178,6 +179,7 @@ type SessionDetail struct {
 }
 
 type GuestOrderState struct {
+	ordering.GuestOrderDetails
 	ID                      string            `json:"id"`
 	PaymentStatus           PaymentStatus     `json:"payment_status"`
 	FulfillmentStatus       FulfillmentStatus `json:"fulfillment_status"`
