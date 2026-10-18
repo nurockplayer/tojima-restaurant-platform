@@ -15,6 +15,8 @@ die() {
   exit 1
 }
 
+[ -n "${CLOUDFLARE_ACCOUNT_ID:-}" ] || die "CLOUDFLARE_ACCOUNT_ID must be set to the target Cloudflare account ID (non-secret) to avoid interactive account selection"
+
 command -v python3 >/dev/null 2>&1 || die "Python 3 is required"
 command -v go >/dev/null 2>&1 || die "Go is required"
 command -v pnpm >/dev/null 2>&1 || die "pnpm is required"
@@ -294,7 +296,9 @@ put_pages_secret() {
   secret_value=$2
   printf '%s\n' "$secret_value" | (
     cd "$repo_dir/deploy/pages-demo" || exit 1
-    exec env -u TEST_DATABASE_URL wrangler pages secret put "$secret_name" \
+    exec env -u TEST_DATABASE_URL -u WRANGLER_LOG -u WRANGLER_LOG_PATH \
+      WRANGLER_LOG_SANITIZE=true WRANGLER_WRITE_LOGS=false \
+      wrangler pages secret put "$secret_name" \
       --project-name tojima-mobile-order-demo
   ) >/dev/null 2>&1 &
   transient_pid=$!
@@ -312,7 +316,9 @@ unset gate_secret
 check_long_lived_children
 (
   cd "$repo_dir/deploy/pages-demo" || exit 1
-  exec env -u TEST_DATABASE_URL wrangler pages deploy "$repo_dir/deploy/pages-demo" \
+  exec env -u TEST_DATABASE_URL -u WRANGLER_LOG -u WRANGLER_LOG_PATH \
+    WRANGLER_LOG_SANITIZE=true WRANGLER_WRITE_LOGS=false \
+    wrangler pages deploy "$repo_dir/deploy/pages-demo" \
     --project-name tojima-mobile-order-demo --branch main
 ) >/dev/null 2>&1 &
 transient_pid=$!

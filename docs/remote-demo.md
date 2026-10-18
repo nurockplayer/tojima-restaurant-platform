@@ -16,6 +16,8 @@ The launcher builds the web app and Go binaries, starts the isolated runtime, ga
 
 Use the repository-pinned Go/Node versions. Install web dependencies with `pnpm --dir web install --frozen-lockfile`; the launcher installs no tools or packages. Install `cloudflared` (Quick Tunnel needs no login) and authenticate Wrangler. `cloudflared` retains `HOME` and may read `~/.cloudflared`; review its existing config. Create Pages project `tojima-mobile-order-demo` with production branch `main` and no build step. Set `DEMO_PASSCODE` and `DEMO_COOKIE_KEY` to at least 32 random bytes; share the passcode with intended guests only. The launcher rotates `DEMO_ORIGIN` and `DEMO_GATE_SECRET` each run.
 
+Export `CLOUDFLARE_ACCOUNT_ID` with the target Cloudflare account ID (non-secret); the launcher fails before starting work if it is missing or empty, preventing interactive account selection for logins with multiple accounts.
+
 Use only an explicitly disposable PostgreSQL database on a literal loopback IP. The launcher rejects DNS/multi-host URLs and all query parameters except one `sslmode`, and clears inherited `PG*` fallbacks. Never use production, shared business data, or a database tunnel. Set `TEST_DATABASE_URL` in the environment without echoing it, then run:
 
 ```sh
@@ -23,6 +25,8 @@ sh scripts/run-remote-demo.sh
 ```
 
 The guide URL defaults to `https://tojima-mobile-order-demo.pages.dev/__demo/guide`; set `TOJIMA_DEMO_PUBLIC_ORIGIN` to another exact HTTPS origin if needed. Open the printed Pages URL and use the preconfigured passcode. The `trycloudflare.com` URL is temporary; do not circulate it as a durable address. Secrets must not appear in command arguments, source control, chat, or logs. The DB URL is read by a local validator and passed to `operationstest`, then removed from unrelated children. The new gate secret is passed only in the gateway process environment and to Wrangler over stdin. Wrangler output and `operationstest` diagnostics are discarded; private readiness/tunnel logs are removed at shutdown.
+
+Every launcher invocation of Wrangler, including secret updates and deployment, forces `WRANGLER_LOG_SANITIZE=true` and `WRANGLER_WRITE_LOGS=false` and unsets inherited `WRANGLER_LOG` / `WRANGLER_LOG_PATH` overrides so gate secrets cannot enter Wrangler's disk debug logs.
 
 ## Security and walkthrough boundary
 
