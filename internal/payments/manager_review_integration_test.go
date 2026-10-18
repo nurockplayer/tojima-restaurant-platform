@@ -65,7 +65,7 @@ func TestPostgresP82BCompanyHoldPaidReviewApprovalIsStable(t *testing.T) {
 		t.Fatalf("approval result: %+v", approved)
 	}
 	replayed, err := h.Operations.ApproveFulfillment(h.ctx, request)
-	if err != nil || !reflect.DeepEqual(replayed, approved) {
+	if err != nil || !equalReviewOrderStates(replayed, approved) {
 		t.Fatalf("same-key replay: result=%+v err=%v want=%+v", replayed, err, approved)
 	}
 	conflicting := request
@@ -94,7 +94,7 @@ func TestPostgresP82BCompanyHoldPaidReviewApprovalIsStable(t *testing.T) {
 		t.Fatalf("close served session: %v", err)
 	}
 	closedReplay, err := h.Operations.ApproveFulfillment(h.ctx, request)
-	if err != nil || !reflect.DeepEqual(closedReplay, approved) {
+	if err != nil || !equalReviewOrderStates(closedReplay, approved) {
 		t.Fatalf("replay after fulfillment and close: result=%+v err=%v original=%+v", closedReplay, err, approved)
 	}
 	h.assertState(order.Order.ID, StatePaid, true, false)
@@ -175,6 +175,14 @@ func TestPostgresP82BExpiredSessionLatePaymentCanBeApproved(t *testing.T) {
 	}
 }
 
+// PostgreSQL scans and JSON replays can represent the same instant with different
+// locations. Normalize the sole time field on copies; keep all other fields exact.
+func equalReviewOrderStates(a, b operations.OrderState) bool {
+	a.CreatedAt = a.CreatedAt.UTC()
+	b.CreatedAt = b.CreatedAt.UTC()
+	return reflect.DeepEqual(a, b)
+}
+
 func reviewOrderVersion(t *testing.T, h *holdFixture, orderID string) int64 {
 	t.Helper()
 	var version int64
@@ -239,7 +247,7 @@ func TestPostgresP82BConcurrentManagerApprovals(t *testing.T) {
 			if successes != 1 && !sameKey {
 				t.Fatalf("different keys had %d successes, want one: %+v", successes, results)
 			}
-			if sameKey && (results[0].err != nil || results[1].err != nil || !reflect.DeepEqual(results[0].state, results[1].state)) {
+			if sameKey && (results[0].err != nil || results[1].err != nil || !equalReviewOrderStates(results[0].state, results[1].state)) {
 				t.Fatalf("same-key callers did not receive original result: %+v", results)
 			}
 			h.assertState(order.Order.ID, StatePaid, true, false)
