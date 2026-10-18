@@ -44,6 +44,24 @@ $$;
 CREATE TRIGGER cancellation_requests_guard BEFORE INSERT OR UPDATE ON cancellation_requests FOR EACH ROW EXECUTE FUNCTION protect_cancellation_request();
 CREATE TRIGGER cancellation_requests_no_delete BEFORE DELETE ON cancellation_requests FOR EACH ROW EXECUTE FUNCTION reject_operation_history_mutation();
 
+-- Keep a table session open while an order in that session has an unresolved
+-- stop request. The original table-session snapshot trigger remains in place.
+CREATE FUNCTION protect_table_session_pending_stop_requests() RETURNS trigger LANGUAGE plpgsql AS $$
+BEGIN
+ IF OLD.status='OPEN' AND NEW.status='CLOSED' AND EXISTS (
+  SELECT 1 FROM operation_order_state s
+  JOIN cancellation_requests c ON c.order_id=s.order_id
+  WHERE s.session_id=OLD.session_id AND c.status IN ('REQUESTED','KITCHEN_CONFIRMED')
+ ) THEN
+  RAISE EXCEPTION 'unresolved stop request blocks session closure';
+ END IF;
+ RETURN NEW;
+END;
+$$;
+CREATE TRIGGER table_sessions_pending_stop_requests
+ BEFORE UPDATE OF status ON table_sessions
+ FOR EACH ROW EXECUTE FUNCTION protect_table_session_pending_stop_requests();
+
 ALTER TABLE operation_order_events DROP CONSTRAINT operation_order_events_event_type_check;
 ALTER TABLE operation_order_events ADD CONSTRAINT operation_order_events_event_type_check CHECK(event_type IN (
  'ORDER_CREATED','STAFF_ACCEPTED','PAYMENT_SETTLED','KDS_RELEASED','FULFILLMENT_ADVANCED','STRIPE_PAID_TEST_FIXTURE','STRIPE_PAID_VERIFIED','STRIPE_REVIEW_REQUIRED','STRIPE_REVIEW_CLEARED','MANAGER_REVIEW_APPROVED',
