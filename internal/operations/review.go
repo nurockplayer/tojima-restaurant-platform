@@ -225,6 +225,16 @@ func (s *Service) ListPaymentReviews(ctx context.Context, scope StoreScope) ([]O
 				break
 			}
 		}
+		for _, request := range orders[i].CancellationRequests {
+			if request.ManualExceptionReason != "" {
+				codes = append(codes, "STOP_MANUAL_EXCEPTION")
+				break
+			}
+			if request.Status == "REQUESTED" || request.Status == "KITCHEN_CONFIRMED" {
+				codes = append(codes, "STOP_REQUEST_PENDING")
+				break
+			}
+		}
 		if r.hold {
 			codes = append(codes, "OPERATIONAL_HOLD")
 		}
