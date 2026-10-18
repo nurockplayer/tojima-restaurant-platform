@@ -1,31 +1,47 @@
--- Old and new application writers lock the company parent before activating a
--- hold. Take those locks BEFORE payment-table DDL: taking the attempt lock first
--- could deadlock with a payment writer holding catalog SHARE. Keep the parents
--- locked until the backfill and activation trigger commit together.
-SELECT catalog_id FROM menu_catalogs
-WHERE owner_kind = 'COMPANY' ORDER BY catalog_id FOR UPDATE;
-
--- Retain the ON decision independently of the current company hold. Clearing
--- a hold never restores a previously issued Checkout continuation.
-ALTER TABLE stripe_payment_attempts ADD COLUMN company_hold_expire_requested_at timestamptz;
-CREATE INDEX stripe_payment_attempt_hold_candidates_idx
-    ON stripe_payment_attempts(tenant_id,session_id,order_id)
-    WHERE state NOT IN ('EXPIRED','PAID','REVIEW_REQUIRED')
-      AND provider_payment_status IS DISTINCT FROM 'paid'
-      AND checkout_status IS DISTINCT FROM 'expired';
-
-CREATE FUNCTION protect_company_hold_expiry_request() RETURNS trigger LANGUAGE plpgsql AS $$
+-- Payment persistence reads attempts before taking catalog SHARE, while order
+-- admission takes catalog SHARE before inserting an attempt. First take the
+-- attempt DDL locks, then try the company parents without waiting. If a parent
+-- is busy, the exception subtransaction rolls back all DDL and releases its
+-- locks before retrying, so either kind of writer can finish without a cycle.
+-- Legacy hold writers also need the parents before touching the hold table;
+-- drain them before hold-trigger DDL and the backfill's fresh snapshot.
+DO $migration$
 BEGIN
-    IF OLD.company_hold_expire_requested_at IS NOT NULL AND
-       NEW.company_hold_expire_requested_at IS DISTINCT FROM OLD.company_hold_expire_requested_at THEN
-        RAISE EXCEPTION 'company hold expiry request cannot be cleared or replaced';
-    END IF;
-    RETURN NEW;
+    LOOP
+        BEGIN
+            -- Retain the ON decision independently of the current company hold. Clearing
+            -- a hold never restores a previously issued Checkout continuation.
+            ALTER TABLE stripe_payment_attempts ADD COLUMN company_hold_expire_requested_at timestamptz;
+            CREATE INDEX stripe_payment_attempt_hold_candidates_idx
+                ON stripe_payment_attempts(tenant_id,session_id,order_id)
+                WHERE state NOT IN ('EXPIRED','PAID','REVIEW_REQUIRED')
+                  AND provider_payment_status IS DISTINCT FROM 'paid'
+                  AND checkout_status IS DISTINCT FROM 'expired';
+
+            CREATE FUNCTION protect_company_hold_expiry_request() RETURNS trigger LANGUAGE plpgsql AS $$
+            BEGIN
+                IF OLD.company_hold_expire_requested_at IS NOT NULL AND
+                   NEW.company_hold_expire_requested_at IS DISTINCT FROM OLD.company_hold_expire_requested_at THEN
+                    RAISE EXCEPTION 'company hold expiry request cannot be cleared or replaced';
+                END IF;
+                RETURN NEW;
+            END;
+            $$;
+            CREATE TRIGGER stripe_payment_attempt_hold_expiry_retained
+                BEFORE UPDATE ON stripe_payment_attempts
+                FOR EACH ROW EXECUTE FUNCTION protect_company_hold_expiry_request();
+
+            PERFORM catalog_id FROM menu_catalogs
+            WHERE owner_kind = 'COMPANY' ORDER BY catalog_id FOR UPDATE NOWAIT;
+
+            EXIT;
+        EXCEPTION WHEN lock_not_available THEN
+            -- The failed block's locks have been released before this sleep.
+            PERFORM pg_sleep(0.05);
+        END;
+    END LOOP;
 END;
-$$;
-CREATE TRIGGER stripe_payment_attempt_hold_expiry_retained
-    BEFORE UPDATE ON stripe_payment_attempts
-    FOR EACH ROW EXECUTE FUNCTION protect_company_hold_expiry_request();
+$migration$;
 
 -- The database owns this side effect so old binaries also retain expiry work.
 -- Hold writers already own catalog UPDATE; taking SHARE here also orders direct
