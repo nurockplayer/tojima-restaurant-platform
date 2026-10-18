@@ -465,6 +465,38 @@ func TestVerifyWebhookRejectsLiveRefundEnvelopeAndChargePIConflict(t *testing.T)
 	}
 }
 
+func TestVerifyWebhookHonorsInjectedHistoricalClock(t *testing.T) {
+	now := time.Date(2020, 1, 1, 12, 0, 0, 0, time.UTC)
+	body, header := signedEvent(t, now, "whsec_test", false, APIVersion)
+	for _, tc := range []struct {
+		name    string
+		offset  time.Duration
+		wantErr bool
+	}{
+		{name: "at-signing-time"},
+		{name: "old-boundary", offset: WebhookTolerance},
+		{name: "future-boundary", offset: -WebhookTolerance},
+		{name: "expired", offset: WebhookTolerance + time.Second, wantErr: true},
+		{name: "too-far-in-future", offset: -WebhookTolerance - time.Second, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			event, err := VerifyWebhook(body, header, []string{"whsec_test"}, now.Add(tc.offset))
+			if tc.wantErr {
+				if !errors.Is(err, ErrWebhook) {
+					t.Fatalf("outside tolerance err=%v", err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("within tolerance err=%v", err)
+			}
+			if event.ID != "evt_test_123" || !event.CreatedAt.Equal(now) {
+				t.Fatalf("incorrect historical event %#v", event)
+			}
+		})
+	}
+}
+
 func TestVerifyWebhookRejectsOldFutureLiveWrongVersionAndOversize(t *testing.T) {
 	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
