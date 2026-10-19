@@ -96,6 +96,9 @@ export function displayTableLocator(locator: string, demo: boolean): string {
 function syncOrigin(current: Entry): SyncOrigin {
   return { sessionID: current.grant.session.id, token: current.grant.table_join_token };
 }
+function isOrigin(current: Entry | null, origin: SyncOrigin): boolean {
+  return current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token;
+}
 function storageKey(sessionID: string) { return `tojima.table-join.${sessionID}`; }
 function safeAmount(amount: string | number | undefined): string {
   if (typeof amount === 'number' && !Number.isSafeInteger(amount)) return '—';
@@ -262,7 +265,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     // Observe batched responses against the same latest cart that dispatch will adopt.
     cartStateRef.current = next;
     const current = entryRef.current;
-    if (origin && current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token && next.cart === incoming) {
+    if (origin && isOrigin(current, origin) && next.cart === incoming) {
       acceptedSyncSequence.current++;
       dispatchSync({ type: 'success', origin, at: Date.now() });
     }
@@ -271,10 +274,8 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const confirmDisplayedCart = useCallback((latest: Cart, origin: SyncOrigin) => {
     // Overlapping reads can confirm the displayed cart without adopting a superseded snapshot.
-    const current = entryRef.current;
     const displayed = cartStateRef.current.cart;
-    if (current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token
-      && displayed && displayed.generation === latest.generation && displayed.version === latest.version) {
+    if (isOrigin(entryRef.current, origin) && displayed?.generation === latest.generation && displayed.version === latest.version) {
       acceptedSyncSequence.current++;
       dispatchSync({ type: 'success', origin, at: Date.now() });
     }
@@ -297,7 +298,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
       const syncFailure = cause instanceof ApiError ? cause.status >= 500 && cause.status <= 599
         : cause instanceof Error && cause.message === 'network_unavailable';
       if (sequence === cartRequestSequence.current && acceptedAtStart === acceptedSyncSequence.current
-        && active?.grant.session.id === origin.sessionID && active.grant.table_join_token === origin.token && syncFailure) {
+        && isOrigin(active, origin) && syncFailure) {
         dispatchSync({ type: 'read-failure', origin, ...(cause instanceof ApiError ? { status: cause.status } : {}) });
       }
       throw cause;
@@ -691,8 +692,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const acceptOperation = (key: string) => {
     const accepted = acceptedOperations.current.get(key);
     acceptedOperations.current.delete(key);
-    if (accepted && entryRef.current?.grant.session.id === accepted.sessionID
-      && entryRef.current.grant.table_join_token === accepted.token) accepted.onAccepted();
+    if (accepted && isOrigin(entryRef.current, accepted)) accepted.onAccepted();
   };
 
   const applyMutation = async (run: (key: string) => Promise<Cart>, onAccepted?: () => void) => {
