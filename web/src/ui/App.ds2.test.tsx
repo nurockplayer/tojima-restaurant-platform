@@ -27,7 +27,7 @@ const previewForMeal = {
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
-function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart)) {
+function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart), options: { onCartRead?: FetchHandler } = {}) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
@@ -36,7 +36,7 @@ function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart)) {
     if (url.endsWith('/v1/guest/tables/ds2-app/join')) return json(grant);
     if (url.endsWith('/v1/guest/tables/ds2-app/menu?amounts=string')) return json(menu);
     if (url.endsWith('/v1/guest/sessions/session-1/cart/lines') && init.method === 'POST') return onAdd(url, init);
-    if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(emptyCart);
+    if (url.endsWith('/v1/guest/sessions/session-1/cart')) return options.onCartRead ? options.onCartRead(url, init) : json(emptyCart);
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
     if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
@@ -49,6 +49,7 @@ function installCartFetch(options: {
   onRemove?: FetchHandler;
   onPreview?: FetchHandler;
   onCommit?: FetchHandler;
+  onCartRead?: FetchHandler;
   getMenu?: () => unknown;
   initialCart?: unknown | (() => unknown);
 } = {}) {
@@ -63,6 +64,7 @@ function installCartFetch(options: {
     if (url.endsWith('/v1/guest/sessions/session-1/cart/commit')) return options.onCommit ? options.onCommit(url, init) : json({ error: 'Unexpected commit' }, 500);
     if (url.includes('/v1/guest/sessions/session-1/cart/lines/') && init.method === 'DELETE') return options.onRemove ? options.onRemove(url, init) : json(emptyCart);
     if (url.endsWith('/v1/guest/sessions/session-1/cart')) {
+      if (options.onCartRead) return options.onCartRead(url, init);
       const current = typeof options.initialCart === 'function' ? options.initialCart() : options.initialCart;
       return json(current ?? cartWithMeal);
     }
@@ -164,6 +166,54 @@ describe('guest App option sheet acceptance', () => {
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(trigger));
+    const requests = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
+    expect(requests).toHaveLength(2);
+    expectSameOperation(requests[0]!.init, requests[1]!.init);
+  });
+
+  it('keeps focus on a safe heading until a replay opener is enabled, then restores it', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    const acceptedCart = { ...emptyCart, version: 1, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [{ group_key: 'rice', option_key: 'regular', group_name: 'ご飯の量', option_name: '普通', available: true }] }] };
+    let adds = 0;
+    let holdPostReplayRefresh = false;
+    let postReplayRefreshStarted = false;
+    const pendingRefresh = deferred<Response>();
+    const { calls } = installGuestFetch(
+      () => ++adds === 1 ? json({ error: 'temporary' }, 503) : json(acceptedCart),
+      { onCartRead: () => {
+        if (holdPostReplayRefresh) {
+          postReplayRefreshStarted = true;
+          return pendingRefresh.promise;
+        }
+        return json(emptyCart);
+      } },
+    );
+    const user = userEvent.setup();
+    render(<App />);
+
+    const trigger = await screen.findByRole('button', { name: 'カートに追加' });
+    const dialog = await openOptions(user);
+    await user.click(within(dialog).getByRole('radio', { name: /普通/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'カートに追加' }));
+    const retry = await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
+    holdPostReplayRefresh = true;
+    await user.click(retry);
+
+    await waitFor(() => expect(postReplayRefreshStarted).toBe(true));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+    const menuHeading = screen.getByRole('heading', { name: 'お品書き' });
+    await waitFor(() => expect(document.activeElement).toBe(menuHeading));
+    const interimFocus = document.activeElement;
+    expect(interimFocus).not.toBe(document.body);
+    expect(interimFocus?.isConnected).toBe(true);
+    expect((interimFocus as HTMLElement | null)?.tabIndex).toBe(-1);
+    expect((interimFocus as HTMLElement | null)?.matches('h1, h2, h3')).toBe(true);
+
+    await act(async () => { pendingRefresh.resolve(json(acceptedCart)); await Promise.resolve(); });
+    await waitFor(() => expect((trigger as HTMLButtonElement).disabled).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+
     const requests = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
     expect(requests).toHaveLength(2);
     expectSameOperation(requests[0]!.init, requests[1]!.init);
@@ -397,6 +447,45 @@ describe('guest App cart sheet focus and destinations', () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
     expect(screen.getByRole('dialog')).toBeTruthy();
     expect(screen.getByRole('dialog').querySelector('[data-quantity]')?.textContent).toBe('3');
+  });
+
+  it('restores focus to the enabled cart bar when the cart sheet closes during a replay refresh', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    let removeCalls = 0;
+    let holdPostReplayRefresh = false;
+    let postReplayRefreshStarted = false;
+    const replayResponse = deferred<Response>();
+    const pendingRefresh = deferred<Response>();
+    installCartFetch({
+      onRemove: () => ++removeCalls === 1 ? json({ error: 'temporary' }, 503) : replayResponse.promise,
+      onCartRead: () => {
+        if (holdPostReplayRefresh) {
+          postReplayRefreshStarted = true;
+          return pendingRefresh.promise;
+        }
+        return json(cartWithMeal);
+      },
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const cartBar = await screen.findByRole('button', { name: 'カートを開く' });
+    const dialog = await openCartSheet(user);
+    await user.click(within(dialog).getByRole('button', { name: '削除' }));
+    const retry = await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
+    holdPostReplayRefresh = true;
+    await user.click(retry);
+    await act(async () => { replayResponse.resolve(json(cartWithMeal)); await Promise.resolve(); });
+    await waitFor(() => expect(postReplayRefreshStarted).toBe(true));
+
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(cartBar.hasAttribute('disabled')).toBe(false);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(cartBar));
+    expect(document.activeElement).not.toBe(document.body);
+
+    await act(async () => { pendingRefresh.resolve(json(cartWithMeal)); await Promise.resolve(); });
   });
 
   it('keeps the cart and menu polling cadence when the cart sheet opens and closes', async () => {

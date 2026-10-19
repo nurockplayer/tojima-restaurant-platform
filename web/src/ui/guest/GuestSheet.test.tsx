@@ -7,12 +7,12 @@ import { GuestSheet } from './GuestSheet';
 
 afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 
-function Harness({ removeTrigger = false, locale = 'ja' }: { removeTrigger?: boolean; locale?: 'ja' | 'zh' }) {
+function Harness({ removeTrigger = false, locale = 'ja', disabledTrigger = false }: { removeTrigger?: boolean; locale?: 'ja' | 'zh'; disabledTrigger?: boolean }) {
   const [open, setOpen] = useState(false);
   const heading = useRef<HTMLHeadingElement>(null);
   return <>
     <h1 ref={heading} tabIndex={-1}>メニュー</h1>
-    {(!removeTrigger || !open) && <button onClick={() => setOpen(true)}>開く</button>}
+    {(!removeTrigger || !open) && <button disabled={disabledTrigger} onClick={() => setOpen(true)}>開く</button>}
     <button>背景操作</button>
     <GuestSheet isOpen={open} onOpenChange={setOpen} title="オプション" locale={locale} fallbackFocus={() => heading.current}>
       <label>数量<input /></label><button>追加</button>
@@ -115,4 +115,26 @@ describe('GuestSheet', () => {
       await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'メニュー' })));
     } finally { animations.mockRestore(); delete (Element.prototype as Partial<Element>).getAnimations; }
   });
+  it('uses fallback focus until a disabled opener becomes enabled', async () => {
+    const { user, trigger, rerender } = await openSheet();
+    rerender(<Harness disabledTrigger />);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'メニュー' })));
+    expect((trigger as HTMLButtonElement).disabled).toBe(true);
+    rerender(<Harness />);
+    await waitFor(() => expect(document.activeElement).toBe(trigger));
+  });
+
+  it('does not take focus back after the guest chooses another control while the opener is disabled', async () => {
+    const { user, rerender } = await openSheet();
+    rerender(<Harness disabledTrigger />);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'メニュー' })));
+    const other = screen.getByRole('button', { name: '背景操作' });
+    await user.click(other);
+    rerender(<Harness />);
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(resolve)); });
+    expect(document.activeElement).toBe(other);
+  });
+
 });

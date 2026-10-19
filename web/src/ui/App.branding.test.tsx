@@ -37,4 +37,14 @@ describe('guest header and footer', () => {
     await user.click(language);
     expect(screen.getByRole('button', { name: '日本語' }).getAttribute('lang')).toBe('ja');
   });
+  it('uses target-sized controls for the PIN and join action in both languages', async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    expect((await screen.findByRole('textbox', { name: 'テーブル PIN' })).getAttribute('data-control')).toBe('guest-entry');
+    expect(screen.getByRole('button', { name: '参加する' }).getAttribute('data-control')).toBe('guest-entry');
+    await user.click(screen.getByRole('button', { name: '繁中' }));
+    expect(screen.getByRole('textbox', { name: '桌次 PIN' }).getAttribute('data-control')).toBe('guest-entry');
+    expect(screen.getByRole('button', { name: '加入桌次' }).getAttribute('data-control')).toBe('guest-entry');
+  });
+
 });

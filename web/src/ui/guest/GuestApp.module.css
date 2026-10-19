@@ -111,3 +111,8 @@
 }
 
 .syncNotice strong { display: block; }
+
+.entryControl {
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+}

@@ -351,6 +351,20 @@ describe('DS-1 static design-token regression gate', () => {
     checkCartStepper(allRules);
   });
 
+  it.each([
+    ['../ui/guest/GuestApp.module.css', '.entryControl', ['min-width', 'min-height']],
+    ['../ui/OrderRead.module.css', '.control', ['min-inline-size', 'min-block-size']],
+    ['../ui/OrderRead.module.css', '.sharedInput', ['min-inline-size', 'min-block-size']],
+  ] as const)('keeps %s %s controls at least 44px in both dimensions', (file, selector, dimensions) => {
+    const control = allRules.find((r) => r.file === file && !r.context && r.selector === selector);
+    expect(control).toBeDefined();
+    for (const dimension of dimensions) {
+      const value = declarations(control!, dimension)[0]?.value;
+      expect(value).toBeDefined();
+      expect(fontPixels(resolve(value!, [], contextFor(file)))).toBeGreaterThanOrEqual(44);
+    }
+  });
+
   it('overrides UA small shrinking with an unconditional base rule of at least 12px', () => {
     const base = allRules.filter((r) => r.file === '../ui/styles.css' && !r.context && split(r.selector, ',').map(normal).includes('small'));
     const sizes = base.flatMap((r) => declarations(r, 'font-size'));

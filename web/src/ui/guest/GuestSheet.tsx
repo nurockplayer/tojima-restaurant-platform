@@ -1,4 +1,4 @@
-import { useCallback, useRef, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useRef, type ReactNode, type Ref } from 'react';
 import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components';
 import styles from './GuestSheet.module.css';
 
@@ -22,13 +22,56 @@ export function GuestSheet({ isOpen, onOpenChange, title, titleRef, locale, chil
   const overlay = useRef<HTMLDivElement | null>(null);
   const trigger = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
+  const mounted = useRef(true);
+  const stopWaiting = useRef<(() => void) | null>(null);
+  const restoration = useRef(0);
   fallback.current = fallbackFocus;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; stopWaiting.current?.(); };
+  }, []);
   const overlayRef = useCallback((element: HTMLDivElement | null) => {
-    if (element) trigger.current = document.activeElement;
+    const version = ++restoration.current;
+    if (element) {
+      stopWaiting.current?.();
+      trigger.current = document.activeElement;
+    }
     overlay.current = element;
     if (!element) {
       requestAnimationFrame(() => {
-        if (!overlay.current && (trigger.current === document.body || !trigger.current?.isConnected)) fallback.current?.()?.focus();
+        if (overlay.current || restoration.current !== version) return;
+        const opener = trigger.current;
+        const interim = fallback.current?.();
+        const restore = () => {
+          if (!(opener instanceof HTMLElement) || opener === document.body || opener === document.documentElement || !opener.isConnected
+            || opener.matches(':disabled, [aria-disabled="true"]') || opener.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+          opener.focus({ preventScroll: true });
+          return document.activeElement === opener;
+        };
+        if (restore()) return;
+        interim?.focus({ preventScroll: true });
+        if (!mounted.current || !opener?.isConnected || opener === document.body) return;
+
+        // A replay can close the sheet before busy releases its opener.
+        // Keep focus safe meanwhile, and stop if the guest moves elsewhere.
+        const cancel = () => {
+          observer.disconnect();
+          document.removeEventListener('focusin', moved);
+          document.removeEventListener('pointerdown', cancel, true);
+          document.removeEventListener('keydown', cancel, true);
+          stopWaiting.current = null;
+        };
+        const moved = () => { if (document.activeElement !== interim && document.activeElement !== document.body) cancel(); };
+        const observer = new MutationObserver(() => {
+          if (!opener.isConnected || overlay.current) { cancel(); return; }
+          if (document.activeElement !== interim && document.activeElement !== document.body) { cancel(); return; }
+          if (restore()) cancel();
+        });
+        observer.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['disabled', 'aria-disabled', 'hidden', 'inert', 'aria-hidden', 'class', 'style'] });
+        document.addEventListener('focusin', moved);
+        document.addEventListener('pointerdown', cancel, true);
+        document.addEventListener('keydown', cancel, true);
+        stopWaiting.current = cancel;
       });
     }
   }, []);

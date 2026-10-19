@@ -803,9 +803,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
       <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
-      {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
+      {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input className={guestStyles.entryControl} data-control="guest-entry" autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
       {(!query.locator && !query.sessionID) && <p className="notice">テーブル QR からアクセスしてください。</p>}
-      <button className="button primary wide" disabled={busy || blocked || (!query.locator && !query.sessionID) || !!status?.expired} onClick={() => void submitJoin()}>{busy ? t.loading : t.enter}</button>
+      <button className={`button primary wide ${guestStyles.entryControl}`} data-control="guest-entry" disabled={busy || blocked || (!query.locator && !query.sessionID) || !!status?.expired} onClick={() => void submitJoin()}>{busy ? t.loading : t.enter}</button>
       {visibleError && <p className="error" role="alert">{visibleError}</p>}
     </section>
   </Shell>;
