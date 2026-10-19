@@ -28,7 +28,11 @@ export function CategoryNav({ categories, currentCategoryKey, locale, onNavigate
   const activeCategoryKey = currentCategoryKey ?? observedCategoryKey;
 
   useEffect(() => {
-    if (currentCategoryKey !== undefined || categories.length < 2) return;
+    if (currentCategoryKey !== undefined) return;
+    if (categories.length < 2) {
+      setObservedCategoryKey(categories[0]?.key ?? '');
+      return;
+    }
     const updateCurrentCategory = () => {
       const threshold = Math.max(nav.current?.getBoundingClientRect().bottom ?? 0, window.innerHeight * 0.25);
       const passed = categories.filter((category) => {

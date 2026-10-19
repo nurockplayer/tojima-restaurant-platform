@@ -38,4 +38,16 @@ describe('CategoryNav', () => {
     render(<CategoryNav categories={[]} locale="zh" />);
     expect(screen.getByRole('navigation', { name: '分類' }).textContent).toContain('目前沒有分類');
   });
+
+  it('keeps the remaining category current when a menu refresh removes the observed category', () => {
+    const view = render(<CategoryNav categories={categories} locale="ja" />);
+    expect(screen.getByRole('button', { name: 'ごはん' }).getAttribute('aria-current')).toBe('location');
+
+    view.rerender(<CategoryNav categories={[categories[1]!]} locale="ja" />);
+    expect(screen.getByRole('button', { name: '飲み物' }).getAttribute('aria-current')).toBe('location');
+    view.rerender(<CategoryNav categories={[]} locale="ja" />);
+    expect(screen.queryByRole('button')).toBeNull();
+    view.rerender(<CategoryNav categories={[categories[0]!]} locale="ja" />);
+    expect(screen.getByRole('button', { name: 'ごはん' }).getAttribute('aria-current')).toBe('location');
+  });
 });

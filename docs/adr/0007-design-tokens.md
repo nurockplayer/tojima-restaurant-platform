@@ -182,20 +182,20 @@ ADR-0006 adopts React Aria Components for a real complex control when it first h
 
 ### Bundle measurements
 
-Measured with `pnpm --dir web build` on the DS-2 tree. Raw and gzip figures below are Vite-reported per emitted JavaScript chunk; the guest total sums the rounded Vite-reported guest chunks. Baseline figures are from P-89 §2. The guest total is `123.77 KB gzip`, `24.07 KB` above its `99.7 KB` baseline; App is `35.48 KB gzip`, `23.89 KB` above `11.59 KB`, and the full App delta is not attributed solely to React Aria. StaffApp is unchanged in raw size; CatalogApp is up `0.01 KB` (`0.012%`), within the ±1% baseline.
+Measured with `pnpm --dir web build` on the DS-2 review r4 P3 tree. Raw and gzip figures below are Vite-reported per emitted JavaScript chunk; guest totals and raw size comparisons use those reported two-decimal values. Baseline figures are from P-89 §2. The guest total is `124.42 KB gzip`, `24.72 KB` above its `99.7 KB` baseline; App is `36.07 KB gzip`, `24.48 KB` above `11.59 KB`, and the full App delta is not attributed solely to React Aria. StaffApp is unchanged in the reported raw size (`0.00 KB`, `0.000%`); CatalogApp is up `0.01 KB` (`0.012%`), within the ±1% baseline.
 
 | Chunk / measure | Baseline (gzip unless marked raw) | DS-2 measured raw / gzip |
 |---|---:|---:|
 | Guest entry / `index` chunk | included in guest total | 223.77 KB / 70.52 KB |
-| Guest initial `App` | `11.59 KB` gzip | 112.57 KB / 35.48 KB |
-| Guest `OrderRead` | included in guest total | 43.71 KB / 14.21 KB |
+| Guest initial `App` | `11.59 KB` gzip | 114.79 KB / 36.07 KB |
+| Guest `OrderRead` | included in guest total | 43.94 KB / 14.27 KB |
 | Guest `cart-state` | included in guest total | 5.41 KB / 1.91 KB |
 | Guest `DemoBanner` | included in guest total | 4.03 KB / 1.65 KB |
-| Other guest chunks / guest total | `99.7 KB` gzip total | 389.49 KB / 123.77 KB |
+| Other guest chunks / guest total | `99.7 KB` gzip total | 391.94 KB / 124.42 KB |
 | `StaffApp` | `64.14 KB` raw | 64.14 KB / 17.42 KB |
 | `CatalogApp` | `84.64 KB` raw | 84.65 KB / 26.32 KB |
 
-The production build module inspection found 98 rendered React Aria/Stately modules in App and none in index, OrderRead, cart-state, DemoBanner, StaffApp or CatalogApp. The remote-demo build and `node scripts/check-remote-demo-bundle.mjs web/dist` also pass; its guest JavaScript total is approximately `123.78 KB gzip`.
+The production build module inspection found 98 rendered React Aria/Stately modules in App and none in index, OrderRead, cart-state, DemoBanner, StaffApp or CatalogApp. The remote-demo build and `node scripts/check-remote-demo-bundle.mjs web/dist` also pass; its guest JavaScript total is approximately `124.42 KB gzip`.
 
 ### Store-name source
 
@@ -207,18 +207,18 @@ The guest API does not yet supply a store display name. DS-2 therefore uses the 
 
 `[data-surface="guest"]` は寸法だけを定義する：`--text-body: 16px`、`--size-target: 48px`、`--size-target-min: 44px`、`--size-row: 56px`、`--size-media: 72px`、`--size-catnav: 48px`、`--size-cartbar: 64px`。色、`--brand-*`、`--ref-*` は再定義しない。DEMO の保護ロール `--color-demo-ink`、`--color-demo-bg`、`--color-demo-border` は Tier-1 primitive を参照し、従来の `#503b14`、`#fff6df`、`#c59b4a` を維持する。店舗ブランドから上書きできない。
 
-ADR-0006 の方針に従い、React Aria Components `1.21.1` を初めて実需要のある複雑な制御として guest sheet に採用した。DS-1 の native `<dialog>` は gzip `+0 KB` だが、記録済みの動作では最後の項目から Tab すると document 全体の外へ移動する。React Aria はフォーカスをシート内に保ち、表示中の背景を inert にし、閉じた後にフォーカスを復帰する。P-89 §2 の初期 App 試算 `11.59 → 29.17 KB gzip`（`+17.6 KB`）は試算であり、現在の App サイズ増分すべてを React Aria に帰属させるものではない。Vite production build の programmatic module inspection では react-aria／react-stately の rendered module が App chunk に98件あり、index、OrderRead、cart-state、DemoBanner、StaffApp、CatalogApp には0件だった。guest 合計は gzip `123.77 KB` で基準 `99.7 KB` より `24.07 KB` 増、App は gzip `35.48 KB` で基準 `11.59 KB` より `23.89 KB` 増だが、App の全増分を React Aria だけに帰属させない。StaffApp の raw サイズは不変、CatalogApp は `0.01 KB`（`0.012%`）増で ±1% 以内。remote-demo build と `node scripts/check-remote-demo-bundle.mjs web/dist` も成功し、その guest JS 合計は約 `123.78 KB gzip`。現行 build の各 chunk は下表のとおり。顧客 root と sheet は `font-family: var(--font-sans)` を使い、html の `lang` により繁體中文は既存の `:lang(zh-Hant)` font stack を使う。
+ADR-0006 の方針に従い、React Aria Components `1.21.1` を初めて実需要のある複雑な制御として guest sheet に採用した。DS-1 の native `<dialog>` は gzip `+0 KB` だが、記録済みの動作では最後の項目から Tab すると document 全体の外へ移動する。React Aria はフォーカスをシート内に保ち、表示中の背景を inert にし、閉じた後にフォーカスを復帰する。P-89 §2 の初期 App 試算 `11.59 → 29.17 KB gzip`（`+17.6 KB`）は試算であり、現在の App サイズ増分すべてを React Aria に帰属させるものではない。Vite production build の programmatic module inspection では react-aria／react-stately の rendered module が App chunk に98件あり、index、OrderRead、cart-state、DemoBanner、StaffApp、CatalogApp には0件だった。guest 合計は gzip `124.42 KB` で基準 `99.7 KB` より `24.72 KB` 増、App は gzip `36.07 KB` で基準 `11.59 KB` より `24.48 KB` 増だが、App の全増分を React Aria だけに帰属させない。StaffApp の報告 raw サイズは不変（`0.00 KB`、`0.000%`）、CatalogApp は `0.01 KB`（`0.012%`）増で ±1% 以内。remote-demo build と `node scripts/check-remote-demo-bundle.mjs web/dist` も成功し、その guest JS 合計は約 `124.42 KB gzip`。現行 build の各 chunk は下表のとおり。顧客 root と sheet は `font-family: var(--font-sans)` を使い、html の `lang` により繁體中文は既存の `:lang(zh-Hant)` font stack を使う。
 
-下表は `pnpm --dir web build` で得た各チャンクの Vite 報告 raw／gzip 計測値。P-89 §2 の StaffApp `64.14 KB`、CatalogApp `84.64 KB` は raw サイズ。
+下表は DS-2 review r4 P3 の `pnpm --dir web build` で得た各チャンクの Vite 報告 raw／gzip 計測値。guest 合計と raw サイズ比較は小数2桁の報告値を使用する。P-89 §2 の StaffApp `64.14 KB`、CatalogApp `84.64 KB` は raw サイズ。
 
 | チャンク／計測 | 基準（明記がなければ gzip） | DS-2 実測 raw／gzip |
 |---|---:|---:|
 | Guest entry／`index` chunk | guest 合計に含む | 223.77 KB / 70.52 KB |
-| Guest 初期 `App` | `11.59 KB` gzip | 112.57 KB / 35.48 KB |
-| Guest `OrderRead` | guest 合計に含む | 43.71 KB / 14.21 KB |
+| Guest 初期 `App` | `11.59 KB` gzip | 114.79 KB / 36.07 KB |
+| Guest `OrderRead` | guest 合計に含む | 43.94 KB / 14.27 KB |
 | Guest `cart-state` | guest 合計に含む | 5.41 KB / 1.91 KB |
 | Guest `DemoBanner` | guest 合計に含む | 4.03 KB / 1.65 KB |
-| その他 guest chunks／guest 合計 | 合計 `99.7 KB` gzip | 389.49 KB / 123.77 KB |
+| その他 guest chunks／guest 合計 | 合計 `99.7 KB` gzip | 391.94 KB / 124.42 KB |
 | `StaffApp` | `64.14 KB` raw | 64.14 KB / 17.42 KB |
 | `CatalogApp` | `84.64 KB` raw | 84.65 KB / 26.32 KB |
 
@@ -232,16 +232,16 @@ ADR-0006 の方針に従い、React Aria Components `1.21.1` を初めて実需�
 
 依 ADR-0006 的採用時機，guest sheet 首次使用 React Aria Components `1.21.1` 作為複雜控制項。DS-1 的原生 `<dialog>` 增加 gzip `+0 KB`，但紀錄顯示按 Tab 會在最後一個 dialog 控制項後離開整份文件（document）。React Aria 會將焦點限制在 sheet 內、開啟時使背景 inert，並於關閉後還原焦點。套件只進入 guest 分塊；下表量測 StaffApp 與 CatalogApp。guest 根節點與 sheet 使用 `font-family: var(--font-sans)`；文件的 `lang` 讓繁體中文解析至既有的 `:lang(zh-Hant)` 字型堆疊。
 
-下表列出 `pnpm --dir web build` 的各 chunk Vite 回報 raw／gzip 數據。StaffApp 與 CatalogApp 的 P-89 §2 基準是 raw 尺寸。Vite production build 的程式化 module inspection 顯示 App chunk 含98個 rendered react-aria／react-stately modules；index、OrderRead、cart-state、DemoBanner、StaffApp 與 CatalogApp 均為0個。guest 合計 gzip `123.77 KB`，比 `99.7 KB` 基準增加 `24.07 KB`；App gzip `35.48 KB`，比 `11.59 KB` 基準增加 `23.89 KB`，不把 App 全部增幅歸因於 React Aria。StaffApp raw 尺寸不變；CatalogApp 增加 `0.01 KB`（`0.012%`），仍在 ±1% 內。remote-demo build 與 `node scripts/check-remote-demo-bundle.mjs web/dist` 也通過，該模式 guest JS 合計約 `123.78 KB gzip`。
+下表列出 DS-2 review r4 P3 的 `pnpm --dir web build` 各 chunk Vite 回報 raw／gzip 數據。guest 合計與 raw 尺寸比較使用回報至小數兩位的數值。StaffApp 與 CatalogApp 的 P-89 §2 基準是 raw 尺寸。Vite production build 的程式化 module inspection 顯示 App chunk 含98個 rendered react-aria／react-stately modules；index、OrderRead、cart-state、DemoBanner、StaffApp 與 CatalogApp 均為0個。guest 合計 gzip `124.42 KB`，比 `99.7 KB` 基準增加 `24.72 KB`；App gzip `36.07 KB`，比 `11.59 KB` 基準增加 `24.48 KB`，不把 App 全部增幅歸因於 React Aria。StaffApp 回報的 raw 尺寸不變（`0.00 KB`、`0.000%`）；CatalogApp 增加 `0.01 KB`（`0.012%`），仍在 ±1% 內。remote-demo build 與 `node scripts/check-remote-demo-bundle.mjs web/dist` 也通過，該模式 guest JS 合計約 `124.42 KB gzip`。
 
 | Chunk／量測 | 基準（未特別標示時為 gzip） | DS-2 實測 raw／gzip |
 |---|---:|---:|
 | Guest entry／`index` chunk | 已包含於 guest 合計 | 223.77 KB / 70.52 KB |
-| Guest 初始 `App` | `11.59 KB` gzip | 112.57 KB / 35.48 KB |
-| Guest `OrderRead` | 已包含於 guest 合計 | 43.71 KB / 14.21 KB |
+| Guest 初始 `App` | `11.59 KB` gzip | 114.79 KB / 36.07 KB |
+| Guest `OrderRead` | 已包含於 guest 合計 | 43.94 KB / 14.27 KB |
 | Guest `cart-state` | 已包含於 guest 合計 | 5.41 KB / 1.91 KB |
 | Guest `DemoBanner` | 已包含於 guest 合計 | 4.03 KB / 1.65 KB |
-| 其他 guest chunks／guest 合計 | 合計 `99.7 KB` gzip | 389.49 KB / 123.77 KB |
+| 其他 guest chunks／guest 合計 | 合計 `99.7 KB` gzip | 391.94 KB / 124.42 KB |
 | `StaffApp` | `64.14 KB` raw | 64.14 KB / 17.42 KB |
 | `CatalogApp` | `84.64 KB` raw | 84.65 KB / 26.32 KB |
 
