@@ -5,6 +5,7 @@ import { grantFromFragment, orderReadClient, orderReadLink, type OrderReadGrant,
 import { loadMyOrders, myOrdersChanged, rememberOrderGrant } from './my-orders';
 import styles from './OrderRead.module.css';
 import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
+import { DemoBanner, type DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
 const ja = {
@@ -140,7 +141,7 @@ export function RequestOrderLink({ sessionID, token, orderID, locale }: { sessio
     {failed && <p role="alert">{t.failed}</p>}{grant && <a href={orderReadLink(grant)} referrerPolicy="no-referrer">{t.title}</a>}
   </div>;
 }
-export function OrderPage() {
+export function OrderPage({ demo = false }: DemoSurfaceProps) {
   const [locale, setLocale] = useState<Locale>('ja');
   const [grant, setGrant] = useState(() => grantFromFragment(window.location.hash));
   useEffect(() => {
@@ -150,6 +151,7 @@ export function OrderPage() {
   }, []);
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
   return <main><meta name="referrer" content="no-referrer" /><button type="button" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button>
+    <DemoBanner demo={demo} locale={locale} />
     {grant ? <OrderStatusView grant={grant} locale={locale} onRead={rememberOrderGrant} /> : <p role="alert">{copy[locale].invalid}</p>}
     <MyOrders locale={locale} />
   </main>;
