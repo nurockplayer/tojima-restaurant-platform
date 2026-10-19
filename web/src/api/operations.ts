@@ -5,7 +5,7 @@ export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitch
 export interface StaffTable { table_id: string; name: string; session_id?: string; status: 'OPEN' | 'CLOSED' | 'IDLE'; mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN'; expires_at?: string; unpaid_cash_jpy: string; order_count: number }
 export interface StaffOrder {
   id: string; session_id: string; table_id: string; table_name: string; generation: number;
-  payment_method: 'CASH' | 'STRIPE'; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN' | 'REFUND_PENDING' | 'REFUNDED';
+  payment_method: 'CASH' | 'STRIPE'; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN' | 'VOIDED' | 'REFUND_PENDING' | 'REFUNDED';
   fulfillment_status: 'WAITING' | 'ACCEPTED' | 'PREPARING' | 'READY' | 'SERVED' | 'CANCELLED';
   requires_staff_acceptance: boolean; staff_accepted: boolean; cash_mode?: 'PREPAID' | 'PAY_LATER'; version: number;
   total_gross_jpy: string; effective_total_gross_jpy?: string; created_at: string; blocked_reason?: string;
@@ -28,7 +28,7 @@ export interface SessionOperations { session: { id: string; status: string; mode
 export interface CashSettings { enabled: boolean; mode: 'PREPAID' | 'PAY_LATER'; version: number }
 export interface CashPreview { session_id: string; fingerprint: string; order_ids: string[]; due_jpy: string; tax: Receipt['tax'] }
 export interface OpenedSession { session: { id: string; status: string; mode: string; expires_at?: string }; pin?: string }
-export interface GuestOrderStatus { id: string; display_state: string; payment_status: 'UNPAID' | 'PAID' | 'PENDING' | 'UNKNOWN'; fulfillment_status: StaffOrder['fulfillment_status']; requires_staff_acceptance: boolean; staff_accepted: boolean; total_gross_jpy: string; effective_total_gross_jpy: string; effective_lines: Array<{ product_name: string; quantity: number; line_total_jpy: string; option_names: string[] }>; adjusted: boolean; refunds: Array<{ status: string; amount_jpy: string; method: 'CASH' | 'STRIPE' }>; refunded_total_jpy: string; cash_mode?: 'PREPAID' | 'PAY_LATER' }
+export interface GuestOrderStatus { id: string; display_state: string; payment_status: StaffOrder['payment_status']; fulfillment_status: StaffOrder['fulfillment_status']; requires_staff_acceptance: boolean; staff_accepted: boolean; total_gross_jpy: string; effective_total_gross_jpy: string; effective_lines: Array<{ product_name: string; quantity: number; line_total_jpy: string; option_names: string[] }>; adjusted: boolean; refunds: Array<{ status: string; amount_jpy: string; method: 'CASH' | 'STRIPE' }>; refunded_total_jpy: string; cash_mode?: 'PREPAID' | 'PAY_LATER' }
 export interface GuestOperations { orders: GuestOrderStatus[]; cash_enabled: boolean }
 
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
@@ -50,6 +50,7 @@ export const operationsClient = {
   approveFulfillment: (context: StaffContext, token: string, order: StaffOrder, body: { expected_version: number; reason: string }, key: string) => request<StaffOrder>(`${base(context)}/tables/${enc(order.table_id)}/sessions/${enc(order.session_id)}/orders/${enc(order.id)}/approve-fulfillment`, token, json(body, key)),
   previewAdjustment: (context: StaffContext, token: string, order: StaffOrder, body: AdjustmentRequest) => request<AdjustmentPreview>(`${orderPath(context, order)}/adjustments/preview`, token, json(body)),
   adjustOrder: (context: StaffContext, token: string, order: StaffOrder, body: AdjustmentRequest, key: string) => request<StaffOrder>(`${orderPath(context, order)}/adjustments`, token, json(body, key)),
+  voidUnpaidOrder: (context: StaffContext, token: string, order: StaffOrder, body: { expected_version: number; reason: string }, key: string) => request<StaffOrder>(`${orderPath(context, order)}/payment/void-unpaid`, token, json(body, key)),
   requestStop: (context: StaffContext, token: string, order: StaffOrder, body: { expected_version: number; reason: string; lines: AdjustmentLine[] }, key: string) => request<StaffOrder>(`${orderPath(context, order)}/stop-requests`, token, json(body, key)),
   stopRequestAction: (context: StaffContext, token: string, order: StaffOrder, requestID: string, action: 'withdraw' | 'confirm' | 'reject' | 'finalize', body: { expected_version: number; expected_request_version: number; reason?: string; non_delivery_confirmed?: boolean; cash_hand_back_confirmed?: boolean }, key: string) => request<StaffOrder>(`${orderPath(context, order)}/stop-requests/${enc(requestID)}/${action}`, token, json(body, key)),
   retryRefund: (context: StaffContext, token: string, order: StaffOrder, refundID: string, expectedVersion: number, key: string) => request<StaffOrder>(`${orderPath(context, order)}/refunds/${enc(refundID)}/retry`, token, json({ expected_version: expectedVersion }, key)),

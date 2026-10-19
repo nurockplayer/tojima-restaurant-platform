@@ -11,7 +11,7 @@ import type { DemoSurfaceProps } from './DemoBanner';
 
 type Locale = 'ja' | 'zh';
 type View = 'tables' | 'kds' | 'reviews';
-type Dialog = 'cash' | 'close' | 'approve' | 'adjust' | 'stop' | null;
+type Dialog = 'cash' | 'close' | 'approve' | 'adjust' | 'stop' | 'void' | null;
 const CONTEXT_KEY = 'tojima.staff.context';
 const TOKEN_KEY = 'tojima.staff.access-token';
 // The HTTP client has no timeout, so a hung KDS poll is aborted (and the board marked stale) after this.
@@ -32,6 +32,7 @@ const copy = {
     noCashOrders: '精算対象の現金注文はありません。', closeBlocked: '未提供または未精算の注文があるため閉卓できません。',
     reviews: '要確認', reviewQueue: '支払済み・要確認の注文', noReviews: '確認が必要な注文はありません。', approve: '提供を承認', approveTitle: '提供を承認しますか？', reason: '承認理由', confirmApprove: '承認して厨房へ送る', reviewCompany: '企業の商品保留', reviewOperations: '運営保留', reviewClosed: '卓セッション終了後の確認', reviewPayment: '支払い確認', reviewRefund: '返金未完了', effectiveTotal: '変更後合計', originalTotal: '元の合計', reviewStale: '注文が更新されました。最新状態を読み込みました。内容を確認してください。', reviewLoading: '確認が必要な注文を読み込んでいます…', reviewDataStale: '表示中の確認一覧が最新ではありません。再読み込みしてください。', reviewLoadError: '確認一覧を読み込めませんでした。', companyHoldActive: '企業の商品保留中です。解除後に再度お試しください。', reviewNotReady: 'この注文は承認できません。最新状態を確認してください。',
     adjust: '取消・減量', adjustTitle: '注文内容の取消・数量変更', adjustReason: '取消理由（必須）', previewAdjustment: '変更内容を確認', adjustedTotal: '変更後合計', refundAmount: '返金額', confirmAdjustment: '変更を確定', cashHandback: '現金をお客様へ返金しました（手渡し確認）', refunds: '返金状況', refundProcessing: '処理中', refundDispatchPending: '返金の送信待ち（自動再試行）', refundReconciliationNeeded: '返金状況の確認が必要です', refundFailed: '失敗', refundSucceeded: '完了', retryRefund: '返金を再試行', orderUpdated: '注文が更新されました。厨房で内容を確認してください。', acknowledgeUpdate: '更新を確認',
+    voidUnpaid: '未払いとして取消', voidTitle: '未払いとして注文を取り消しますか？', voidExplanation: 'Stripe に支払状況を再確認し、未完了の決済画面を閉じてから注文を取り消します。お客様には請求されません。', voidReason: '取消理由（必須）', confirmVoid: '取消を確定', voidIneligible: '支払いが完了しているか処理中のため取り消せません。照合結果を確認してください。', voidUnavailable: 'Stripe に接続できません。時間をおいて再試行してください。', voided: '未払い取消',
     stopRequest: '調理中の商品を止める', stopTitle: '停止を依頼', stopNoRemaining: '停止できる数量がありません', stopUnavailable: '最新状態を確認してください', stopPending: '停止依頼中', stopConfirmed: '厨房が停止を確認しました', stopFinalized: '取消を確定', stopWithdraw: '依頼を取り下げる', stopKitchenConfirm: '停止を確認', stopKitchenReject: '停止できない', stopReason: '停止理由（必須）', nonDelivery: '商品が提供されていないことを確認しました', uncertainDelivery: '提供状況が不明なため手動確認が必要です', stopRequestPending: '停止依頼を確認してください', stopManual: '手動対応が必要です', stopRejected: '厨房で停止できませんでした', stopWithdrawn: '停止依頼を取り下げました', stopConfirmTitle: '停止済みであることを確認しますか？', stopWithdrawTitle: '停止依頼を取り下げますか？', stopRejectTitle: '停止できない理由を記録しますか？', stopRequestTitle: 'この商品を止めるよう厨房へ依頼しますか？',
     paymentCheck: '支払い状況を確認', paymentReconcile: '最新の支払い状況を確認', paymentError: '支払い状況を確認できません。時間をおいてお試しください。', paymentReview: '支払い状況を店舗で確認する必要があります。', lastPaymentCheck: '最終確認',
     kdsStale: '厨房看板の接続が切れています。表示が最新ではない可能性があります。自動で再接続しています。', kdsLastSync: '最終同期',
@@ -54,6 +55,7 @@ const copy = {
     noCashOrders: '目前沒有待收現金訂單。', closeBlocked: '尚有未送達或未結清的訂單，無法關桌。',
     reviews: '待審核', reviewQueue: '已付款且待審核的訂單', noReviews: '目前沒有待審核的訂單。', approve: '核准出餐', approveTitle: '要核准此訂單出餐嗎？', reason: '核准原因', confirmApprove: '核准並送至廚房', reviewCompany: '企業商品保留', reviewOperations: '營運保留', reviewClosed: '桌次結束後確認', reviewPayment: '付款確認', reviewRefund: '退款尚未完成', effectiveTotal: '調整後總額', originalTotal: '原始總額', reviewStale: '訂單狀態已更新。已重新載入最新資料，請確認後操作。', reviewLoading: '正在載入待審核訂單…', reviewDataStale: '目前顯示的審核清單不是最新資料，請重新載入。', reviewLoadError: '無法載入審核清單。', companyHoldActive: '企業商品仍在保留中，解除後才能核准。', reviewNotReady: '此訂單目前無法核准，請確認最新狀態。',
     adjust: '取消・減量', adjustTitle: '取消或減少訂購數量', adjustReason: '取消原因（必填）', previewAdjustment: '預覽變更', adjustedTotal: '變更後總額', refundAmount: '退款金額', confirmAdjustment: '確認變更', cashHandback: '已將現金退還顧客（確認已交付）', refunds: '退款狀態', refundProcessing: '處理中', refundDispatchPending: '退款等待送出（自動重試）', refundReconciliationNeeded: '需要確認退款狀態', refundFailed: '失敗', refundSucceeded: '完成', retryRefund: '重試退款', orderUpdated: '訂單已更新，請廚房確認內容。', acknowledgeUpdate: '確認更新',
+    voidUnpaid: '以未付款作廢', voidTitle: '要以未付款作廢此訂單嗎？', voidExplanation: '系統會向 Stripe 重新確認付款狀態，關閉未完成的付款頁面後取消此訂單，不會向顧客收費。', voidReason: '作廢原因（必填）', confirmVoid: '確認作廢', voidIneligible: '付款已完成或仍在處理中，無法作廢。請確認核對結果。', voidUnavailable: '無法連線 Stripe，請稍後再試。', voided: '未付款作廢',
     stopRequest: '申請停止製作中品項', stopTitle: '申請停止', stopNoRemaining: '沒有可停止的數量', stopUnavailable: '請確認最新狀態', stopPending: '停止申請待處理', stopConfirmed: '廚房已確認停止', stopFinalized: '確認取消', stopWithdraw: '撤回申請', stopKitchenConfirm: '確認已停止', stopKitchenReject: '無法停止', stopReason: '停止原因（必填）', nonDelivery: '我確認商品尚未送達', uncertainDelivery: '送達狀態不明，需人工處理', stopRequestPending: '請處理停止申請', stopManual: '需要人工處理', stopRejected: '廚房無法停止', stopWithdrawn: '已撤回停止申請', stopConfirmTitle: '確認廚房已停止製作？', stopWithdrawTitle: '要撤回停止申請嗎？', stopRejectTitle: '記錄無法停止的原因？', stopRequestTitle: '要請廚房停止此品項嗎？',
     paymentCheck: '確認付款狀態', paymentReconcile: '更新付款狀態', paymentError: '目前無法確認付款狀態，請稍後再試。', paymentReview: '需要由門店確認付款狀態。', lastPaymentCheck: '最後確認',
     kdsStale: '廚房看板連線中斷，畫面可能不是最新狀態，系統正在自動重新連線。', kdsLastSync: '最後同步',
@@ -64,7 +66,7 @@ const copy = {
   },
 } as const;
 
-interface PendingWrite { key: string; epoch: number; run: () => Promise<unknown>; success: (value: unknown) => Promise<void> | void; conflict: () => Promise<void> }
+interface PendingWrite { key: string; epoch: number; run: () => Promise<unknown>; success: (value: unknown) => Promise<void> | void; conflict: () => Promise<void>; unavailableCopy?: () => string }
 interface ActiveStaffContext { epoch: number; context: StaffContext; bearer: string; ready: boolean }
 
 export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfaceProps) {
@@ -84,6 +86,9 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const [reviewError, setReviewError] = useState('');
   const [approveOrder, setApproveOrder] = useState<StaffOrder | null>(null);
   const [approveReason, setApproveReason] = useState('');
+  const [voidOrder, setVoidOrder] = useState<StaffOrder | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const voidKey = useRef('');
   const [adjustOrder, setAdjustOrder] = useState<StaffOrder | null>(null);
   const [stopOrder, setStopOrder] = useState<StaffOrder | null>(null);
   const [stopMode, setStopMode] = useState<'request' | 'reject' | 'finalize' | 'withdraw' | 'confirm' | null>(null);
@@ -378,24 +383,23 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       if (epoch.current !== requestEpoch) return;
       if (cause instanceof ApiError && cause.status === 409) {
         pendingWrite.current = null; setUncertain(false);
-        setError(['stop_request_pending', 'stop_request_state', 'manual_exception_required'].includes(cause.body.error) ? explain(cause, locale) : cause.body.error === 'company_hold_active' ? t.companyHoldActive : cause.body.error === 'review_not_ready' ? t.reviewNotReady : cause.body.error === 'stale_version' || cause.body.error === 'idempotency_conflict' ? t.reviewStale : t.stale);
+        setError(cause.body.error === 'void_not_eligible' ? t.voidIneligible : ['stop_request_pending', 'stop_request_state', 'manual_exception_required'].includes(cause.body.error) ? explain(cause, locale) : cause.body.error === 'company_hold_active' ? t.companyHoldActive : cause.body.error === 'review_not_ready' ? t.reviewNotReady : cause.body.error === 'stale_version' || cause.body.error === 'idempotency_conflict' ? t.reviewStale : t.stale);
         try { await operation.conflict(); }
         catch (conflictCause) { if (epoch.current === requestEpoch) setError(explain(conflictCause, locale)); }
       } else if (!(cause instanceof ApiError) || cause.status >= 500) {
-        setUncertain(true); setError(t.network);
+        setUncertain(true); setError(operation.unavailableCopy?.() ?? t.network);
       } else {
         pendingWrite.current = null; setUncertain(false); setError(explain(cause, locale));
       }
     } finally { writeInitiated.current = false; if (epoch.current === requestEpoch) setBusy(false); }
-  }, [locale, t.companyHoldActive, t.network, t.reviewNotReady, t.reviewStale, t.stale]);
+  }, [locale, t.companyHoldActive, t.network, t.reviewNotReady, t.reviewStale, t.stale, t.voidIneligible]);
 
-  const startWrite = <P, R>(payload: P, execute: (payload: P, key: string) => Promise<R>, success: (result: R) => Promise<void> | void, conflict: () => Promise<void>) => {
+  const startWrite = <P, R>(payload: P, execute: (payload: P, key: string) => Promise<R>, success: (result: R) => Promise<void> | void, conflict: () => Promise<void>, key = newOperationKey(), unavailableCopy?: () => string) => {
     if (busy || uncertain || writeInitiated.current) return;
     writeInitiated.current = true;
-    const key = newOperationKey();
     const replay = createReplayOperation(key, payload, (original) => execute(original, key));
     const operationEpoch = epoch.current;
-    const pending: PendingWrite = { key, epoch: operationEpoch, run: replay.run, success: (value) => success(value as R), conflict };
+    const pending: PendingWrite = { key, epoch: operationEpoch, run: replay.run, success: (value) => success(value as R), conflict, unavailableCopy };
     pendingWrite.current = pending;
     void perform(pending);
   };
@@ -482,6 +486,21 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       setDialog(null); setApproveOrder(null); setApproveReason('');
       await loadReviews(context, token);
     });
+  };
+
+  const openVoidDialog = (order: StaffOrder, button: HTMLButtonElement) => {
+    openerRef.current = button; voidKey.current = newOperationKey(); setVoidOrder(order); setVoidReason(''); setError(''); setDialog('void');
+  };
+  const voidUnpaidOrder = () => {
+    if (!voidOrder || !capabilities?.can_approve_fulfillment || !voidReason.trim() || !voidKey.current) return;
+    const target = voidOrder; const payload = { expected_version: target.version, reason: voidReason.trim() };
+    startWrite(payload, (body, key) => operationsClient.voidUnpaidOrder(context, token, target, body, key), async () => {
+      setDialog(null); setVoidOrder(null); setVoidReason(''); voidKey.current = '';
+      await Promise.all([refreshDetail(), loadTables(context, token)]);
+    }, async () => {
+      setDialog(null); setVoidOrder(null); setVoidReason(''); voidKey.current = '';
+      await Promise.all([refreshDetail(), loadTables(context, token)]);
+    }, voidKey.current, () => t.voidUnavailable);
   };
 
   const adjustmentBody = (): AdjustmentRequest | null => {
@@ -619,7 +638,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
           {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
             <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; void openCashPreview(); }}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
-            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} canManage={capabilities.can_approve_fulfillment === true} onStopRequest={(button) => { openerRef.current = button; setStopOrder(order); setStopMode('request'); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setDialog('stop'); }} onStopAction={(id, action, button) => openStopAction(order, id, action, button)} onAdjust={() => { invalidateAdjustmentPreview(); setAdjustOrder(order); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setCashHandback(false); setError(''); setDialog('adjust'); }} onRetryRefund={(refundID) => retryRefund(order, refundID)} onAcknowledgeUpdate={() => acknowledgeUpdatedOrder(order)} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
+            {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} canManage={capabilities.can_approve_fulfillment === true} onVoid={(button) => openVoidDialog(order, button)} onStopRequest={(button) => { openerRef.current = button; setStopOrder(order); setStopMode('request'); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setDialog('stop'); }} onStopAction={(id, action, button) => openStopAction(order, id, action, button)} onAdjust={() => { invalidateAdjustmentPreview(); setAdjustOrder(order); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setCashHandback(false); setError(''); setDialog('adjust'); }} onRetryRefund={(refundID) => retryRefund(order, refundID)} onAcknowledgeUpdate={() => acknowledgeUpdatedOrder(order)} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
             <div className="staff-section-title"><h3>{t.receipts}</h3></div>
             {detail.receipts.map((item) => <ReceiptCard key={item.id} receipt={item} t={t} demo={demo} locale={locale} />)}
             {capabilities.can_serve && <button className="button quiet wide close-table" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; setDialog('close'); }}>{t.close}</button>}
@@ -667,6 +686,7 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       {uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}
       {error && <p className="error" role="alert">{error}</p>}
     </StaffDialog>}
+    {dialog === 'void' && voidOrder && <StaffDialog labelledBy="void-title" dismissible={!busy && !uncertain} onDismiss={() => { setDialog(null); setVoidOrder(null); setVoidReason(''); voidKey.current = ''; }}><div className="eyebrow">{t.orders}</div><h2 id="void-title">{t.voidTitle}</h2><p>{t.voidExplanation}</p><p>{voidOrder.table_name} · #{voidOrder.generation}</p><label className="field">{t.voidReason}<textarea rows={3} required maxLength={500} value={voidReason} disabled={busy || uncertain} onChange={(event) => setVoidReason(event.target.value)} /></label><button className="button primary wide" disabled={busy || uncertain || !voidReason.trim()} onClick={voidUnpaidOrder}>{t.confirmVoid}</button><button className="button quiet wide" disabled={busy || uncertain} onClick={() => { setDialog(null); setVoidOrder(null); setVoidReason(''); voidKey.current = ''; }}>{t.closeDialog}</button>{uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}{error && <p className="error" role="alert">{error}</p>}</StaffDialog>}
     {dialog === 'approve' && approveOrder && <StaffDialog labelledBy="approve-title" dismissible={!busy && !uncertain} onDismiss={() => { setDialog(null); setApproveOrder(null); }}><div className="eyebrow">{t.reviews}</div><h2 id="approve-title">{t.approveTitle}</h2><p>{approveOrder.table_name} · #{approveOrder.generation} · {amountJPY(approveOrder.effective_total_gross_jpy ?? approveOrder.total_gross_jpy)}</p><label className="field">{t.reason}<textarea rows={3} required maxLength={500} value={approveReason} disabled={busy || uncertain} onChange={(event) => setApproveReason(event.target.value)} /></label><button className="button primary wide" disabled={busy || uncertain || !approveReason.trim()} onClick={approveFulfillment}>{t.confirmApprove}</button><button className="button quiet wide" disabled={busy || uncertain} onClick={() => setDialog(null)}>{t.closeDialog}</button>{uncertain && <button className="button retry wide" disabled={busy} onClick={retryWrite}>{t.retry}</button>}{error && <p className="error" role="alert">{error}</p>}</StaffDialog>}
     {dialog === 'stop' && stopOrder && <StaffDialog labelledBy="stop-title" dismissible={!busy && !uncertain} onDismiss={clearStopDialog}><div className="eyebrow">{t.orders}</div><h2 id="stop-title">{stopMode === 'request' ? t.stopRequestTitle : stopMode === 'reject' ? t.stopRejectTitle : stopMode === 'confirm' ? t.stopConfirmTitle : stopMode === 'withdraw' ? t.stopWithdrawTitle : t.stopFinalized}</h2><p>{stopOrder.table_name} · #{stopOrder.generation}</p>
       {stopMode !== 'request' && (() => { const item = stopOrder.cancellation_requests?.find((request) => request.id === stopRequestID); const line = item && stopOrder.lines.find((candidate, index) => (candidate.line_index ?? index) === item.line_index); return item ? <p className="notice">{line?.product_name ?? `#${item.line_index + 1}`} × {item.quantity} · {item.reason}</p> : null; })()}
@@ -690,10 +710,10 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   </StaffShell>;
 }
 
-function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, demo = false, paymentStatus, paymentBusy = false, paymentError = '', canCheckPayment = false, canManage = false, onCheckPayment, onReconcilePayment, onStopRequest, onStopAction, onAdjust, onRetryRefund, onAcknowledgeUpdate, onAccept, onStart, onReady, onServe }: {
+function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, demo = false, paymentStatus, paymentBusy = false, paymentError = '', canCheckPayment = false, canManage = false, onCheckPayment, onReconcilePayment, onVoid, onStopRequest, onStopAction, onAdjust, onRetryRefund, onAcknowledgeUpdate, onAccept, onStart, onReady, onServe }: {
   order: StaffOrder; locale: Locale; t: typeof copy[Locale]; canServe: boolean; busy: boolean; compact?: boolean; demo?: boolean;
   paymentStatus?: CheckoutStatus; paymentBusy?: boolean; paymentError?: string; canCheckPayment?: boolean; canManage?: boolean;
-  onCheckPayment?: () => void; onReconcilePayment?: () => void; onStopRequest?: (button: HTMLButtonElement) => void; onStopAction?: (requestID: string, action: 'withdraw' | 'confirm' | 'reject' | 'finalize', button: HTMLButtonElement) => void;
+  onCheckPayment?: () => void; onReconcilePayment?: () => void; onVoid?: (button: HTMLButtonElement) => void; onStopRequest?: (button: HTMLButtonElement) => void; onStopAction?: (requestID: string, action: 'withdraw' | 'confirm' | 'reject' | 'finalize', button: HTMLButtonElement) => void;
   onAdjust?: () => void; onRetryRefund?: (refundID: string) => void; onAcknowledgeUpdate?: () => void;
   onAccept?: () => void; onStart?: () => void; onReady?: () => void; onServe?: () => void;
 }) {
@@ -716,6 +736,7 @@ function StaffOrderCard({ order, locale, t, canServe, busy, compact = false, dem
       {paymentStatus && <button className="button small primary" disabled={busy || paymentBusy} onClick={onReconcilePayment}>{paymentBusy ? t.loading : t.paymentReconcile}</button>}
     </div>}
     <div className="staff-order-actions">
+      {!compact && canManage && order.payment_method === 'STRIPE' && (order.payment_status === 'PENDING' || order.payment_status === 'UNKNOWN') && order.fulfillment_status === 'WAITING' && onVoid && <button className="button small quiet" disabled={busy} onClick={(event) => onVoid(event.currentTarget)}>{t.voidUnpaid}</button>}
       {!compact && canManage && (order.review_decision ?? 'UNRESOLVED') === 'UNRESOLVED' && (activeState === 'WAITING' || activeState === 'ACCEPTED') && (order.payment_method === 'CASH' || order.payment_status === 'PAID') && onAdjust && <button className="button small quiet" disabled={busy} onClick={onAdjust}>{t.adjust}</button>}
       {!compact && canManage && activeState === 'PREPARING' && onStopRequest && order.lines.some((line) => line.stop_request_eligibility === 'ELIGIBLE') && <button className="button small quiet" disabled={busy} onClick={(event) => onStopRequest(event.currentTarget)}>{t.stopRequest}</button>}
       {compact && order.order_updated && onAcknowledgeUpdate && <button className="button small primary" disabled={busy} onClick={onAcknowledgeUpdate}>{t.acknowledgeUpdate}</button>}
@@ -781,7 +802,7 @@ function statusLabel(status: StaffOrder['fulfillment_status'] | StaffTable['stat
   return status;
 }
 function paymentLabel(status: StaffOrder['payment_status'], t: typeof copy[Locale]) {
-  if (status === 'PAID') return t.paid; if (status === 'REFUNDED') return t.refunded; if (status === 'REFUND_PENDING') return t.refundPending; if (status === 'UNPAID') return t.unpaidStatus; if (status === 'PENDING') return t.pending; return t.unknown;
+  if (status === 'PAID') return t.paid; if (status === 'REFUNDED') return t.refunded; if (status === 'REFUND_PENDING') return t.refundPending; if (status === 'VOIDED') return t.voided; if (status === 'UNPAID') return t.unpaidStatus; if (status === 'PENDING') return t.pending; return t.unknown;
 }
 function stopNeedsCashHandback(order: StaffOrder | null, requestID: string) {
   if (!order || order.payment_method !== 'CASH' || order.payment_status !== 'PAID') return false;

@@ -50,7 +50,7 @@ func (s *Service) CheckClose(ctx context.Context, tx pgx.Tx, session tablesessio
 	err := tx.QueryRow(ctx, `SELECT count(*) FROM table_orders o JOIN operation_order_state os USING(order_id)
 		LEFT JOIN stripe_payment_attempts a USING(order_id)
 		WHERE o.session_id=$1 AND os.payment_method='STRIPE'
-		AND (a.order_id IS NULL OR a.state<>'PAID' OR a.payment_review_required OR os.payment_review_required)`, session.ID).Scan(&unsafe)
+		AND (a.order_id IS NULL OR NOT (a.state='PAID' OR (a.state='EXPIRED' AND os.fulfillment_status='CANCELLED' AND os.payment_status='VOIDED')) OR a.payment_review_required OR os.payment_review_required)`, session.ID).Scan(&unsafe)
 	if err != nil {
 		return err
 	}

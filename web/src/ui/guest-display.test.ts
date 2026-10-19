@@ -14,7 +14,7 @@ describe('guestDisplayKind', () => {
   );
   it('accepts paid review and validates cancelled states as a separate kind', () => {
     expect(guestDisplayKind({ display_state: 'PAID_UNDER_REVIEW', payment_status: 'PAID', fulfillment_status: 'WAITING' })).toBe('review');
-    for (const payment_status of ['UNPAID', 'PENDING', 'PAID', 'UNKNOWN', 'REFUND_PENDING', 'REFUNDED']) {
+    for (const payment_status of ['UNPAID', 'PENDING', 'PAID', 'UNKNOWN', 'VOIDED', 'REFUND_PENDING', 'REFUNDED']) {
       expect(guestDisplayKind({ display_state: 'CANCELLED', payment_status, fulfillment_status: 'CANCELLED' })).toBe('cancelled');
     }
   });

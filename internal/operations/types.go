@@ -69,6 +69,7 @@ const (
 	Unknown       PaymentStatus = "UNKNOWN"
 	RefundPending PaymentStatus = "REFUND_PENDING"
 	Refunded      PaymentStatus = "REFUNDED"
+	Voided        PaymentStatus = "VOIDED"
 )
 
 type FulfillmentStatus string
