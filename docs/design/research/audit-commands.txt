@@ -1,0 +1,19 @@
+# Baseline audit commands (tojima-restaurant-platform @ 5d82bce, run from web/src/ui)
+# font-size declarations per file: total / <=11px / 9px
+for f in styles.css CatalogApp.module.css OrderRead.module.css; do
+  t=$(grep -oE 'font-size:\s*[0-9.]+px' $f | wc -l)
+  s=$(grep -oE 'font-size:\s*[0-9.]+px' $f | grep -oE '[0-9.]+' | awk '$1<=11' | wc -l)
+  n=$(grep -oE 'font-size:\s*9px' $f | wc -l); echo "$f $t $s $n"; done
+#   styles.css 86 51 19 ; CatalogApp.module.css 25 14 3 ; OrderRead.module.css 0 0 0  => all UI CSS 111 / 65 / 22
+# named custom properties in styles.css :root  => 10 (--cream --green --green-2 --ink --line --mint --muted --orange --red --shadow)
+grep -oE -- '--[a-z0-9-]+:' styles.css | sort -u
+# hard-coded hex colours across UI CSS => 130 occurrences, 88 unique
+cat *.css | grep -oE '#[0-9a-fA-F]{3,6}\b' | wc -l
+cat *.css | grep -oE '#[0-9a-fA-F]{3,6}\b' | tr A-F a-f | sort -u | wc -l
+# var(--muted) references across UI CSS => 27
+grep -o 'var(--muted' *.css | wc -l
+# contrast ratios: WCAG 2.1 relative luminance, same function as contrast-gate.mjs
+#   #748079 on #f4f4ee = 3.73 ; #d2a36b on #f4f4ee = 2.07 ; #d97943 on #fbfbf7 = 2.99
+# Tachiko Sheet churn (tachiko-sheet @ c082616):
+#   git log --oneline --no-merges -- src/ui/sheet-shell.css | wc -l   => 58 (2026-09-12 .. 2026-10-18)
+#   git log --oneline -- src/ui/sheet-shell.css | wc -l               => 59 ; --first-parent => 25

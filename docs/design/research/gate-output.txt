@@ -1,0 +1,80 @@
+PASS  guest  13.82 >= 4.5  --color-text / --color-bg  body text
+PASS  guest  14.98 >= 4.5  --color-text / --color-surface  body text on card
+PASS  guest   5.81 >= 4.5  --color-text-muted / --color-bg  secondary text
+PASS  guest    6.3 >= 4.5  --color-text-muted / --color-surface  secondary text on card
+PASS  guest   5.45 >= 4.5  --color-text-muted / --color-surface-sunken  secondary text on sunken
+PASS  guest  14.98 >= 4.5  --color-price / --color-surface  price
+PASS  guest   9.71 >= 4.5  --color-on-action / --color-action  primary button label
+PASS  guest   7.24 >= 4.5  --color-on-action / --color-action-hover  primary button hover
+PASS  guest   8.33 >= 4.5  --color-action-soft-ink / --color-action-soft  selected chip
+PASS  guest   9.71 >= 3  --color-action / --color-surface  primary as non-text indicator
+PASS  guest   3.73 >= 3  --color-border-control / --color-surface  control boundary (1.4.11)
+PASS  guest    5.5 >= 3  --color-focus / --color-bg  focus ring on page
+PASS  guest   5.96 >= 3  --color-focus / --color-surface  focus ring on card
+PASS  guest   6.13 >= 4.5  --color-success-ink / --color-success-bg  status: success
+PASS  guest   6.81 >= 4.5  --color-warning-ink / --color-warning-bg  status: warning
+PASS  guest   6.02 >= 4.5  --color-danger-ink / --color-danger-bg  status: danger
+PASS  guest   5.72 >= 4.5  --color-info-ink / --color-info-bg  status: info
+PASS  guest   6.97 >= 4.5  --color-danger-ink / --color-surface  inline error text
+PASS  floor  13.82 >= 4.5  --color-text / --color-bg  body text
+PASS  floor  14.98 >= 4.5  --color-text / --color-surface  body text on card
+PASS  floor   5.81 >= 4.5  --color-text-muted / --color-bg  secondary text
+PASS  floor    6.3 >= 4.5  --color-text-muted / --color-surface  secondary text on card
+PASS  floor   5.45 >= 4.5  --color-text-muted / --color-surface-sunken  secondary text on sunken
+PASS  floor  14.98 >= 4.5  --color-price / --color-surface  price
+PASS  floor   9.71 >= 4.5  --color-on-action / --color-action  primary button label
+PASS  floor   7.24 >= 4.5  --color-on-action / --color-action-hover  primary button hover
+PASS  floor   8.33 >= 4.5  --color-action-soft-ink / --color-action-soft  selected chip
+PASS  floor   9.71 >= 3  --color-action / --color-surface  primary as non-text indicator
+PASS  floor   3.73 >= 3  --color-border-control / --color-surface  control boundary (1.4.11)
+PASS  floor    5.5 >= 3  --color-focus / --color-bg  focus ring on page
+PASS  floor   5.96 >= 3  --color-focus / --color-surface  focus ring on card
+PASS  floor   6.13 >= 4.5  --color-success-ink / --color-success-bg  status: success
+PASS  floor   6.81 >= 4.5  --color-warning-ink / --color-warning-bg  status: warning
+PASS  floor   6.02 >= 4.5  --color-danger-ink / --color-danger-bg  status: danger
+PASS  floor   5.72 >= 4.5  --color-info-ink / --color-info-bg  status: info
+PASS  floor   6.97 >= 4.5  --color-danger-ink / --color-surface  inline error text
+PASS  office 13.82 >= 4.5  --color-text / --color-bg  body text
+PASS  office 14.98 >= 4.5  --color-text / --color-surface  body text on card
+PASS  office  5.81 >= 4.5  --color-text-muted / --color-bg  secondary text
+PASS  office   6.3 >= 4.5  --color-text-muted / --color-surface  secondary text on card
+PASS  office  5.45 >= 4.5  --color-text-muted / --color-surface-sunken  secondary text on sunken
+PASS  office 14.98 >= 4.5  --color-price / --color-surface  price
+PASS  office  9.71 >= 4.5  --color-on-action / --color-action  primary button label
+PASS  office  7.24 >= 4.5  --color-on-action / --color-action-hover  primary button hover
+PASS  office  8.33 >= 4.5  --color-action-soft-ink / --color-action-soft  selected chip
+PASS  office  9.71 >= 3  --color-action / --color-surface  primary as non-text indicator
+PASS  office  3.73 >= 3  --color-border-control / --color-surface  control boundary (1.4.11)
+PASS  office   5.5 >= 3  --color-focus / --color-bg  focus ring on page
+PASS  office  5.96 >= 3  --color-focus / --color-surface  focus ring on card
+PASS  office  6.13 >= 4.5  --color-success-ink / --color-success-bg  status: success
+PASS  office  6.81 >= 4.5  --color-warning-ink / --color-warning-bg  status: warning
+PASS  office  6.02 >= 4.5  --color-danger-ink / --color-danger-bg  status: danger
+PASS  office  5.72 >= 4.5  --color-info-ink / --color-info-bg  status: info
+PASS  office  6.97 >= 4.5  --color-danger-ink / --color-surface  inline error text
+PASS  kds     16.3 >= 4.5  --color-text / --color-bg  body text
+PASS  kds    14.55 >= 4.5  --color-text / --color-surface  body text on card
+PASS  kds     8.49 >= 4.5  --color-text-muted / --color-bg  secondary text
+PASS  kds     7.58 >= 4.5  --color-text-muted / --color-surface  secondary text on card
+PASS  kds     6.55 >= 4.5  --color-text-muted / --color-surface-sunken  secondary text on sunken
+PASS  kds    14.55 >= 4.5  --color-price / --color-surface  price
+PASS  kds     9.91 >= 4.5  --color-on-action / --color-action  primary button label
+PASS  kds     11.6 >= 4.5  --color-on-action / --color-action-hover  primary button hover
+PASS  kds     6.65 >= 4.5  --color-action-soft-ink / --color-action-soft  selected chip
+PASS  kds     8.85 >= 3  --color-action / --color-surface  primary as non-text indicator
+PASS  kds     3.65 >= 3  --color-border-control / --color-surface  control boundary (1.4.11)
+PASS  kds    10.07 >= 3  --color-focus / --color-bg  focus ring on page
+PASS  kds     8.99 >= 3  --color-focus / --color-surface  focus ring on card
+PASS  kds     7.34 >= 4.5  --color-success-ink / --color-success-bg  status: success
+PASS  kds     7.38 >= 4.5  --color-warning-ink / --color-warning-bg  status: warning
+PASS  kds     7.56 >= 4.5  --color-danger-ink / --color-danger-bg  status: danger
+PASS  kds     6.77 >= 4.5  --color-info-ink / --color-info-bg  status: info
+PASS  kds     8.06 >= 4.5  --color-danger-ink / --color-surface  inline error text
+PASS  brand  Tojima 既定 (#174d3c) → fill=#174d3c on=#ffffff ink=#174d3c focus=#ffffff
+PASS  brand  假想・深海藍 (#1d3b6e) → fill=#1d3b6e on=#ffffff ink=#1d3b6e focus=#ffffff
+PASS  brand  假想・朱紅 (#b3261e) → fill=#b3261e on=#ffffff ink=#b3261e focus=#ffffff
+PASS  brand  假想・芥末黃 (#f2c94c) → fill=#f2c94c on=#1b2a23 ink=#716a33 focus=#1b2a23
+PASS  brand  假想・橘 (#e07a2f) → fill=#e07a2f on=#1b2a23 ink=#9b5e2b focus=#1b2a23
+fuzz: 2000 random store colours, 0 failures, 311 fills adjusted {}
+
+ALL CHECKS PASS

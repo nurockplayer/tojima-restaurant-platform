@@ -1,0 +1,1007 @@
+{
+  "label": "after",
+  "base": "http://127.0.0.1:8095",
+  "at": "2026-10-19T07:02:52.497Z",
+  "states": {
+    "guest-ja-375-01-menu": {
+      "audit": {
+        "total": 43,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-02-cart": {
+      "audit": {
+        "total": 47,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-stepper-present": true,
+    "guest-ja-375-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-375-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-375-04-preview": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-05-orders": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "d3f5b3e2259ae8d0f893",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "2px",
+        "w": 282.75,
+        "h": 64,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-375-06-order-read": {
+      "audit": {
+        "total": 8,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-01-menu": {
+      "audit": {
+        "total": 44,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-02-cart": {
+      "audit": {
+        "total": 48,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-stepper-present": true,
+    "guest-zh-375-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-375-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-375-04-preview": {
+      "audit": {
+        "total": 27,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-05-orders": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "6e81abc9032be5fd5858",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "2px",
+        "w": 282.75,
+        "h": 60,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-375-06-order-read": {
+      "audit": {
+        "total": 8,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-01-menu": {
+      "audit": {
+        "total": 46,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-02-cart": {
+      "audit": {
+        "total": 50,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-stepper-present": true,
+    "guest-ja-1280-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-1280-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-1280-04-preview": {
+      "audit": {
+        "total": 28,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-05-orders": {
+      "audit": {
+        "total": 28,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "8a4827b53ae43cd11871",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "2px",
+        "w": 323.75,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-1280-06-order-read": {
+      "audit": {
+        "total": 8,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-01-menu": {
+      "audit": {
+        "total": 46,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-02-cart": {
+      "audit": {
+        "total": 50,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-stepper-present": true,
+    "guest-zh-1280-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-1280-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-1280-04-preview": {
+      "audit": {
+        "total": 28,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-05-orders": {
+      "audit": {
+        "total": 28,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "c809affc76c0e30580da",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "2px",
+        "w": 285.59375,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-1280-06-order-read": {
+      "audit": {
+        "total": 8,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-320-menu": {
+      "audit": {
+        "total": 44,
+        "controls": 9,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 320,
+        "innerWidth": 320
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-01-tables": {
+      "audit": {
+        "total": 19,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-02-detail": {
+      "audit": {
+        "total": 20,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-dialog-opened-by": "現金（デモ・テスト専用）",
+    "staff-ja-1280-03-dialog": {
+      "audit": {
+        "total": 28,
+        "controls": 1,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 466,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-1280-accepted-order": true,
+    "staff-zh-1280-01-tables": {
+      "audit": {
+        "total": 19,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-02-detail": {
+      "audit": {
+        "total": 21,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-dialog-opened-by": "現金（展示測試專用）",
+    "staff-zh-1280-03-dialog": {
+      "audit": {
+        "total": 29,
+        "controls": 1,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 466,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-375-01-tables": {
+      "audit": {
+        "total": 18,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-02-detail": {
+      "audit": {
+        "total": 20,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-dialog-opened-by": "現金（デモ・テスト専用）",
+    "staff-ja-375-03-dialog": {
+      "audit": {
+        "total": 28,
+        "controls": 1,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 305,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-375-accepted-order": true,
+    "staff-zh-375-01-tables": {
+      "audit": {
+        "total": 18,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-02-detail": {
+      "audit": {
+        "total": 20,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-dialog-opened-by": "現金（展示測試專用）",
+    "staff-zh-375-03-dialog": {
+      "audit": {
+        "total": 28,
+        "controls": 1,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "-3px",
+        "w": 305,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(11, 95, 204)",
+          "offset": "-3px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "kds-ja-1280": {
+      "audit": {
+        "total": 19,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-ja-1280": {
+      "audit": {
+        "total": 76,
+        "controls": 37,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-focus-textarea": {
+      "focus": {
+        "tag": "TEXTAREA",
+        "cls": "",
+        "text": "DEMO / 歴史資料の参考価格・現行店",
+        "outline": "solid 3px rgb(11, 95, 204)",
+        "offset": "2px",
+        "w": 994,
+        "h": 56,
+        "clippedBy": null
+      }
+    },
+    "kds-zh-1280": {
+      "audit": {
+        "total": 19,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-zh-1280": {
+      "audit": {
+        "total": 76,
+        "controls": 37,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "kds-ja-375": {
+      "audit": {
+        "total": 18,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "catalog-ja-375": {
+      "audit": {
+        "total": 76,
+        "controls": 37,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "kds-zh-375": {
+      "audit": {
+        "total": 18,
+        "controls": 0,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "catalog-zh-375": {
+      "audit": {
+        "total": 76,
+        "controls": 37,
+        "fails": [],
+        "minFont": 12,
+        "small": []
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    }
+  }
+}

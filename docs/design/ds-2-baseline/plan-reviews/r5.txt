@@ -1,0 +1,5 @@
+[P3] Scope “only live region” to the two-track status — `ds-2-plan.md:45,64` uses this phrase, while `web/src/ui/App.tsx:793,802,809,813` also announces stale data, checkout loading, adjustments and refunds — Clarify that the new tracks must not duplicate the combined status announcement; preserve the existing sibling announcements.
+
+[P3] Preserve the explicit UX-3 assertion exception in the risk summary — `ds-2-plan.md:128` says cited assertions remain unchanged, while `:94` expressly replaces the required-option disabled-button assertion — Add “except the UX-3 assertion replacement specified in §4” to both language versions.
+
+VERDICT: PASS
