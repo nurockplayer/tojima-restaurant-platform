@@ -30,12 +30,11 @@ const ja = {
     backToMenu: 'メニューに戻る',
     synced: 'テーブルで共有中', syncWaiting: '同期待ち', syncAt: '時点', syncUnstable: '通信が不安定です',
     syncReason: '表示は {time} 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
-    table: 'テーブル', pending: '共有カート', committed: '注文履歴',
+    table: 'テーブル', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
-    menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中', emergencyHold: '販売停止中',
-    choose: '選択してください', required: '必須', noOption: '選択しない', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
-    remove: '削除', quantity: '数量', options: '追加オプション', latest: '共有カートを確認しました', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
+    menu: 'お品書き',
+    remove: '削除', latest: '共有カートを確認しました', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
     refresh: '共有内容を更新', preview: '金額を確認する', previewHint: '注文を確定する前に最新の金額と内容をご確認ください。',
     total: '税込合計', tax: '内消費税', method: '今回のお支払い方法', stripe: 'クレジットカード', cash: '店頭で現金',
     confirm: 'この内容で注文を確定', working: '送信中…', cancelPreview: 'カートへ戻る',
@@ -46,8 +45,7 @@ const ja = {
     checkoutUnavailable: 'カードのお支払いを準備できませんでした。注文は送信されていません。もう一度お試しください。', resumeError: '支払い画面を開けませんでした。状況を確認してから、スタッフにお声がけください。',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
-    error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
-    selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
+    error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。',
     operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。', amountUnavailable: '最新の注文内容と金額を確認できません。', changed: '店舗により注文内容が変更されました', cancelled: 'この注文は取り消されました', originalTotal: '注文確定時の税込合計', refundPending: '返金処理中', refundFailed: '返金を確認中です。店舗にお問い合わせください', refunded: '返金済み', refundedTotal: '返金合計',
     noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
 };
@@ -55,12 +53,11 @@ const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
     backToMenu: '返回菜單',
     synced: '同桌共用中', syncWaiting: '等待同步', syncAt: '的內容', syncUnstable: '網路連線不穩',
     syncReason: '目前顯示 {time} 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
-    table: '桌次', pending: '共用購物車', committed: '已送出訂單',
+    table: '桌次', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
-    menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中', emergencyHold: '暫停販售',
-    choose: '請選擇', required: '必選', noOption: '不選擇', add: '加入購物車', cartEmpty: '購物車目前是空的。',
-    remove: '移除', quantity: '數量', options: '加料選項', latest: '已確認共用購物車', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
+    menu: '菜單',
+    remove: '移除', latest: '已確認共用購物車', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
     refresh: '更新共用內容', preview: '確認金額', previewHint: '送出前請確認最新品項和金額。',
     total: '含稅總額', tax: '其中消費稅', method: '本次付款方式', stripe: '信用卡', cash: '店內現金',
     confirm: '確認並送出訂單', working: '送出中…', cancelPreview: '返回購物車',
@@ -71,8 +68,7 @@ const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
     checkoutUnavailable: '無法準備信用卡付款，訂單尚未送出。請再試一次。', resumeError: '無法開啟付款畫面，請先確認狀態或洽服務人員。',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
-    error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
-    selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
+    error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。',
     operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。', amountUnavailable: '目前無法確認最新訂單內容與金額。', changed: '店家已調整您的訂單', cancelled: '此訂單已取消', originalTotal: '送單時含稅總額', refundPending: '退款處理中', refundFailed: '退款確認中，請洽店家', refunded: '已退款', refundedTotal: '退款總額',
     noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
@@ -754,14 +750,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
     });
   };
 
-  const selectionsValid = (productKey: string, selected: OptionSelection[]) => {
-    const product = menuProducts.get(productKey);
-    return !!product?.selectable && product.option_groups.every((group) => {
-      const count = selected.filter((item) => item.group_key === group.key).length;
-      return count >= group.min_select && count <= group.max_select;
-    });
-  };
-
   const openPreview = async () => {
     if (!entry || !cart || cart.lines.length === 0 || busy || uncertain) return;
     setBusy(true); setError(''); clearPreview();
@@ -869,7 +857,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
           onChoose={(groupKey, optionKey, max) => { if (optionProduct) chooseOption(optionProduct.key, groupKey, optionKey, max); }}
           onClear={(groupKey) => { if (optionProduct) setSelections((current) => ({ ...current, [optionProduct.key]: (current[optionProduct.key] ?? []).filter((item) => item.group_key !== groupKey) })); }}
           onQuantity={(quantity) => { if (optionProduct) setQuantities((current) => ({ ...current, [optionProduct.key]: quantity })); }}
-          onAdd={() => { if (optionProduct && selectionsValid(optionProduct.key, selections[optionProduct.key] ?? [])) void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, optionProduct.key, quantities[optionProduct.key] ?? 1, selections[optionProduct.key] ?? [], key), () => setOptionProductKey(null)); }}>
+          onAdd={() => { if (optionProduct) void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, optionProduct.key, quantities[optionProduct.key] ?? 1, selections[optionProduct.key] ?? [], key), () => setOptionProductKey(null)); }}>
           {syncNotice(`${syncID}-option`)}
           {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
           {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}

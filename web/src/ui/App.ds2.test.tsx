@@ -27,14 +27,14 @@ const previewForMeal = {
 
 type FetchHandler = (url: string, init: RequestInit) => Response | Promise<Response>;
 
-function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart), options: { onCartRead?: FetchHandler } = {}) {
+function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart), options: { onCartRead?: FetchHandler; getMenu?: () => unknown } = {}) {
   const calls: Array<{ url: string; init: RequestInit }> = [];
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const url = String(input);
     calls.push({ url, init });
     if (url.endsWith('/v1/guest/tables/ds2-app')) return json(table);
     if (url.endsWith('/v1/guest/tables/ds2-app/join')) return json(grant);
-    if (url.endsWith('/v1/guest/tables/ds2-app/menu?amounts=string')) return json(menu);
+    if (url.endsWith('/v1/guest/tables/ds2-app/menu?amounts=string')) return json(options.getMenu?.() ?? menu);
     if (url.endsWith('/v1/guest/sessions/session-1/cart/lines') && init.method === 'POST') return onAdd(url, init);
     if (url.endsWith('/v1/guest/sessions/session-1/cart')) return options.onCartRead ? options.onCartRead(url, init) : json(emptyCart);
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
@@ -145,6 +145,55 @@ afterEach(async () => {
 });
 
 describe('guest App option sheet acceptance', () => {
+  it.each([
+    ['ja', 'max'], ['zh', 'max'], ['ja', 'min'], ['zh', 'min'], ['ja', 'unavailable'], ['zh', 'unavailable'],
+  ] as const)('explains a refreshed %s %s option constraint before allowing a corrected add', async (locale, change) => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Date'] });
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    let refreshed = false;
+    const { calls } = installGuestFetch(() => json({ ...cartWithMeal, version: 1 }), { getMenu: () => ({ ...menu,
+      categories: menu.categories.map((category) => ({ ...category, products: category.products.map((product) => ({ ...product,
+        option_groups: product.option_groups.map((group) => ({ ...group,
+          min_select: refreshed && change === 'min' ? 1 : 0,
+          max_select: refreshed && change === 'max' ? 1 : 2,
+          options: group.options.map((option) => ({ ...option, availability: refreshed && change === 'unavailable' && option.key === 'regular' ? 'PAUSED' : 'AVAILABLE' })),
+        })),
+      })) })),
+    }) });
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    render(<App />);
+    await act(async () => { for (let index = 0; index < 30; index++) await Promise.resolve(); });
+    if (locale === 'zh') await user.click(screen.getByRole('button', { name: '繁中' }));
+    const addName = locale === 'ja' ? 'カートに追加' : '加入購物車';
+    await user.click(screen.getByRole('button', { name: addName }));
+    let dialog = screen.getByRole('dialog');
+    if (change !== 'min') await user.click(within(dialog).getByRole('checkbox', { name: /普通/ }));
+    if (change === 'max') await user.click(within(dialog).getByRole('checkbox', { name: /大盛り/ }));
+    refreshed = true;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    dialog = screen.getByRole('dialog');
+    const add = within(dialog).getByRole('button', { name: addName });
+    expect(add.hasAttribute('disabled')).toBe(false);
+    await user.click(add);
+    const group = within(dialog).getByRole('group', { name: /ご飯の量/ });
+    expect(group.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(group.getAttribute('aria-describedby')!)?.getAttribute('role')).toBe('alert');
+    const error = change === 'min'
+      ? locale === 'ja' ? '必須オプションを選択してください。' : '請選擇必選項目。'
+      : locale === 'ja' ? '選択内容を確認し、選び直してください。' : '請檢查選項並重新選擇。';
+    expect(within(group).getByRole('alert').textContent).toBe(error);
+    expect(document.activeElement).toBe(within(group).getByRole(change === 'max' ? 'radio' : 'checkbox', { name: change === 'unavailable' ? /大盛り/ : /普通/ }));
+    expect(calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'))).toHaveLength(0);
+    if (change !== 'min') await user.click(within(group).getByRole('button', { name: locale === 'ja' ? '選び直す' : '重新選擇' }));
+    await user.click(within(group).getByRole(change === 'max' ? 'radio' : 'checkbox', { name: change === 'unavailable' ? /大盛り/ : /普通/ }));
+    await user.click(add);
+    await act(async () => { await vi.advanceTimersByTimeAsync(64); });
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const requests = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
+    expect(requests).toHaveLength(1);
+    expect(JSON.parse(String(requests[0]!.init.body)).options).toEqual([{ group_key: 'rice', option_key: change === 'unavailable' ? 'large' : 'regular' }]);
+  });
+
   it('does not reopen the option sheet when a later menu refresh restores the product', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Date'] });
     window.history.replaceState({}, '', '/?table=ds2-app');
