@@ -248,7 +248,8 @@ describe('guest app mount', () => {
     });
 
     await openCartSheet(host!);
-    expect(host.textContent).toContain('東島');
+    expect(host.textContent).toContain('Powered by Tojima');
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
     expect(document.body.textContent).toContain('共有カート');
     expect(host.textContent).toContain('お食事');
     expect(document.body.textContent).toContain('Previously added item');

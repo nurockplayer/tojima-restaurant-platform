@@ -150,7 +150,7 @@ export function OrderPage({ demo = false }: DemoSurfaceProps) {
     return () => window.removeEventListener('hashchange', changed);
   }, []);
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
-  return <main><meta name="referrer" content="no-referrer" /><button type="button" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button>
+  return <main className={styles.page}><meta name="referrer" content="no-referrer" /><header className={styles.header}><button className={styles.language} type="button" lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button></header>
     <DemoBanner demo={demo} locale={locale} />
     {grant ? <OrderStatusView grant={grant} locale={locale} onRead={rememberOrderGrant} /> : <p role="alert">{copy[locale].invalid}</p>}
     <MyOrders locale={locale} />

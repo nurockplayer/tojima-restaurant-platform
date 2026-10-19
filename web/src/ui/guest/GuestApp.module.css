@@ -1,7 +1,7 @@
 .shell {
   max-width: 720px;
   margin: 0 auto;
-  padding: 0 var(--space-gutter);
+  padding: 0 var(--space-gutter) calc(var(--size-cartbar) + var(--ref-space-8) + env(safe-area-inset-bottom));
   font-family: var(--font-sans);
   font-size: var(--text-body);
 }
@@ -14,15 +14,36 @@
   padding-block: var(--ref-space-3);
 }
 
+.identity {
+  min-width: 0;
+}
+
 .topbar strong,
 .topbar span {
   display: block;
   overflow-wrap: anywhere;
 }
 
+.topbar strong {
+  font-size: var(--text-body);
+  font-weight: 700;
+  color: var(--color-text);
+}
+
+.topbar .tableLabel {
+  font-size: var(--text-title);
+  font-weight: 700;
+}
+
+.footer {
+  padding-block: var(--ref-space-6);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  text-align: center;
+}
+
 .workspace {
   min-width: 0;
-  padding-bottom: calc(var(--size-cartbar) + var(--ref-space-8) + env(safe-area-inset-bottom));
 }
 
 .welcome {

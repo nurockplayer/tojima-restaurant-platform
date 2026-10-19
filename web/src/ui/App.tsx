@@ -29,7 +29,7 @@ const ja = {
     backToMenu: 'メニューに戻る',
     synced: 'テーブルで共有中', syncWaiting: '同期待ち', syncAt: '時点', syncUnstable: '通信が不安定です',
     syncReason: '表示は {time} 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
-    brand: '東島', subtitle: 'TABLE ORDER', table: 'テーブル', pending: '共有カート', committed: '注文履歴',
+    table: 'テーブル', pending: '共有カート', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
     menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中', emergencyHold: '販売停止中',
@@ -54,7 +54,7 @@ const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
     backToMenu: '返回菜單',
     synced: '同桌共用中', syncWaiting: '等待同步', syncAt: '的內容', syncUnstable: '網路連線不穩',
     syncReason: '目前顯示 {time} 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
-    brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
+    table: '桌次', pending: '共用購物車', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
     menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中', emergencyHold: '暫停販售',
@@ -800,7 +800,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const visibleError = error === 'session_expired' ? t.closed : error;
   if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <section className="entry-card" aria-labelledby="entry-title">
-      <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
+      <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
       {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
@@ -859,7 +859,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         </div>}
       </>}
 
-      {tab === 'orders' && <section className={guestStyles.orders}><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2 ref={orderHeading} tabIndex={-1}>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+      {tab === 'orders' && <section className={guestStyles.orders}><div className="section-heading"><div><h2 ref={orderHeading} tabIndex={-1}>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
         {notice && <p role="status">{notice}</p>}
         {operationsStale && <p className="notice" role="status">{guestOperations ? t.operationsStale : t.amountUnavailable}</p>}
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" data-order-card={order.order_id} key={order.order_id}>
@@ -888,11 +888,10 @@ export function App({ demo = false }: DemoSurfaceProps) {
           <small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
         </article>; })}
       </section>}
-      <footer className="workspace-footer">{t.brand} <span>·</span> {locale === 'ja' ? 'おいしい時間を、みんなで。' : '與同桌一起享用好味道。'}</footer>
     </div>
   </Shell>;
 }
 
 function Shell({ children, demo = false, locale, setLocale, t, tableLabel }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string }) {
-  return <main className={guestStyles.shell} data-surface="guest"><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div>{demo && <strong>{demoStoreName}</strong>}<span>{tableLabel}</span></div><button className={guestStyles.navigation} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /></main>;
+  return <main className={guestStyles.shell} data-surface="guest"><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{demo && <strong data-store-slot="demo">{demoStoreName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
 }
