@@ -1,0 +1,546 @@
+{
+  "label": "baseline-3c47f7a",
+  "base": "http://127.0.0.1:8093",
+  "at": "2026-10-19T07:50:14.332Z",
+  "states": {
+    "guest-ja-320": {
+      "viewport": "320x700",
+      "topbarBrand": "東 東島 TABLE ORDER",
+      "h1": "テーブル 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 68,
+        "h": 68,
+        "w": 286
+      },
+      "demoBanner": {
+        "top": 68,
+        "bottom": 186,
+        "h": 118,
+        "w": 286
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 225,
+        "bottom": 333,
+        "h": 108,
+        "w": 286
+      },
+      "tabs": {
+        "top": 333,
+        "bottom": 367,
+        "h": 34,
+        "w": 286
+      },
+      "cartPanel": {
+        "top": 395,
+        "bottom": 696,
+        "h": 301,
+        "w": 286
+      },
+      "menuSection": {
+        "top": 716,
+        "bottom": 3196,
+        "h": 2480,
+        "w": 286
+      },
+      "firstCard": {
+        "top": 832,
+        "bottom": 1185,
+        "h": 353,
+        "w": 286
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 0,
+      "cardsPartlyInFirstViewport": 0,
+      "cardHeight": {
+        "min": 207,
+        "median": 226,
+        "max": 353
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [],
+      "scrollHeight": 3577,
+      "scrollWidth": 320,
+      "localeSwitch": {
+        "w": 65,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "お品書き",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · おいしい時間を、みんなで。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-ja-375": {
+      "viewport": "375x812",
+      "topbarBrand": "東 東島 TABLE ORDER",
+      "h1": "テーブル 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 68,
+        "h": 68,
+        "w": 341
+      },
+      "demoBanner": {
+        "top": 68,
+        "bottom": 163,
+        "h": 95,
+        "w": 341
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 202,
+        "bottom": 310,
+        "h": 108,
+        "w": 341
+      },
+      "tabs": {
+        "top": 310,
+        "bottom": 344,
+        "h": 34,
+        "w": 341
+      },
+      "cartPanel": {
+        "top": 372,
+        "bottom": 673,
+        "h": 301,
+        "w": 341
+      },
+      "menuSection": {
+        "top": 693,
+        "bottom": 3099,
+        "h": 2406,
+        "w": 341
+      },
+      "firstCard": {
+        "top": 809,
+        "bottom": 1144,
+        "h": 335,
+        "w": 341
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 0,
+      "cardsPartlyInFirstViewport": 1,
+      "cardHeight": {
+        "min": 207,
+        "median": 207,
+        "max": 335
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [],
+      "scrollHeight": 3480,
+      "scrollWidth": 375,
+      "localeSwitch": {
+        "w": 65,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "お品書き",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · おいしい時間を、みんなで。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-ja-1280": {
+      "viewport": "1280x900",
+      "topbarBrand": "東 東島 TABLE ORDER",
+      "h1": "テーブル 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 82,
+        "h": 82,
+        "w": 1200
+      },
+      "demoBanner": {
+        "top": 82,
+        "bottom": 131,
+        "h": 49,
+        "w": 1200
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 180,
+        "bottom": 302,
+        "h": 122,
+        "w": 1200
+      },
+      "tabs": {
+        "top": 302,
+        "bottom": 336,
+        "h": 34,
+        "w": 801
+      },
+      "cartPanel": {
+        "top": 302,
+        "bottom": 693,
+        "h": 391,
+        "w": 365
+      },
+      "menuSection": {
+        "top": 361,
+        "bottom": 1831,
+        "h": 1470,
+        "w": 801
+      },
+      "firstCard": {
+        "top": 477,
+        "bottom": 812,
+        "h": 335,
+        "w": 394
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 2,
+      "cardsPartlyInFirstViewport": 4,
+      "cardHeight": {
+        "min": 207,
+        "median": 207,
+        "max": 335
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [
+        "ASIDE.cart-panel "
+      ],
+      "scrollHeight": 2187,
+      "scrollWidth": 1280,
+      "localeSwitch": {
+        "w": 65,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "お品書き",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · おいしい時間を、みんなで。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-zh-320": {
+      "viewport": "320x700",
+      "topbarBrand": "東 東島 桌邊點餐",
+      "h1": "桌次 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 68,
+        "h": 68,
+        "w": 286
+      },
+      "demoBanner": {
+        "top": 68,
+        "bottom": 176,
+        "h": 108,
+        "w": 286
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 215,
+        "bottom": 318,
+        "h": 103,
+        "w": 286
+      },
+      "tabs": {
+        "top": 318,
+        "bottom": 350,
+        "h": 32,
+        "w": 286
+      },
+      "cartPanel": {
+        "top": 378,
+        "bottom": 673,
+        "h": 295,
+        "w": 286
+      },
+      "menuSection": {
+        "top": 693,
+        "bottom": 3126,
+        "h": 2433,
+        "w": 286
+      },
+      "firstCard": {
+        "top": 804,
+        "bottom": 1151,
+        "h": 347,
+        "w": 286
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 0,
+      "cardsPartlyInFirstViewport": 0,
+      "cardHeight": {
+        "min": 205,
+        "median": 224,
+        "max": 347
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [],
+      "scrollHeight": 3453,
+      "scrollWidth": 320,
+      "localeSwitch": {
+        "w": 77,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "菜單",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · 與同桌一起享用好味道。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-zh-375": {
+      "viewport": "375x812",
+      "topbarBrand": "東 東島 桌邊點餐",
+      "h1": "桌次 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 68,
+        "h": 68,
+        "w": 341
+      },
+      "demoBanner": {
+        "top": 68,
+        "bottom": 155,
+        "h": 87,
+        "w": 341
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 194,
+        "bottom": 297,
+        "h": 103,
+        "w": 341
+      },
+      "tabs": {
+        "top": 297,
+        "bottom": 329,
+        "h": 32,
+        "w": 341
+      },
+      "cartPanel": {
+        "top": 357,
+        "bottom": 652,
+        "h": 295,
+        "w": 341
+      },
+      "menuSection": {
+        "top": 672,
+        "bottom": 2993,
+        "h": 2321,
+        "w": 341
+      },
+      "firstCard": {
+        "top": 783,
+        "bottom": 1112,
+        "h": 329,
+        "w": 341
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 0,
+      "cardsPartlyInFirstViewport": 1,
+      "cardHeight": {
+        "min": 205,
+        "median": 205,
+        "max": 329
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [],
+      "scrollHeight": 3321,
+      "scrollWidth": 375,
+      "localeSwitch": {
+        "w": 77,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "菜單",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · 與同桌一起享用好味道。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-zh-1280": {
+      "viewport": "1280x900",
+      "topbarBrand": "東 東島 桌邊點餐",
+      "h1": "桌次 05",
+      "topbar": {
+        "top": 0,
+        "bottom": 82,
+        "h": 82,
+        "w": 1200
+      },
+      "demoBanner": {
+        "top": 82,
+        "bottom": 129,
+        "h": 47,
+        "w": 1200
+      },
+      "demoBanners": 1,
+      "welcome": {
+        "top": 178,
+        "bottom": 295,
+        "h": 117,
+        "w": 1200
+      },
+      "tabs": {
+        "top": 295,
+        "bottom": 327,
+        "h": 32,
+        "w": 801
+      },
+      "cartPanel": {
+        "top": 295,
+        "bottom": 680,
+        "h": 385,
+        "w": 365
+      },
+      "menuSection": {
+        "top": 352,
+        "bottom": 1801,
+        "h": 1449,
+        "w": 801
+      },
+      "firstCard": {
+        "top": 463,
+        "bottom": 792,
+        "h": 329,
+        "w": 394
+      },
+      "cardsTotal": 9,
+      "cardsFullyInFirstViewport": 2,
+      "cardsPartlyInFirstViewport": 4,
+      "cardHeight": {
+        "min": 205,
+        "median": 205,
+        "max": 329
+      },
+      "categories": 3,
+      "cardsWithOptions": 1,
+      "requiredGroups": 1,
+      "disabledAddButtons": 1,
+      "images": 0,
+      "stickyOrFixed": [
+        "ASIDE.cart-panel "
+      ],
+      "scrollHeight": 2150,
+      "scrollWidth": 1280,
+      "localeSwitch": {
+        "w": 77,
+        "h": 44
+      },
+      "poweredByTojima": false,
+      "platformWordmarks": 3,
+      "eyebrows": [
+        "菜單",
+        "TOJIMA KITCHEN",
+        "OPEN TABLE"
+      ],
+      "footer": "東島 · 與同桌一起享用好味道。",
+      "fontFamily": "\"DM Sans\", \"Noto Sans JP\", \"Noto Sans TC\", sans-serif",
+      "tabsToFirstEnabledAdd": 8,
+      "tabsToPreviewButton": null
+    },
+    "guest-js": [
+      {
+        "name": "index-BUErHDFo.js",
+        "decoded": 223741,
+        "transfer": 300
+      },
+      {
+        "name": "DemoBanner-CrpR7Quv.js",
+        "decoded": 3703,
+        "transfer": 300
+      },
+      {
+        "name": "App-D-UN90aw.js",
+        "decoded": 39032,
+        "transfer": 300
+      },
+      {
+        "name": "cart-state-Ctlef6I6.js",
+        "decoded": 5419,
+        "transfer": 300
+      },
+      {
+        "name": "OrderRead-BnueXQ7w.js",
+        "decoded": 43517,
+        "transfer": 300
+      }
+    ],
+    "order-read-375": {
+      "text": "繁體中文",
+      "cls": "",
+      "w": 76,
+      "h": 29,
+      "fontSize": "15px",
+      "border": "2px outset rgb(0, 0, 0)",
+      "bg": "rgb(239, 239, 239)",
+      "radius": "0px",
+      "mainPadding": "0px",
+      "scrollWidth": 375
+    },
+    "order-read-1280": {
+      "text": "繁體中文",
+      "cls": "",
+      "w": 76,
+      "h": 29,
+      "fontSize": "15px",
+      "border": "2px outset rgb(0, 0, 0)",
+      "bg": "rgb(239, 239, 239)",
+      "radius": "0px",
+      "mainPadding": "0px",
+      "scrollWidth": 1280
+    },
+    "orders-ja-375": {
+      "activeTab": "注文履歴1",
+      "status": [
+        "店員の受付待ち · 未払い"
+      ],
+      "checkoutPanels": 0,
+      "method": "現金（デモ・テスト専用）",
+      "kicker": "スタッフの確認待ち · #1",
+      "orderLinks": 1
+    }
+  }
+}

@@ -1,0 +1,6834 @@
+{
+  "label": "before",
+  "base": "http://127.0.0.1:8094",
+  "at": "2026-10-19T07:02:52.510Z",
+  "states": {
+    "guest-ja-375-01-menu": {
+      "audit": {
+        "total": 48,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "数量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須オプションを選択してください。",
+            "cls": "field-hint",
+            "fg": "rgb(217, 121, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 2.99,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "カートはまだ空です。",
+            "cls": "",
+            "fg": "rgb(119, 132, 122)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.77,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "同じテーブルと共有中",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "10px 0",
+          "10px 0",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 注文できます",
+          "10px ごはんの量 必須",
+          "8.33333px 必須",
+          "10px 普通",
+          "9px ¥20",
+          "10px 数量12345678910",
+          "10px カートに追加",
+          "10px 必須オプションを選択してください。",
+          "10px カートに追加",
+          "9px OPEN TABLE",
+          "9px 同じテーブルと共有中",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-02-cart": {
+      "audit": {
+        "total": 53,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "数量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文できます",
+            "cls": "",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通",
+            "cls": "cart-selected-options",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "同じテーブルと共有中",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "10px 2",
+          "10px 0",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 注文できます",
+          "10px ごはんの量 必須",
+          "8.33333px 必須",
+          "10px 普通",
+          "9px ¥20",
+          "10px 数量12345678910",
+          "10px カートに追加",
+          "9px OPEN TABLE",
+          "9px 注文できます",
+          "10px 削除",
+          "11px ¥960",
+          "10px 1",
+          "9px ごはんの量: 普通",
+          "9px 普通",
+          "9px 同じテーブルと共有中",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-stepper-present": true,
+    "guest-ja-375-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-ja-375-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-ja-375-04-preview": {
+      "audit": {
+        "total": 31,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "金額を確認する",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文を確定する前に最新の金額と内容をご確認ください。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥960 × 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "＋ 普通 · ¥20 × 1",
+            "cls": "quote-option",
+            "fg": "rgb(122, 134, 126)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.65,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "内消費税",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金（デモ・テスト専用）",
+            "cls": "payment-note",
+            "fg": "rgb(116, 128, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.97,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "10px 3",
+          "10px 0",
+          "9px 金額を確認する",
+          "11px 注文を確定する前に最新の金額と内容をご確認ください。",
+          "11px 塩唐揚げ定食",
+          "9px ¥960 × 2",
+          "9px ＋ 普通 · ¥20 × 1",
+          "10px 内消費税",
+          "9px 現金（デモ・テスト専用）",
+          "9px 現金（デモ・テスト専用）",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-05-orders": {
+      "audit": {
+        "total": 29,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "共有カート0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "スタッフの確認待ち · #1",
+            "cls": "order-kicker",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2026/10/19 16:03:10",
+            "cls": "",
+            "fg": "rgb(141, 152, 144)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.88,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "10px 0",
+          "10px 1",
+          "9px スタッフの確認待ち · #1",
+          "9px 現金（デモ・テスト専用）",
+          "10px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 税込合計",
+          "9px 2026/10/19 16:03:10",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-ja-375-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "b2f630265ddab2b3d693",
+        "outline": "auto 1px rgb(0, 95, 204)",
+        "offset": "1px",
+        "w": 282.75,
+        "h": 64,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-375-06-order-read": {
+      "audit": {
+        "total": 6,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 9,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 普通"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": false
+    },
+    "guest-zh-375-01-menu": {
+      "audit": {
+        "total": 49,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單1",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "1",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必選",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "數量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "請選擇必選項目。",
+            "cls": "field-hint",
+            "fg": "rgb(217, 121, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 2.99,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "購物車目前是空的。",
+            "cls": "",
+            "fg": "rgb(119, 132, 122)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.77,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "與同桌即時共用",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "10px 0",
+          "10px 1",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 可點選",
+          "10px ごはんの量 必選",
+          "8.33333px 必選",
+          "10px 普通",
+          "9px ¥20",
+          "10px 數量12345678910",
+          "10px 加入購物車",
+          "10px 請選擇必選項目。",
+          "10px 加入購物車",
+          "9px OPEN TABLE",
+          "9px 與同桌即時共用",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-02-cart": {
+      "audit": {
+        "total": 54,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單1",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "1",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必選",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "數量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "可點選",
+            "cls": "",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通",
+            "cls": "cart-selected-options",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "與同桌即時共用",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "10px 2",
+          "10px 1",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 可點選",
+          "10px ごはんの量 必選",
+          "8.33333px 必選",
+          "10px 普通",
+          "9px ¥20",
+          "10px 數量12345678910",
+          "10px 加入購物車",
+          "9px OPEN TABLE",
+          "9px 可點選",
+          "10px 移除",
+          "11px ¥960",
+          "10px 1",
+          "9px ごはんの量: 普通",
+          "9px 普通",
+          "9px 與同桌即時共用",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-stepper-present": true,
+    "guest-zh-375-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-zh-375-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-zh-375-04-preview": {
+      "audit": {
+        "total": 32,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單1",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "1",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "確認金額",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "送出前請確認最新品項和金額。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥960 × 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "＋ 普通 · ¥20 × 1",
+            "cls": "quote-option",
+            "fg": "rgb(122, 134, 126)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.65,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "其中消費稅",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金（展示測試專用）",
+            "cls": "payment-note",
+            "fg": "rgb(116, 128, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.97,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "10px 3",
+          "10px 1",
+          "9px 確認金額",
+          "11px 送出前請確認最新品項和金額。",
+          "11px 塩唐揚げ定食",
+          "9px ¥960 × 2",
+          "9px ＋ 普通 · ¥20 × 1",
+          "10px 其中消費稅",
+          "9px 現金（展示測試專用）",
+          "9px 現金（展示測試專用）",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-05-orders": {
+      "audit": {
+        "total": 29,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "共用購物車0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "等待店員確認 · #1",
+            "cls": "order-kicker",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2026/10/19 下午4:03:10",
+            "cls": "",
+            "fg": "rgb(141, 152, 144)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.88,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "10px 0",
+          "10px 2",
+          "9px 等待店員確認 · #1",
+          "9px 現金（展示測試專用）",
+          "10px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 含稅總額",
+          "9px 2026/10/19 下午4:03:10",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "guest-zh-375-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "dd399e42951cfedbdd1d",
+        "outline": "auto 1px rgb(0, 95, 204)",
+        "offset": "1px",
+        "w": 282.75,
+        "h": 60,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-375-06-order-read": {
+      "audit": {
+        "total": 6,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 9,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 普通"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": false
+    },
+    "guest-ja-1280-01-menu": {
+      "audit": {
+        "total": 51,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴2",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "数量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須オプションを選択してください。",
+            "cls": "field-hint",
+            "fg": "rgb(217, 121, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 2.99,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "カートはまだ空です。",
+            "cls": "",
+            "fg": "rgb(119, 132, 122)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.77,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "同じテーブルと共有中",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "11px 最新の共有内容",
+          "10px 0",
+          "10px 2",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 注文できます",
+          "10px ごはんの量 必須",
+          "8.33333px 必須",
+          "10px 普通",
+          "9px ¥20",
+          "10px 数量12345678910",
+          "10px カートに追加",
+          "10px 必須オプションを選択してください。",
+          "10px カートに追加",
+          "9px OPEN TABLE",
+          "9px 同じテーブルと共有中",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-02-cart": {
+      "audit": {
+        "total": 56,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴2",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "数量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文できます",
+            "cls": "",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通",
+            "cls": "cart-selected-options",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "同じテーブルと共有中",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "11px 最新の共有内容",
+          "10px 2",
+          "10px 2",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 注文できます",
+          "10px ごはんの量 必須",
+          "8.33333px 必須",
+          "10px 普通",
+          "9px ¥20",
+          "10px 数量12345678910",
+          "10px カートに追加",
+          "9px OPEN TABLE",
+          "9px 注文できます",
+          "10px 削除",
+          "11px ¥960",
+          "10px 1",
+          "9px ごはんの量: 普通",
+          "9px 普通",
+          "9px 同じテーブルと共有中",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-stepper-present": true,
+    "guest-ja-1280-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-ja-1280-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-ja-1280-04-preview": {
+      "audit": {
+        "total": 33,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴2",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "金額を確認する",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文を確定する前に最新の金額と内容をご確認ください。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥960 × 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "＋ 普通 · ¥20 × 1",
+            "cls": "quote-option",
+            "fg": "rgb(122, 134, 126)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.65,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "内消費税",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金（デモ・テスト専用）",
+            "cls": "payment-note",
+            "fg": "rgb(116, 128, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.97,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "11px 最新の共有内容",
+          "10px 3",
+          "10px 2",
+          "9px 金額を確認する",
+          "11px 注文を確定する前に最新の金額と内容をご確認ください。",
+          "11px 塩唐揚げ定食",
+          "9px ¥960 × 2",
+          "9px ＋ 普通 · ¥20 × 1",
+          "10px 内消費税",
+          "9px 現金（デモ・テスト専用）",
+          "9px 現金（デモ・テスト専用）",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-05-orders": {
+      "audit": {
+        "total": 31,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "共有カート0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "スタッフの確認待ち · #1",
+            "cls": "order-kicker",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2026/10/19 16:03:10",
+            "cls": "",
+            "fg": "rgb(141, 152, 144)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.88,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "11px 最新の共有内容",
+          "10px 0",
+          "10px 3",
+          "9px スタッフの確認待ち · #1",
+          "9px 現金（デモ・テスト専用）",
+          "10px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 税込合計",
+          "9px 2026/10/19 16:03:10",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-ja-1280-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "072712d409a857f8ce1f",
+        "outline": "auto 1px rgb(0, 95, 204)",
+        "offset": "1px",
+        "w": 320.65625,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-ja-1280-06-order-read": {
+      "audit": {
+        "total": 6,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 9,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 普通"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": false
+    },
+    "guest-zh-1280-01-menu": {
+      "audit": {
+        "total": 51,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單3",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "3",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必選",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "數量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "請選擇必選項目。",
+            "cls": "field-hint",
+            "fg": "rgb(217, 121, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 2.99,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "購物車目前是空的。",
+            "cls": "",
+            "fg": "rgb(119, 132, 122)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.77,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "與同桌即時共用",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "11px 最新共用內容",
+          "10px 0",
+          "10px 3",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 可點選",
+          "10px ごはんの量 必選",
+          "8.33333px 必選",
+          "10px 普通",
+          "9px ¥20",
+          "10px 數量12345678910",
+          "10px 加入購物車",
+          "10px 請選擇必選項目。",
+          "10px 加入購物車",
+          "9px OPEN TABLE",
+          "9px 與同桌即時共用",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-02-cart": {
+      "audit": {
+        "total": 56,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單3",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "3",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必選",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "數量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "可點選",
+            "cls": "",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通",
+            "cls": "cart-selected-options",
+            "fg": "rgb(87, 130, 103)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 4.22,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "與同桌即時共用",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "11px 最新共用內容",
+          "10px 2",
+          "10px 3",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 可點選",
+          "10px ごはんの量 必選",
+          "8.33333px 必選",
+          "10px 普通",
+          "9px ¥20",
+          "10px 數量12345678910",
+          "10px 加入購物車",
+          "9px OPEN TABLE",
+          "9px 可點選",
+          "10px 移除",
+          "11px ¥960",
+          "10px 1",
+          "9px ごはんの量: 普通",
+          "9px 普通",
+          "9px 與同桌即時共用",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-stepper-present": true,
+    "guest-zh-1280-focus-stepper": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "＋",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-zh-1280-focus-stepper-minus": {
+      "focus": {
+        "tag": "BUTTON",
+        "cls": "",
+        "text": "−",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 44,
+        "h": 44,
+        "clippedBy": "stepper"
+      }
+    },
+    "guest-zh-1280-04-preview": {
+      "audit": {
+        "total": 33,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "已送出訂單3",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "3",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "確認金額",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "送出前請確認最新品項和金額。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥960 × 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "＋ 普通 · ¥20 × 1",
+            "cls": "quote-option",
+            "fg": "rgb(122, 134, 126)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.65,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "其中消費稅",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金（展示測試專用）",
+            "cls": "payment-note",
+            "fg": "rgb(116, 128, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.97,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "11px 最新共用內容",
+          "10px 3",
+          "10px 3",
+          "9px 確認金額",
+          "11px 送出前請確認最新品項和金額。",
+          "11px 塩唐揚げ定食",
+          "9px ¥960 × 2",
+          "9px ＋ 普通 · ¥20 × 1",
+          "10px 其中消費稅",
+          "9px 現金（展示測試專用）",
+          "9px 現金（展示測試專用）",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-05-orders": {
+      "audit": {
+        "total": 31,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "桌邊點餐",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "透過桌邊 QR 加入",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "共用購物車0",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "0",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "等待店員確認 · #1",
+            "cls": "order-kicker",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2026/10/19 下午4:03:10",
+            "cls": "",
+            "fg": "rgb(141, 152, 144)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.88,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 與同桌一起享用好味道。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 桌邊點餐",
+          "9px 菜單",
+          "11px 最新共用內容",
+          "10px 0",
+          "10px 4",
+          "9px 等待店員確認 · #1",
+          "9px 現金（展示測試專用）",
+          "10px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 含稅總額",
+          "9px 2026/10/19 下午4:03:10",
+          "10px 東島 · 與同桌一起享用好味道。",
+          "10px ·"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "guest-zh-1280-focus-link": {
+      "focus": {
+        "tag": "A",
+        "cls": "",
+        "text": "c4745c8bde960e65b480",
+        "outline": "auto 1px rgb(0, 95, 204)",
+        "offset": "1px",
+        "w": 295.96875,
+        "h": 44,
+        "clippedBy": null
+      }
+    },
+    "guest-zh-1280-06-order-read": {
+      "audit": {
+        "total": 6,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "普通",
+            "cls": "order-option",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 9,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 普通"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": false
+    },
+    "guest-ja-320-menu": {
+      "audit": {
+        "total": 49,
+        "controls": 9,
+        "fails": [
+          {
+            "text": "TABLE ORDER",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "お品書き",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "テーブルの QR から参加",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "注文履歴4",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "4",
+            "cls": "",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(233, 237, 231)",
+            "size": 10,
+            "ratio": 2.81,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "9",
+            "cls": "menu-count",
+            "fg": "rgb(120, 134, 125)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 11,
+            "ratio": 3.46,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 11,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須",
+            "cls": "",
+            "fg": "rgb(179, 106, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 8.33333,
+            "ratio": 4,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "¥20",
+            "cls": "",
+            "fg": "rgb(129, 144, 135)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.23,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "数量12345678910",
+            "cls": "quantity-select",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "必須オプションを選択してください。",
+            "cls": "field-hint",
+            "fg": "rgb(217, 121, 67)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 2.99,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN TABLE",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "カートはまだ空です。",
+            "cls": "",
+            "fg": "rgb(119, 132, 122)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.77,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "同じテーブルと共有中",
+            "cls": "sync-caption",
+            "fg": "rgb(138, 150, 142)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 2.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · おいしい時間を、みんなで。",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 8.33333,
+        "small": [
+          "9px TABLE ORDER",
+          "9px お品書き",
+          "10px 0",
+          "10px 4",
+          "11px 9",
+          "11px DEMO / 歴史資料の参考価格・現行店内価格未確認 — 2",
+          "9px 注文できます",
+          "10px ごはんの量 必須",
+          "8.33333px 必須",
+          "10px 普通",
+          "9px ¥20",
+          "10px 数量12345678910",
+          "10px カートに追加",
+          "10px 必須オプションを選択してください。",
+          "10px カートに追加",
+          "9px OPEN TABLE",
+          "9px 同じテーブルと共有中",
+          "10px 東島 · おいしい時間を、みんなで。",
+          "10px ·",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 1"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 320,
+        "innerWidth": 320
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-01-tables": {
+      "audit": {
+        "total": 21,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "QR参加",
+            "cls": "table-mode",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "未収現金¥11,600",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "9px 利用中",
+          "10px QR参加",
+          "10px 未収現金¥11,600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-02-detail": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px OPEN",
+          "10px 現金（デモ・テスト専用）",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付確認中",
+          "11px 受付確認中",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-dialog-opened-by": "現金（デモ・テスト専用）",
+    "staff-ja-1280-03-dialog": {
+      "audit": {
+        "total": 34,
+        "controls": 1,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金精算（デモ・テスト専用）",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px OPEN",
+          "10px 現金（デモ・テスト専用）",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付確認中",
+          "11px 受付確認中",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 現金精算（デモ・テスト専用）",
+          "11px テーブル 05 · #3 · ¥2,900",
+          "11px お預かり金額",
+          "11px [control] 11600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-ja-1280-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 466,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-1280-accepted-order": true,
+    "staff-zh-1280-01-tables": {
+      "audit": {
+        "total": 21,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "掃碼加入",
+            "cls": "table-mode",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待收現金¥11,600",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "9px 用餐中",
+          "10px 掃碼加入",
+          "10px 待收現金¥11,600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-02-detail": {
+      "audit": {
+        "total": 27,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px OPEN",
+          "10px 現金（展示測試專用）",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 待店員確認",
+          "11px 待店員確認"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-dialog-opened-by": "現金（展示測試專用）",
+    "staff-zh-1280-03-dialog": {
+      "audit": {
+        "total": 35,
+        "controls": 1,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金結帳（展示測試專用）",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px OPEN",
+          "10px 現金（展示測試專用）",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 待店員確認",
+          "11px 待店員確認",
+          "9px 現金結帳（展示測試專用）",
+          "11px テーブル 05 · #3 · ¥2,900",
+          "11px 實收金額",
+          "11px [control] 11600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "staff-zh-1280-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 466,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 466,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-375-01-tables": {
+      "audit": {
+        "total": 20,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "QR参加",
+            "cls": "table-mode",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "未収現金¥11,600",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "9px 利用中",
+          "10px QR参加",
+          "10px 未収現金¥11,600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-02-detail": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px OPEN",
+          "10px 現金（デモ・テスト専用）",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付済み",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 受付確認中",
+          "11px 受付確認中"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-dialog-opened-by": "現金（デモ・テスト専用）",
+    "staff-ja-375-03-dialog": {
+      "audit": {
+        "total": 34,
+        "controls": 1,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金精算（デモ・テスト専用）",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px OPEN",
+          "10px 現金（デモ・テスト専用）",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付済み",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 受付確認中",
+          "11px 受付確認中",
+          "9px 現金精算（デモ・テスト専用）",
+          "11px テーブル 05 · #3 · ¥2,900",
+          "11px お預かり金額",
+          "11px [control] 11600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-ja-375-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 305,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "キャンセル",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "staff-ja-375-accepted-order": true,
+    "staff-zh-375-01-tables": {
+      "audit": {
+        "total": 20,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "掃碼加入",
+            "cls": "table-mode",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待收現金¥11,600",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "9px 用餐中",
+          "10px 掃碼加入",
+          "10px 待收現金¥11,600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-02-detail": {
+      "audit": {
+        "total": 26,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px OPEN",
+          "10px 現金（展示測試專用）",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 待店員確認",
+          "11px 待店員確認"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-dialog-opened-by": "現金（展示測試專用）",
+    "staff-zh-375-03-dialog": {
+      "audit": {
+        "total": 34,
+        "controls": 1,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "OPEN",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "現金結帳（展示測試專用）",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.91,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px OPEN",
+          "10px 現金（展示測試專用）",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "10px ¥1,920",
+          "9px 普通",
+          "9px 待店員確認",
+          "11px 待店員確認",
+          "9px 現金結帳（展示測試專用）",
+          "11px テーブル 05 · #3 · ¥2,900",
+          "11px 實收金額",
+          "11px [control] 11600"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "staff-zh-375-dialog-focus": {
+      "focus": {
+        "tag": "INPUT",
+        "cls": "",
+        "text": "",
+        "outline": "solid 3px rgb(210, 163, 107)",
+        "offset": "2px",
+        "w": 305,
+        "h": 44,
+        "clippedBy": null
+      },
+      "steps": [
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        null,
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "11600",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "INPUT",
+          "cls": "",
+          "text": "",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        },
+        {
+          "tag": "BUTTON",
+          "cls": "button quiet wide",
+          "text": "取消",
+          "outline": "solid 3px rgb(210, 163, 107)",
+          "offset": "2px",
+          "w": 305,
+          "h": 44,
+          "clippedBy": null
+        }
+      ]
+    },
+    "kds-ja-1280": {
+      "audit": {
+        "total": 23,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 10,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px 2",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付済み",
+          "11px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 調理開始"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-ja-1280": {
+      "audit": {
+        "total": 79,
+        "controls": 37,
+        "fails": [
+          {
+            "text": "本部と店舗のメニュー",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "メニュー管理",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-shironagasukujira",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店舗メニュー",
+            "cls": "tab ",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "公開版: 1",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "緊急販売停止を確認",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 10,
+            "ratio": 3.38,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 11,
+            "ratio": 3.92,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "新しい商品と選択肢は、連動中の各店舗で確認されるまで販売でき",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · メニュー管理",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 本部と店舗のメニュー",
+          "9px メニュー管理",
+          "10px 切断",
+          "11px 公開版: 1",
+          "11px 1",
+          "11px 現在公開中の内容を表示",
+          "11px シロナガスクジラ定食",
+          "10px 緊急販売停止を確認",
+          "11px ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+          "11px 商品キー",
+          "10px キーで販売停止状態を確認",
+          "11px 新しい商品と選択肢は、連動中の各店舗で確認されるまで販売でき",
+          "10px カテゴリ名",
+          "10px 削除",
+          "10px 商品名",
+          "10px 削除",
+          "10px 説明",
+          "10px 販売対象",
+          "10px 削除",
+          "10px グループ名",
+          "10px 販売対象",
+          "10px 選択肢を追加",
+          "10px 選択肢グループを追加",
+          "10px 商品を追加",
+          "10px 東島 · メニュー管理",
+          "10px ·",
+          "10px [control] ランチ定食",
+          "10px [control] シロナガスクジラ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] ごはんの量",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 普通",
+          "10px [control] 20",
+          "10px [control] 小（100g）",
+          "10px [control] 0",
+          "10px [control] 塩唐揚げ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] 餃子定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1200",
+          "10px [control] タルタルチキン南蛮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 980",
+          "10px [control] 牛すじカレー定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1000",
+          "10px [control] サバの味噌煮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1080",
+          "10px [control] 博多餃子",
+          "10px [control] 博多鉄板餃子（12個）",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1150",
+          "10px [control] 酒肴・小皿",
+          "10px [control] 高菜明太ポテトサラダ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 560",
+          "10px [control] 三種の漬物盛り合わせ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 720"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-focus-textarea": {
+      "focus": {
+        "tag": "TEXTAREA",
+        "cls": "",
+        "text": "DEMO / 歴史資料の参考価格・現行店",
+        "outline": "auto 1px rgb(0, 95, 204)",
+        "offset": "0px",
+        "w": 994,
+        "h": 50,
+        "clippedBy": null
+      }
+    },
+    "kds-zh-1280": {
+      "audit": {
+        "total": 23,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 10,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px 2",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 開始製作"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "catalog-zh-1280": {
+      "audit": {
+        "total": 79,
+        "controls": 37,
+        "fails": [
+          {
+            "text": "總部與分店菜單",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單管理",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-shironagasukujira",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "分店菜單",
+            "cls": "tab ",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "發布版本: 1",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "查看緊急停售狀態",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 10,
+            "ratio": 3.38,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 11,
+            "ratio": 3.92,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "新增商品與選項在連動分店確認前不會開放販售。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 菜單管理",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 總部與分店菜單",
+          "9px 菜單管理",
+          "10px 登出",
+          "11px 發布版本: 1",
+          "11px 1",
+          "11px 檢視目前已發布內容",
+          "11px シロナガスクジラ定食",
+          "10px 查看緊急停售狀態",
+          "11px ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+          "11px 商品鍵",
+          "10px 依商品鍵確認停售狀態",
+          "11px 新增商品與選項在連動分店確認前不會開放販售。",
+          "10px 分類名稱",
+          "10px 刪除",
+          "10px 商品名稱",
+          "10px 刪除",
+          "10px 說明",
+          "10px 納入販售",
+          "10px 刪除",
+          "10px 群組名稱",
+          "10px 納入販售",
+          "10px 新增選項",
+          "10px 新增選項群組",
+          "10px 新增商品",
+          "10px 東島 · 菜單管理",
+          "10px ·",
+          "10px [control] ランチ定食",
+          "10px [control] シロナガスクジラ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] ごはんの量",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 普通",
+          "10px [control] 20",
+          "10px [control] 小（100g）",
+          "10px [control] 0",
+          "10px [control] 塩唐揚げ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] 餃子定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1200",
+          "10px [control] タルタルチキン南蛮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 980",
+          "10px [control] 牛すじカレー定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1000",
+          "10px [control] サバの味噌煮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1080",
+          "10px [control] 博多餃子",
+          "10px [control] 博多鉄板餃子（12個）",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1150",
+          "10px [control] 酒肴・小皿",
+          "10px [control] 高菜明太ポテトサラダ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 560",
+          "10px [control] 三種の漬物盛り合わせ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 720"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 1280,
+        "innerWidth": 1280
+      },
+      "demoNotice": true
+    },
+    "kds-ja-375": {
+      "audit": {
+        "total": 22,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "STAFF OPERATIONS",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "要確認",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 10,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "16:03 · b2f630265ddab2b3d693c0",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px STAFF OPERATIONS",
+          "9px STAFF OPERATIONS",
+          "10px 切断",
+          "10px 2",
+          "10px 16:03 · b2f630265ddab2b3d693c0",
+          "9px 受付済み",
+          "11px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 調理開始"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "catalog-ja-375": {
+      "audit": {
+        "total": 79,
+        "controls": 37,
+        "fails": [
+          {
+            "text": "本部と店舗のメニュー",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "メニュー管理",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-shironagasukujira",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "切断",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店舗メニュー",
+            "cls": "tab ",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "公開版: 1",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "緊急販売停止を確認",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 10,
+            "ratio": 3.38,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 11,
+            "ratio": 3.92,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "新しい商品と選択肢は、連動中の各店舗で確認されるまで販売でき",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · メニュー管理",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 本部と店舗のメニュー",
+          "9px メニュー管理",
+          "10px 切断",
+          "11px 公開版: 1",
+          "11px 1",
+          "11px 現在公開中の内容を表示",
+          "11px シロナガスクジラ定食",
+          "10px 緊急販売停止を確認",
+          "11px ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+          "11px 商品キー",
+          "10px キーで販売停止状態を確認",
+          "11px 新しい商品と選択肢は、連動中の各店舗で確認されるまで販売でき",
+          "10px カテゴリ名",
+          "10px 削除",
+          "10px 商品名",
+          "10px 削除",
+          "10px 説明",
+          "10px 販売対象",
+          "10px 削除",
+          "10px グループ名",
+          "10px 販売対象",
+          "10px 選択肢を追加",
+          "10px 選択肢グループを追加",
+          "10px 商品を追加",
+          "10px 東島 · メニュー管理",
+          "10px ·",
+          "10px [control] ランチ定食",
+          "10px [control] シロナガスクジラ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] ごはんの量",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 普通",
+          "10px [control] 20",
+          "10px [control] 小（100g）",
+          "10px [control] 0",
+          "10px [control] 塩唐揚げ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] 餃子定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1200",
+          "10px [control] タルタルチキン南蛮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 980",
+          "10px [control] 牛すじカレー定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1000",
+          "10px [control] サバの味噌煮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1080",
+          "10px [control] 博多餃子",
+          "10px [control] 博多鉄板餃子（12個）",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1150",
+          "10px [control] 酒肴・小皿",
+          "10px [control] 高菜明太ポテトサラダ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 560",
+          "10px [control] 三種の漬物盛り合わせ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 720"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "kds-zh-375": {
+      "audit": {
+        "total": 22,
+        "controls": 0,
+        "fails": [
+          {
+            "text": "店員作業台",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "店員作業台",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-synthetic",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "待審核",
+            "cls": "tab",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "2",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 10,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "下午04:03 · b2f630265ddab2b3d693",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 10,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "普通",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 9,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 店員作業台",
+          "9px 店員作業台",
+          "10px 登出",
+          "10px 2",
+          "10px 下午04:03 · b2f630265ddab2b3d693",
+          "9px 待製作",
+          "11px 塩唐揚げ定食 × 2",
+          "9px 普通",
+          "10px 開始製作"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    },
+    "catalog-zh-375": {
+      "audit": {
+        "total": 79,
+        "controls": 37,
+        "fails": [
+          {
+            "text": "總部與分店菜單",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "⌄",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(251, 251, 247)",
+            "size": 12,
+            "ratio": 3.96,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "菜單管理",
+            "cls": "eyebrow",
+            "fg": "rgb(114, 130, 120)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 9,
+            "ratio": 3.67,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "demo-shironagasukujira",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 12,
+            "ratio": 3.73,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "登出",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 3.21,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "分店菜單",
+            "cls": "tab ",
+            "fg": "rgb(131, 144, 135)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 13,
+            "ratio": 3.02,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "發布版本: 1",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "查看緊急停售狀態",
+            "cls": "text-button",
+            "fg": "rgb(127, 139, 131)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 10,
+            "ratio": 3.38,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+            "cls": "",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(248, 250, 247)",
+            "size": 11,
+            "ratio": 3.92,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "新增商品與選項在連動分店確認前不會開放販售。",
+            "cls": "muted",
+            "fg": "rgb(116, 128, 121)",
+            "bg": "rgb(255, 255, 255)",
+            "size": 11,
+            "ratio": 4.11,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "東島 · 菜單管理",
+            "cls": "workspace-footer",
+            "fg": "rgb(139, 150, 142)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 2.78,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          },
+          {
+            "text": "·",
+            "cls": "",
+            "fg": "rgb(196, 203, 196)",
+            "bg": "rgb(244, 244, 238)",
+            "size": 10,
+            "ratio": 1.5,
+            "need": 4.5,
+            "disabled": false,
+            "pass": false
+          }
+        ],
+        "minFont": 9,
+        "small": [
+          "9px 總部與分店菜單",
+          "9px 菜單管理",
+          "10px 登出",
+          "11px 發布版本: 1",
+          "11px 1",
+          "11px 檢視目前已發布內容",
+          "11px シロナガスクジラ定食",
+          "10px 查看緊急停售狀態",
+          "11px ごはんの量: 普通 (+¥20)、小（100g） (+¥0)",
+          "11px 商品鍵",
+          "10px 依商品鍵確認停售狀態",
+          "11px 新增商品與選項在連動分店確認前不會開放販售。",
+          "10px 分類名稱",
+          "10px 刪除",
+          "10px 商品名稱",
+          "10px 刪除",
+          "10px 說明",
+          "10px 納入販售",
+          "10px 刪除",
+          "10px 群組名稱",
+          "10px 納入販售",
+          "10px 新增選項",
+          "10px 新增選項群組",
+          "10px 新增商品",
+          "10px 東島 · 菜單管理",
+          "10px ·",
+          "10px [control] ランチ定食",
+          "10px [control] シロナガスクジラ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] ごはんの量",
+          "10px [control] 1",
+          "10px [control] 1",
+          "10px [control] 普通",
+          "10px [control] 20",
+          "10px [control] 小（100g）",
+          "10px [control] 0",
+          "10px [control] 塩唐揚げ定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 960",
+          "10px [control] 餃子定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1200",
+          "10px [control] タルタルチキン南蛮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 980",
+          "10px [control] 牛すじカレー定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1000",
+          "10px [control] サバの味噌煮定食",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1080",
+          "10px [control] 博多餃子",
+          "10px [control] 博多鉄板餃子（12個）",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 1150",
+          "10px [control] 酒肴・小皿",
+          "10px [control] 高菜明太ポテトサラダ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 560",
+          "10px [control] 三種の漬物盛り合わせ",
+          "10px [control] DEMO / 歴史資料の参考価格・現行店内価格未",
+          "10px [control] 720"
+        ]
+      },
+      "overflow": {
+        "scrollWidth": 375,
+        "innerWidth": 375
+      },
+      "demoNotice": true
+    }
+  }
+}

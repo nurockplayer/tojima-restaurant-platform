@@ -1,0 +1,1092 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+</head>
+<body>
+<title>Tojima Design System v0.1</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+/*
+ * Tojima Design System — proposed tokens v0.1 (DRAFT · 待批准 / 承認待ち)
+ * Research artifact only. Not wired into web/ and not approved by the Owner.
+ *
+ * Tier 1  --ref-*     primitives. Components never read these directly.
+ * Tier 2  --color-*, --text-*, --size-*, --space-*, --radius-*   semantic roles.
+ *         Re-bound per surface with [data-surface="guest|floor|kds|office"].
+ * Tier 3  --brand-*   store brand layer. Guest surface only; written by the
+ *         brand gate (see contrast-gate.mjs), never by hand-picked hex in components.
+ *
+ * Protected roles (status, danger, focus, price, demo/legal notices) are never
+ * re-bound by a store brand.
+ */
+
+:root {
+  /* ---- Tier 1: neutrals (warm, slightly green-biased; evolved from the existing --ink/--cream) */
+  --ref-neutral-0: #ffffff;
+  --ref-neutral-25: #fbfbf8;
+  --ref-neutral-50: #f6f6f1;
+  --ref-neutral-100: #eeefe8;
+  --ref-neutral-200: #dfe2da;
+  --ref-neutral-300: #c9cec5;
+  --ref-neutral-500: #7c877f;
+  --ref-neutral-600: #56635b;
+  --ref-neutral-800: #2c3a33;
+  --ref-neutral-900: #1b2a23;
+  --ref-neutral-950: #0f1513;
+  --ref-neutral-925: #18211d;
+  --ref-neutral-875: #222d28;
+  --ref-neutral-700d: #6b7a72;
+
+  /* ---- Tier 1: Tojima green (existing #174d3c kept as 800) */
+  --ref-green-50: #e6f0ea;
+  --ref-green-100: #cfe3d6;
+  --ref-green-600: #2b7556;
+  --ref-green-700: #1f6248;
+  --ref-green-800: #174d3c;
+  --ref-green-900: #0f3529;
+
+  /* ---- Tier 1: status hues */
+  --ref-amber-50: #fcf0d9;
+  --ref-amber-400: #f0b43c;
+  --ref-amber-800: #7a4708;
+  --ref-red-50: #fbebe8;
+  --ref-red-700: #a3302a;
+  --ref-red-300: #ff9a8f;
+  --ref-blue-50: #e6eef7;
+  --ref-blue-300: #79b4ff;
+  --ref-blue-200: #8cc4ff;
+  --ref-blue-600: #0b5fcc;
+  --ref-blue-700: #2b5f8f;
+  --ref-mint-300: #5fd39a;
+  --ref-success-700: #226345;
+  --ref-success-50: #e3f1e8;
+
+  /* ---- Tier 1: type. System CJK faces only: no web-font download on guest phones. */
+  --ref-font-sans: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
+    "Noto Sans JP", "Noto Sans CJK JP", "Yu Gothic UI", "Meiryo", sans-serif;
+  --ref-font-sans-zh: system-ui, -apple-system, "PingFang TC", "Noto Sans TC", "Noto Sans CJK TC",
+    "Microsoft JhengHei", sans-serif;
+
+  /* ---- Tier 1: space (4px base) and radius */
+  --ref-space-1: 4px;
+  --ref-space-2: 8px;
+  --ref-space-3: 12px;
+  --ref-space-4: 16px;
+  --ref-space-5: 20px;
+  --ref-space-6: 24px;
+  --ref-space-8: 32px;
+  --ref-space-10: 40px;
+  --ref-radius-sm: 6px;
+  --ref-radius-md: 10px;
+  --ref-radius-lg: 16px;
+  --ref-radius-pill: 999px;
+}
+
+/* ---- Tier 2: semantic roles. Default = guest surface, light scheme. */
+:root,
+[data-surface="guest"],
+[data-surface="floor"],
+[data-surface="office"] {
+  color-scheme: light; /* guest dark scheme is post-MVP; native controls must not follow the OS */
+  --font-sans: var(--ref-font-sans);
+
+  --color-bg: var(--ref-neutral-50);
+  --color-surface: var(--ref-neutral-0);
+  --color-surface-sunken: var(--ref-neutral-100);
+  --color-text: var(--ref-neutral-900);
+  --color-text-muted: var(--ref-neutral-600); /* 5.81:1 on bg; old --muted was 3.73:1 */
+  --color-border: var(--ref-neutral-200); /* decorative separators only */
+  --color-border-control: var(--ref-neutral-500); /* >= 3:1 for input/stepper edges */
+  --color-action: var(--ref-green-800);
+  --color-action-hover: var(--ref-green-700);
+  --color-on-action: var(--ref-neutral-0);
+  --color-action-soft: var(--ref-green-50);
+  --color-action-soft-ink: var(--ref-green-800);
+  --color-focus: var(--ref-blue-600); /* old focus #d2a36b was 2.07:1 */
+  --color-price: var(--ref-neutral-900); /* protected */
+
+  /* Protected status pairs (ink on tint). Never re-bound by store brand. */
+  --color-success-ink: var(--ref-success-700);
+  --color-success-bg: var(--ref-success-50);
+  --color-warning-ink: var(--ref-amber-800);
+  --color-warning-bg: var(--ref-amber-50);
+  --color-danger-ink: var(--ref-red-700);
+  --color-danger-bg: var(--ref-red-50);
+  --color-info-ink: var(--ref-blue-700);
+  --color-info-bg: var(--ref-blue-50);
+
+  /* Type scale. Floor is 12px everywhere; old UI used 9px in 22 places. */
+  --text-meta: 12px;
+  --text-label: 13px;
+  --text-body: 16px; /* >= 16px also prevents iOS Safari input zoom */
+  --text-title: 18px;
+  --text-heading: 22px;
+  --text-display: 28px;
+  --leading-tight: 1.3;
+  --leading-body: 1.6;
+
+  /* Hit targets and density */
+  --size-target: 48px; /* guest primary actions */
+  --size-target-min: 44px; /* absolute floor on every touch surface */
+  --size-row: 56px;
+  --radius-control: var(--ref-radius-md);
+  --radius-card: var(--ref-radius-lg);
+  --space-gutter: var(--ref-space-4);
+  --shadow-sheet: 0 -8px 32px rgb(15 21 19 / 0.16);
+  --motion-fast: 120ms;
+  --motion-sheet: 220ms;
+
+  /* ---- Tier 3: store brand (guest only). Defaults = Tojima platform. */
+  --brand-primary: var(--ref-green-800);
+  --brand-on-primary: var(--ref-neutral-0);
+  --brand-ink: var(--ref-green-800); /* brand used as text on light surfaces, >= 4.5:1 */
+  --brand-focus: var(--ref-neutral-0); /* focus ring drawn on brand fill */
+}
+
+/* Staff handheld / tablet (S01–S04): same palette, slightly denser, 44px floor kept. */
+[data-surface="floor"] {
+  --text-body: 15px;
+  --size-target: 44px;
+  --size-row: 52px;
+}
+
+/* Back-office desktop (M01/M02, MOD-02/03): dense tables, pointer-first. */
+[data-surface="office"] {
+  --text-body: 14px;
+  --text-heading: 20px;
+  --size-target: 36px;
+  --size-target-min: 32px; /* pointer surfaces only; never on guest/floor/kds */
+  --size-row: 36px;
+  --radius-control: var(--ref-radius-sm);
+  --radius-card: var(--ref-radius-md);
+}
+
+/* Kitchen display (K01): dark, glanceable at 1–2 m, large type, no store brand. */
+[data-surface="kds"] {
+  color-scheme: dark;
+  --font-sans: var(--ref-font-sans);
+  --color-bg: var(--ref-neutral-950);
+  --color-surface: var(--ref-neutral-925);
+  --color-surface-sunken: var(--ref-neutral-875);
+  --color-text: #edf2ee;
+  --color-text-muted: #a6b3ab;
+  --color-border: #2f3b35;
+  --color-border-control: var(--ref-neutral-700d);
+  --color-action: var(--ref-mint-300);
+  --color-action-hover: #7fe0b0;
+  --color-on-action: var(--ref-neutral-950);
+  --color-action-soft: #1d3a2d;
+  --color-action-soft-ink: var(--ref-mint-300);
+  --color-focus: var(--ref-blue-200);
+  --color-price: #edf2ee;
+  --color-success-ink: var(--ref-mint-300);
+  --color-success-bg: #163326;
+  --color-warning-ink: var(--ref-amber-400);
+  --color-warning-bg: #3a2b0e;
+  --color-danger-ink: var(--ref-red-300);
+  --color-danger-bg: #3d1a17;
+  --color-info-ink: var(--ref-blue-300);
+  --color-info-bg: #142a44;
+  --text-meta: 16px;
+  --text-label: 16px;
+  --text-body: 20px;
+  --text-title: 24px;
+  --text-heading: 28px;
+  --text-display: 40px;
+  --size-target: 56px;
+  --size-target-min: 48px;
+  --size-row: 64px;
+}
+
+/* lang-scoped CJK face: Traditional Chinese glyph shapes differ from Japanese. */
+:lang(zh-Hant) {
+  --font-sans: var(--ref-font-sans-zh);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root,
+  [data-surface] {
+    --motion-fast: 0ms;
+    --motion-sheet: 0ms;
+  }
+}
+
+
+/* ===== Page chrome (report). Layout: one reading column, wide bands for the prototype and specimens. */
+:root {
+  --pg-bg: #f6f6f1;
+  --pg-surface: #ffffff;
+  --pg-sunken: #eeefe8;
+  --pg-text: #1b2a23;
+  --pg-muted: #56635b;
+  --pg-line: #dfe2da;
+  --pg-accent: #174d3c;
+  --pg-accent-soft: #e6f0ea;
+  --pg-warn-ink: #7a4708;
+  --pg-warn-bg: #fcf0d9;
+  --pg-good-ink: #226345;
+  --pg-good-bg: #e3f1e8;
+  --pg-bad-ink: #a3302a;
+  --pg-bad-bg: #fbebe8;
+  --pg-focus: #0b5fcc;
+  --pg-font: system-ui, -apple-system, "Hiragino Sans", "PingFang TC", "Noto Sans TC", "Noto Sans JP", sans-serif;
+  --pg-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --pg-bg: #0f1513; --pg-surface: #18211d; --pg-sunken: #222d28; --pg-text: #edf2ee; --pg-muted: #a6b3ab;
+    --pg-line: #2f3b35; --pg-accent: #5fd39a; --pg-accent-soft: #1d3a2d; --pg-warn-ink: #f0b43c; --pg-warn-bg: #3a2b0e;
+    --pg-good-ink: #5fd39a; --pg-good-bg: #163326; --pg-bad-ink: #ff9a8f; --pg-bad-bg: #3d1a17; --pg-focus: #8cc4ff;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --pg-bg: #0f1513; --pg-surface: #18211d; --pg-sunken: #222d28; --pg-text: #edf2ee; --pg-muted: #a6b3ab;
+  --pg-line: #2f3b35; --pg-accent: #5fd39a; --pg-accent-soft: #1d3a2d; --pg-warn-ink: #f0b43c; --pg-warn-bg: #3a2b0e;
+  --pg-good-ink: #5fd39a; --pg-good-bg: #163326; --pg-bad-ink: #ff9a8f; --pg-bad-bg: #3d1a17; --pg-focus: #8cc4ff;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--pg-bg); color: var(--pg-text); font: 15px/1.7 var(--pg-font); }
+.page { max-width: 1120px; margin: 0 auto; padding-block: 32px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: grid; gap: 56px; }
+.read { max-width: 760px; }
+h1, h2, h3 { line-height: 1.3; text-wrap: balance; margin: 0; }
+h1 { font-size: clamp(26px, 4vw, 36px); letter-spacing: -0.01em; }
+h2 { font-size: 22px; }
+h3 { font-size: 16px; }
+p { margin: 0; }
+a { color: var(--pg-accent); }
+:focus-visible { outline: 3px solid var(--pg-focus); outline-offset: 2px; }
+.eyebrow { font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--pg-muted); font-weight: 600; }
+.stack { display: grid; gap: 16px; }
+.stack-sm { display: grid; gap: 8px; }
+.muted { color: var(--pg-muted); }
+.small { font-size: 13px; }
+code, .mono { font-family: var(--pg-mono); font-size: 0.88em; }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-size: 13px; font-weight: 600; }
+.pill.pending { background: var(--pg-warn-bg); color: var(--pg-warn-ink); }
+.pill.good { background: var(--pg-good-bg); color: var(--pg-good-ink); }
+.pill.bad { background: var(--pg-bad-bg); color: var(--pg-bad-ink); }
+header.hero { display: grid; gap: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--pg-line); padding-block-end: 32px; }
+.hero-meta { display: flex; flex-wrap: wrap; gap: 8px 20px; font-size: 13px; color: var(--pg-muted); }
+.verdict { display: grid; grid-template-columns: minmax(0, 1fr); gap: 20px; background: var(--pg-surface); border: 1px solid var(--pg-line); border-radius: 16px; padding: 24px; }
+.verdict-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; }
+.verdict-letter { font-size: 44px; font-weight: 800; line-height: 1; color: var(--pg-accent); }
+.verdict ul, .read ul { margin: 0; padding-left: 20px; display: grid; gap: 6px; }
+.cols-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.cols-3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+@media (max-width: 860px) { .cols-2, .cols-3 { grid-template-columns: minmax(0, 1fr); } }
+.box { background: var(--pg-surface); border: 1px solid var(--pg-line); border-radius: 12px; padding: 18px; min-width: 0; }
+.box h3 { margin-bottom: 8px; }
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; border: 1px solid var(--pg-line); border-radius: 12px; background: var(--pg-surface); }
+table.matrix { border-collapse: collapse; width: 100%; min-width: 760px; font-size: 13.5px; }
+.matrix th, .matrix td { padding: 10px 12px; border-bottom: 1px solid var(--pg-line); text-align: left; vertical-align: top; }
+.matrix thead th { background: var(--pg-sunken); font-size: 13px; position: sticky; top: 0; }
+.matrix td.score { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.score b { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; margin-right: 6px; font-size: 13px; }
+.s1 b { background: var(--pg-bad-bg); color: var(--pg-bad-ink); }
+.s2 b { background: var(--pg-bad-bg); color: var(--pg-bad-ink); }
+.s3 b { background: var(--pg-warn-bg); color: var(--pg-warn-ink); }
+.s4 b, .s5 b { background: var(--pg-good-bg); color: var(--pg-good-ink); }
+.matrix .total td { font-weight: 700; background: var(--pg-sunken); }
+.matrix .col-d { background: color-mix(in srgb, var(--pg-accent-soft) 60%, transparent); }
+.matrix .reason { color: var(--pg-muted); font-size: 12.5px; display: block; margin-top: 2px; white-space: normal; }
+.evidence-shots { display: flex; gap: 12px; flex-wrap: wrap; }
+.evidence-shots figure { margin: 0; flex: 1 1 180px; max-width: 220px; }
+.evidence-shots img { width: 100%; border: 1px solid var(--pg-line); border-radius: 10px; display: block; }
+.evidence-shots figcaption { font-size: 12px; color: var(--pg-muted); margin-top: 6px; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13.5px; }
+.kv dt { font-variant-numeric: tabular-nums; font-weight: 700; }
+.kv dd { margin: 0; color: var(--pg-muted); }
+.band { display: grid; gap: 20px; }
+.lab { display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 28px; align-items: start; }
+@media (max-width: 920px) { .lab { grid-template-columns: minmax(0, 1fr); } }
+.controls { display: grid; gap: 18px; }
+.control-group { display: grid; gap: 8px; }
+.control-group > span { font-size: 13px; font-weight: 600; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg button { min-height: 40px; padding: 0 14px; border-radius: 999px; border: 1px solid var(--pg-line); background: var(--pg-surface); color: var(--pg-text); font: inherit; font-size: 13.5px; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--pg-accent); color: var(--pg-surface); border-color: var(--pg-accent); }
+.swatch-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; vertical-align: -1px; margin-right: 6px; border: 1px solid rgb(0 0 0 / 0.15); }
+.color-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.color-row input[type="color"] { width: 48px; height: 40px; border: 1px solid var(--pg-line); border-radius: 8px; background: var(--pg-surface); padding: 2px; }
+.color-row input[type="text"] { width: 110px; min-height: 40px; border: 1px solid var(--pg-line); border-radius: 8px; padding: 0 10px; background: var(--pg-surface); color: var(--pg-text); font: inherit; font-family: var(--pg-mono); }
+.gate { font-size: 13px; display: grid; gap: 4px; background: var(--pg-sunken); border-radius: 10px; padding: 12px; }
+.gate-row { display: flex; justify-content: space-between; gap: 10px; font-variant-numeric: tabular-nums; }
+.gate-row .ok { color: var(--pg-good-ink); font-weight: 700; }
+.gate-row .ng { color: var(--pg-bad-ink); font-weight: 700; }
+.notes { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; counter-reset: n; }
+.notes li { display: grid; grid-template-columns: auto 1fr; gap: 10px; font-size: 13.5px; line-height: 1.6; }
+.notes li b.tag { font-family: var(--pg-mono); font-size: 12px; color: var(--pg-accent); padding-top: 2px; white-space: nowrap; }
+.phases { display: grid; gap: 12px; }
+.phase { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 16px; background: var(--pg-surface); border: 1px solid var(--pg-line); border-radius: 12px; padding: 16px; }
+.phase-id { font-family: var(--pg-mono); font-size: 13px; color: var(--pg-accent); font-weight: 700; }
+@media (max-width: 560px) { .phase { grid-template-columns: minmax(0, 1fr); gap: 6px; } }
+.decisions { display: grid; gap: 10px; }
+.decision { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 12px; padding: 14px 16px; background: var(--pg-surface); border: 1px solid var(--pg-line); border-radius: 12px; }
+.decision .q { font-family: var(--pg-mono); font-weight: 700; color: var(--pg-warn-ink); }
+footer.page-foot { border-top: 1px solid var(--pg-line); padding-top: 20px; font-size: 13px; color: var(--pg-muted); display: grid; gap: 6px; }
+
+/* ===== Tojima DS components (prototype). Only semantic tokens below this line. */
+.tds { font-family: var(--font-sans); color: var(--color-text); background: var(--color-bg); font-size: var(--text-body); line-height: var(--leading-body); -webkit-font-smoothing: antialiased; }
+.tds button { font: inherit; color: inherit; }
+.tds :focus-visible { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+.tds .on-brand :focus-visible { outline-color: var(--brand-focus); }
+.t-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--size-target); min-width: var(--size-target-min); padding: 0 18px; border-radius: var(--radius-control); border: 1px solid transparent; font-weight: 700; cursor: pointer; transition: background var(--motion-fast) ease, transform var(--motion-fast) ease; }
+.t-btn:active { transform: translateY(1px); }
+.t-btn.primary { background: var(--brand-primary); color: var(--brand-on-primary); }
+.t-btn.platform { background: var(--color-action); color: var(--color-on-action); }
+.t-btn.platform:hover { background: var(--color-action-hover); }
+.t-btn.secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border-control); }
+.t-btn.ghost { background: transparent; color: var(--color-text); }
+.t-btn.block { width: 100%; }
+.t-btn[aria-disabled="true"] { background: var(--color-surface-sunken); color: var(--color-text-muted); cursor: not-allowed; }
+.num { font-variant-numeric: tabular-nums; }
+.t-price { color: var(--color-price); font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.t-price small { font-size: var(--text-meta); color: var(--color-text-muted); font-weight: 500; margin-left: 2px; }
+.t-status { display: inline-flex; align-items: center; gap: 6px; min-height: 26px; padding: 2px 10px; border-radius: 999px; font-size: var(--text-meta); font-weight: 700; white-space: nowrap; }
+.t-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.t-status.success { background: var(--color-success-bg); color: var(--color-success-ink); }
+.t-status.warning { background: var(--color-warning-bg); color: var(--color-warning-ink); }
+.t-status.danger { background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.t-status.info { background: var(--color-info-bg); color: var(--color-info-ink); }
+.t-status.neutral { background: var(--color-surface-sunken); color: var(--color-text-muted); }
+.t-banner { display: flex; gap: 10px; align-items: flex-start; padding: 10px var(--space-gutter); font-size: var(--text-label); line-height: 1.5; }
+.t-banner.demo { background: var(--color-warning-bg); color: var(--color-warning-ink); }
+.t-banner.offline { background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.t-banner strong { display: block; }
+
+/* Phone frame */
+.phone { width: 390px; max-width: 100%; height: 780px; border-radius: 40px; background: #0f1513; padding: 10px; box-shadow: 0 30px 60px -20px rgb(15 21 19 / 0.45); position: relative; }
+.screen { position: relative; height: 100%; border-radius: 31px; overflow: hidden; background: var(--color-bg); display: flex; flex-direction: column; }
+@media (max-width: 420px) { .phone { height: 720px; border-radius: 28px; padding: 6px; } .screen { border-radius: 23px; } }
+.scroller { flex: 1; overflow-y: auto; overscroll-behavior: contain; position: relative; scroll-padding-top: 112px; }
+.store-head { padding: 14px var(--space-gutter) 12px; background: var(--brand-primary); color: var(--brand-on-primary); display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; }
+.store-head .name { font-size: var(--text-title); font-weight: 800; line-height: var(--leading-tight); }
+.store-head .table { font-size: var(--text-label); } /* no opacity on brand fill: composited colour would bypass the gate */
+.store-head .lang { grid-row: 1 / 3; grid-column: 2; min-height: var(--size-target-min); min-width: var(--size-target-min); border-radius: 999px; border: 1.5px solid currentColor; background: transparent; color: inherit; padding: 0 12px; font-size: var(--text-label); font-weight: 700; cursor: pointer; }
+.cat-nav { position: sticky; top: 0; z-index: 3; background: var(--color-bg); border-bottom: 1px solid var(--color-border); display: flex; gap: 8px; overflow-x: auto; padding: 10px var(--space-gutter); scrollbar-width: none; }
+.cat-nav::-webkit-scrollbar { display: none; }
+.cat-chip { flex: none; min-height: var(--size-target-min); padding: 0 16px; border-radius: 999px; border: 1px solid var(--color-border-control); background: var(--color-surface); font-size: var(--text-label); font-weight: 700; cursor: pointer; }
+.cat-chip[aria-current="true"] { background: var(--brand-primary); color: var(--brand-on-primary); border-color: var(--brand-primary); }
+.menu-section { padding: 18px var(--space-gutter) 4px; }
+.menu-section h2 { font-size: var(--text-title); margin-bottom: 6px; }
+.menu-row { width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 14px; align-items: center; text-align: left; padding: 14px 0; min-height: var(--size-row); background: none; border: 0; border-bottom: 1px solid var(--color-border); cursor: pointer; }
+.menu-row .title { font-weight: 700; line-height: var(--leading-tight); }
+.menu-row .sub { grid-column: 1; font-size: var(--text-meta); color: var(--color-text-muted); }
+.menu-row .add { grid-row: 1 / 3; grid-column: 2; display: flex; align-items: center; gap: 10px; }
+.menu-row .plus { width: var(--size-target-min); height: var(--size-target-min); border-radius: 50%; display: grid; place-items: center; background: var(--color-surface); border: 1.5px solid var(--brand-ink); color: var(--brand-ink); font-size: 22px; font-weight: 600; line-height: 1; }
+.menu-row .qty-badge { min-width: 26px; height: 26px; padding: 0 6px; border-radius: 999px; background: var(--brand-primary); color: var(--brand-on-primary); font-size: var(--text-meta); font-weight: 800; display: grid; place-items: center; }
+.menu-row.unavailable { cursor: not-allowed; }
+.menu-row.unavailable .title { color: var(--color-text-muted); }
+.menu-row.unavailable .plus { visibility: hidden; }
+.powered { padding: 24px var(--space-gutter) 120px; font-size: var(--text-meta); color: var(--color-text-muted); display: grid; gap: 4px; }
+.cartbar { position: absolute; left: 12px; right: 12px; bottom: 14px; z-index: 5; }
+.cartbar .t-btn { width: 100%; min-height: 56px; justify-content: space-between; border-radius: 16px; padding: 0 18px; box-shadow: 0 10px 24px -8px rgb(15 21 19 / 0.45); }
+.cartbar .count { display: inline-grid; place-items: center; min-width: 28px; height: 28px; border-radius: 999px; background: var(--brand-on-primary); color: var(--brand-primary); font-size: var(--text-meta); font-weight: 800; margin-right: 8px; }
+.cartbar .sync { font-size: var(--text-meta); font-weight: 600; display: block; text-align: left; }
+.scrim { position: absolute; inset: 0; background: rgb(15 21 19 / 0.48); z-index: 8; }
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 9; max-height: 88%; display: flex; flex-direction: column; background: var(--color-surface); border-radius: 22px 22px 0 0; box-shadow: var(--shadow-sheet); }
+.sheet.enter { animation: rise var(--motion-sheet) ease-out; }
+@keyframes rise { from { transform: translateY(24px); opacity: 0.6; } to { transform: none; opacity: 1; } }
+.sheet-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: start; padding: 18px var(--space-gutter) 12px; border-bottom: 1px solid var(--color-border); }
+.sheet-head h3 { font-size: var(--text-title); }
+.sheet-body { overflow-y: auto; padding: 14px var(--space-gutter); display: grid; gap: 16px; }
+.sheet-foot { padding: 12px var(--space-gutter) 16px; border-top: 1px solid var(--color-border); display: grid; gap: 10px; }
+.sheet-demo { margin: 0; background: var(--color-warning-bg); color: var(--color-warning-ink); font-size: var(--text-meta); font-weight: 600; padding: 6px 10px; border-radius: var(--ref-radius-sm); }
+.close-x { width: var(--size-target-min); height: var(--size-target-min); border-radius: 50%; border: 0; background: var(--color-surface-sunken); font-size: 20px; cursor: pointer; }
+fieldset.t-group { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.t-group legend { font-weight: 700; padding: 0; margin-bottom: 8px; display: flex; gap: 8px; align-items: center; }
+.t-group[data-invalid="true"] legend { color: var(--color-danger-ink); }
+.t-radio-card { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 12px; align-items: center; min-height: var(--size-target); padding: 10px 14px; border: 1.5px solid var(--color-border-control); border-radius: var(--radius-control); cursor: pointer; background: var(--color-surface); }
+.t-radio-card input { width: 20px; height: 20px; margin: 0; accent-color: var(--brand-ink); }
+.t-radio-card:has(input:checked) { border-color: var(--brand-ink); box-shadow: inset 0 0 0 1px var(--brand-ink); }
+.t-radio-card:has(input:focus-visible) { outline: 3px solid var(--color-focus); outline-offset: 2px; }
+.field-error { color: var(--color-danger-ink); font-size: var(--text-label); font-weight: 600; }
+.t-stepper { display: inline-flex; align-items: center; border: 1.5px solid var(--color-border-control); border-radius: var(--radius-control); overflow: hidden; }
+.t-stepper button { width: var(--size-target); height: var(--size-target); border: 0; background: var(--color-surface); font-size: 22px; cursor: pointer; }
+.t-stepper output { min-width: 40px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+.qty-row { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.cart-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 12px 0; border-bottom: 1px solid var(--color-border); }
+.cart-line .opt { font-size: var(--text-meta); color: var(--color-text-muted); }
+.cart-line .t-stepper button { width: var(--size-target-min); height: var(--size-target-min); }
+.sync-line { display: flex; align-items: center; gap: 8px; font-size: var(--text-meta); color: var(--color-text-muted); }
+.sync-line .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-success-ink); }
+.sync-line.stale .dot { background: var(--color-danger-ink); }
+.totals { display: grid; gap: 4px; font-variant-numeric: tabular-nums; }
+.totals div { display: flex; justify-content: space-between; }
+.totals .grand { font-size: var(--text-title); font-weight: 800; }
+.totals .tax { font-size: var(--text-meta); color: var(--color-text-muted); }
+.pay-options { display: grid; gap: 8px; }
+.track { display: grid; gap: 10px; padding: 14px; border-radius: var(--radius-card); background: var(--color-surface); border: 1px solid var(--color-border); }
+.track-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.track-head span:first-child { font-weight: 700; }
+.steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; list-style: none; margin: 0; padding: 0; }
+.steps li { font-size: var(--text-meta); color: var(--color-text-muted); border-top: 4px solid var(--color-border); padding-top: 6px; }
+.steps li[data-state="done"] { border-color: var(--brand-ink); color: var(--color-text); }
+.steps li[data-state="current"] { border-color: var(--brand-ink); color: var(--color-text); font-weight: 800; }
+.status-screen { padding: 18px var(--space-gutter) 32px; display: grid; gap: 14px; }
+.order-no { font-size: var(--text-display); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1; }
+.toast { position: absolute; left: 50%; bottom: 86px; transform: translateX(-50%); z-index: 12; background: var(--color-text); color: var(--color-surface); padding: 10px 16px; border-radius: 999px; font-size: var(--text-label); font-weight: 700; white-space: nowrap; }
+
+/* Specimens */
+.specimen { border: 1px solid var(--pg-line); border-radius: 16px; overflow: hidden; min-width: 0; }
+.specimen-label { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 16px; background: var(--pg-sunken); font-size: 13px; }
+.specimen-body { padding: 16px; overflow-x: auto; }
+.floor-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; }
+.floor-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-card); padding: 14px; display: grid; gap: 10px; }
+.floor-card.attention { border-color: var(--color-warning-ink); box-shadow: inset 0 0 0 1px var(--color-warning-ink); }
+.floor-card .tno { font-size: var(--text-heading); font-weight: 800; line-height: 1; }
+.floor-card .facts { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; font-size: var(--text-label); color: var(--color-text-muted); }
+.floor-card .facts b { color: var(--color-text); font-variant-numeric: tabular-nums; text-align: right; }
+.kds-cols { display: grid; grid-template-columns: repeat(3, minmax(240px, 1fr)); gap: 14px; min-width: 760px; }
+.kds-col h4 { margin: 0 0 10px; font-size: var(--text-title); display: flex; justify-content: space-between; color: var(--color-text-muted); }
+.kds-card { background: var(--color-surface); border: 1px solid var(--color-border); border-left: 8px solid var(--color-info-ink); border-radius: var(--radius-control); padding: 14px; display: grid; gap: 10px; margin-bottom: 12px; }
+.kds-card.new { border-left-color: var(--color-warning-ink); }
+.kds-card.ready { border-left-color: var(--color-success-ink); }
+.kds-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.kds-card .tno { font-size: var(--text-display); font-weight: 800; line-height: 1; }
+.kds-card .elapsed { font-size: var(--text-title); font-weight: 800; font-variant-numeric: tabular-nums; }
+.kds-card ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: var(--text-body); }
+.kds-card li small { display: block; color: var(--color-text-muted); font-size: var(--text-meta); }
+.office-bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.office-select { min-height: var(--size-target); border: 1px solid var(--color-border-control); border-radius: var(--radius-control); background: var(--color-surface); color: var(--color-text); padding: 0 10px; font: inherit; }
+table.t-table { border-collapse: collapse; width: 100%; min-width: 640px; background: var(--color-surface); font-size: var(--text-body); }
+.t-table th, .t-table td { height: var(--size-row); padding: 0 12px; border-bottom: 1px solid var(--color-border); text-align: left; white-space: nowrap; }
+.t-table th { font-size: var(--text-meta); color: var(--color-text-muted); font-weight: 700; background: var(--color-surface-sunken); }
+.t-table td.r, .t-table th.r { text-align: right; font-variant-numeric: tabular-nums; }
+.t-table tbody tr:hover { background: var(--color-action-soft); }
+
+/* Token audit */
+.audit-summary { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+table.audit { border-collapse: collapse; width: 100%; min-width: 680px; font-size: 13px; }
+.audit th, .audit td { padding: 8px 12px; border-bottom: 1px solid var(--pg-line); text-align: left; }
+.audit th { background: var(--pg-sunken); }
+.audit td.r { text-align: right; font-variant-numeric: tabular-nums; }
+.audit .chip { display: inline-flex; gap: 4px; align-items: center; padding: 2px 8px; border-radius: 6px; font-family: var(--pg-mono); font-size: 12px; border: 1px solid var(--pg-line); }
+.before-after td:nth-child(3) { color: var(--pg-bad-ink); font-weight: 700; }
+.before-after td:nth-child(5) { color: var(--pg-good-ink); font-weight: 700; }
+</style>
+
+<div class="page" lang="zh-Hant">
+  <header class="hero">
+    <span class="eyebrow">東島 Tojima · 統合飲食店 SaaS · Design System 研究</span>
+    <h1>Tojima Design System 提案 v0.1</h1>
+    <div style="display:flex;flex-wrap:wrap;gap:8px">
+      <span class="pill good">● 已批准 / 承認済 · Owner 2026-10-19（D-DS-20261019）</span>
+      <span class="pill good">對比度門檻 72/72 PASS · 隨機店家色 2,000/2,000</span>
+    </div>
+    <div class="hero-meta">
+      <span>2026-10-19 JST</span>
+      <span>研究對象：Linear higashijima-manage-system、repo <code>tojima-restaurant-platform@5d82bce</code>、<code>tachiko-sheet@c082616</code></span>
+      <span>不修改正式產品程式碼 · 原価管理 不在範圍</span>
+    </div>
+  </header>
+
+  <section class="verdict" aria-labelledby="rec">
+    <div class="verdict-head">
+      <span class="verdict-letter">D</span>
+      <div class="stack-sm">
+        <span class="eyebrow">已批准方案（D-DS-20261019）</span>
+        <h2 id="rec">在 Tojima 既有 token 上演進出自有設計系統；向 Tachiko Sheet 只借「方法」，不借色彩、元件或程式碼</h2>
+      </div>
+    </div>
+    <ul>
+      <li><b>單一來源在程式碼。</b>CSS custom properties 三層：primitive → semantic → 店家品牌層。完全落在 ADR-0006（原生 CSS＋CSS Modules、React Aria 只用於複雜元件）之內，不新增依賴。</li>
+      <li><b>一套 token，四種表面模式。</b>顧客 Guest／店員 Floor／廚房 KDS（暗色、大字）／後台 Office（高密度表格）以 <code>data-surface</code> 切換，涵蓋 MOD-05 現在與 MOD-02/03/07 未來。</li>
+      <li><b>店家品牌受閘門保護。</b>店家只能給一個顏色；系統自動推導填色上文字色、品牌文字色與焦點色。閘門檢查的每一組品牌配對，在 2,000 個隨機色下都達 WCAG AA（實際渲染位置以 DS-2 的元件測試再驗證）。狀態色、價格、焦點、DEMO／法定標示為受保護角色。</li>
+      <li><b>從 Sheet 借方法：</b>語意角色契約、受保護角色、可執行的對比度門檻、3px 焦點環、forced-colors、「狀態真實性」（未知／同步中／失敗分開顯示）。<b>不借：</b>紫色調色盤、32px 桌面密度、試算表元件、程式碼本身（Linear 文件 05 規定不混用 Tachiko 的 IP 與商標）。</li>
+    </ul>
+    <p class="small muted">D 也可以看作「只繼承方法」的選擇性繼承。本報告把 C 定義為搬入 Sheet 的<em>資產</em>（token 值、CSS、元件），D 則以 Tojima 自己已驗收畫面使用的綠色 token 為基底，只重新實作被驗證過的機制。差別在於有沒有搬資產：不搬，就避開 IP 歸屬未定的問題，也不會出現兩種視覺語言並存。</p>
+  </section>
+
+  <section class="stack" aria-labelledby="cmp">
+    <div class="read stack-sm">
+      <span class="eyebrow">01 · 方案比較</span>
+      <h2 id="cmp">A–D 獨立評估</h2>
+      <p class="muted small">分數為研究者依下方證據所作的判斷評分（1–5），非量測值，比較的是各方案的<em>完整計畫</em>（不是只比第一包）。權重依「Mobile Order 優先、但需涵蓋整套 SaaS」設定。在這組評分下 D 每一項都不低於其他方案，所以結論不受權重影響；但 D 是看過 A–C 的弱點後組合出來的，評分本身仍需 Owner 檢視。D 的風險列於表後。</p>
+    </div>
+    <div class="scroll-x">
+      <table class="matrix">
+        <thead><tr><th style="width:24%">評估項目（權重）</th><th>A 沿用 Tachiko Sheet</th><th>B 完全重新設計</th><th>C 選擇性繼承（搬資產）</th><th class="col-d">D 演進式自有系統＋借方法</th></tr></thead>
+        <tbody>
+          <tr><th>顧客手機點餐適配（25%）</th>
+            <td class="score s1"><b>1</b><span class="reason">32px 目標、14px 內文、無動態、冷紫色；為桌面試算表設計</span></td>
+            <td class="score s4"><b>4</b><span class="reason">可完全為手機設計，但從零起步</span></td>
+            <td class="score s3"><b>3</b><span class="reason">顧客端仍需新設計；搬來的部分用不上</span></td>
+            <td class="score s5 col-d"><b>5</b><span class="reason">觸控優先 48px、16px 內文、底部 sheet、常駐購物車列；已用原型驗證</span></td></tr>
+          <tr><th>整套 SaaS 涵蓋（20%）<span class="reason">KDS、店員、後台、MOD-07 白標</span></th>
+            <td class="score s2"><b>2</b><span class="reason">只適合後台；僅亮色，KDS 不可用；無多租戶品牌</span></td>
+            <td class="score s4"><b>4</b><span class="reason">可規劃全部，但需更長時間</span></td>
+            <td class="score s3"><b>3</b><span class="reason">後台像 Sheet、顧客端像別的產品，兩種語言</span></td>
+            <td class="score s4 col-d"><b>4</b><span class="reason">四種表面模式＋品牌層；後台元件尚待 MOD-02/03 需求</span></td></tr>
+          <tr><th>治理／IP（15%）<span class="reason">文件 05：不混用 Tachiko 商標與資產</span></th>
+            <td class="score s1"><b>1</b><span class="reason">直接沿用 Tachiko 產品資產；Sheet 授權未定</span></td>
+            <td class="score s5"><b>5</b><span class="reason">完全自有</span></td>
+            <td class="score s2"><b>2</b><span class="reason">搬入的程式碼與 token 值歸屬不清</span></td>
+            <td class="score s5 col-d"><b>5</b><span class="reason">自有實作；只參照公開的 WCAG 方法</span></td></tr>
+          <tr><th>MVP 成本與對已驗收畫面的衝擊（20%）<span class="reason">ADR-0006：不為統一而重寫</span></th>
+            <td class="score s2"><b>2</b><span class="reason">全面換色與密度＝重寫 P-78/P-79 畫面</span></td>
+            <td class="score s1"><b>1</b><span class="reason">最慢；P-75 明定 MVP 不啟動 Figma redesign</span></td>
+            <td class="score s3"><b>3</b><span class="reason">中等；需逐一移植與改值</span></td>
+            <td class="score s4 col-d"><b>4</b><span class="reason">完整計畫仍需改顧客端版面（DS-2），但可分五包、每包獨立上線；第一包外觀延續</span></td></tr>
+          <tr><th>品質可驗證性（10%）</th>
+            <td class="score s4"><b>4</b><span class="reason">Sheet 有對比度門檻</span></td>
+            <td class="score s3"><b>3</b><span class="reason">需重建驗證機制</span></td>
+            <td class="score s4"><b>4</b><span class="reason">可搬門檻</span></td>
+            <td class="score s5 col-d"><b>5</b><span class="reason">門檻已實作：72 組 token 配對＋2,000 個隨機店家色 0 失敗</span></td></tr>
+          <tr><th>維護性／單一來源（10%）</th>
+            <td class="score s2"><b>2</b><span class="reason">Sheet 主樣式檔 2026-09-12〜10-18 有 58 個非 merge commit；搬入後需決定追蹤上游或分岔</span></td>
+            <td class="score s3"><b>3</b><span class="reason">取決於新流程</span></td>
+            <td class="score s2"><b>2</b><span class="reason">搬入的值與 Sheet 上游會分岔，需決定是否追蹤</span></td>
+            <td class="score s4 col-d"><b>4</b><span class="reason">token 檔是唯一來源；Figma 僅為選用鏡像</span></td></tr>
+          <tr class="total"><td>加權總分</td><td class="num">1.80</td><td class="num">3.35</td><td class="num">2.85</td><td class="num col-d">4.50</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="cols-2">
+      <div class="box"><h3>D 的風險（誠實列出）</h3><ul class="small" style="margin:0;padding-left:18px;display:grid;gap:4px">
+        <li>沒有專職設計師與 Figma 權威稿；視覺品質靠原型＋實機審查，需 Owner 或東島さん參與實機驗收。</li>
+        <li>品牌閘門會調整約 15.6% 的任意店家色（2,000 個隨機色中 311 個需加深），店家後台必須預覽調整結果。</li>
+        <li>後台高密度元件僅有樣本；MOD-02/03 需求確定前不擴充，避免投機性元件。</li>
+        <li>系統字型在 Android 與 iOS 字形差異較大，需實機截圖比對（對應 P-84 GAP 7g）。</li></ul></div>
+      <div class="box"><h3>被否決方案的保留價值</h3><ul class="small" style="margin:0;padding-left:18px;display:grid;gap:4px">
+        <li>A：Sheet 的試算表密度（28/32px 列高、tabular 數字、安靜外框）可作為 MOD-03 財務表格的<em>參考</em>，以概念重寫。</li>
+        <li>B：「重新設計」留給 MOD-07 會員 App 的品牌體驗；D 的品牌層是它的地基。</li>
+        <li>C：若 Owner 日後書面授權 Sheet 程式碼再利用，contrast checker 可直接比對兩邊實作。</li></ul></div>
+    </div>
+  </section>
+
+  <section class="stack" aria-labelledby="ev">
+    <div class="read stack-sm">
+      <span class="eyebrow">02 · 決策依據</span>
+      <h2 id="ev">四組證據</h2>
+    </div>
+    <div class="cols-2">
+      <div class="box stack-sm">
+        <h3>E1 現況審計：Mobile Order 顧客端（main 5d82bce）</h3>
+        <div class="evidence-shots">
+          <figure><img src="evidence/baseline-guest-top.jpg" alt="現況顧客端首屏：DEMO 橫幅、空購物車卡片佔據首屏，菜單在第二屏才開始" loading="lazy"><figcaption>首屏：空購物車先於菜單</figcaption></figure>
+          <figure><img src="evidence/baseline-guest-menu.jpg" alt="現況菜單：每個商品卡含數量下拉與加入按鈕，每列約 210px 高" loading="lazy"><figcaption>菜單：每列約 210px，表單式</figcaption></figure>
+        </div>
+        <dl class="kv">
+          <dt>51 / 86</dt><dd>顧客／店員共用的 <code>styles.css</code> 中 font-size ≤ 11px 的宣告（9px 有 19 處）；含 Catalog 後台的全部 UI CSS 為 65 / 111（9px 22 處）</dd>
+          <dt>3.73 : 1</dt><dd>最常用的 <code>--muted</code>（UI CSS 中 27 處引用）文字對比，未達 AA 4.5</dd>
+          <dt>2.07 : 1</dt><dd>焦點環 <code>#d2a36b</code>，未達非文字 3:1</dd>
+          <dt>10 vs 88</dt><dd>具名 custom property（9 色＋1 陰影）vs 寫死的 hex 色碼種類（共 130 處）</dd>
+          <dt>≈ 800px</dt><dd>手機上第一個商品的位置：首屏最底端，首屏被 DEMO 橫幅與空購物車佔據</dd>
+        </dl>
+        <p class="small muted">範圍：<code>web/src/ui/*.css</code> @ 5d82bce（以 grep 計算，指令見附檔 <code>audit-commands.txt</code>）。截圖取自 isolated demo（<code>operationstest -demo-shironagasukujira</code>，375×812）。</p>
+      </div>
+      <div class="box stack-sm">
+        <h3>E2 Tachiko Sheet 設計系統</h3>
+        <dl class="kv">
+          <dt>定位</dt><dd>「Dense data, quiet chrome」— 桌面試算表，≥1024px 為主</dd>
+          <dt>密度</dt><dd>指令 32/36px、格 28/32px、內文 14px、無動態（motion 0）</dd>
+          <dt>色彩</dt><dd>僅亮色；29 個語意角色；紫色 porcelain v3</dd>
+          <dt>強項</dt><dd>可執行 WCAG 門檻、受保護角色、forced-colors、IME 安全的 Esc</dd>
+          <dt>共用性</dt><dd>無套件；其品質契約明言不做跨產品平台</dd>
+          <dt>Figma</dt><dd>權威是已核准的 Figma 節點（bridge 由 code 繪製圖層）；檔內變數集合仍是早期藍／青值，未與程式碼連動</dd>
+        </dl>
+      </div>
+      <div class="box stack-sm">
+        <h3>E3 Linear 治理與既有決策</h3>
+        <dl class="kv">
+          <dt>文件 05</dt><dd>Tachiko 不屬於本案產品、資料或 IP；不混用其 GitHub、付款、資料庫或商標</dd>
+          <dt>P-75</dt><dd>MVP 起始包明定不啟動 Figma redesign</dd>
+          <dt>ADR-0006</dt><dd>原生 CSS＋custom properties、CSS Modules；否決 MUI/AntD/Mantine/shadcn/Tailwind/CSS-in-JS；函式庫只在第一個真實需求時引入</dd>
+          <dt>Linear</dt><dd>無任何品牌指南、色票、字型或 mockup</dd>
+        </dl>
+      </div>
+      <div class="box stack-sm">
+        <h3>E4 產品範圍（設計需涵蓋的表面）</h3>
+        <dl class="kv">
+          <dt>顧客</dt><dd>C01 桌位確認 → C02 菜單 → C03 商品選項 → C04 共用購物車 → C05 付款方式 → C06 訂單／付款狀態（分開顯示）</dd>
+          <dt>店員</dt><dd>S01 桌況、S02 桌詳細、S03 現金結帳、S04 關桌確認（手機＋平板）</dd>
+          <dt>廚房</dt><dd>K01 三欄 KDS，一單一卡、不顯示價格</dd>
+          <dt>後台</dt><dd>M01 菜單列表＋店舖切換、M02 商品編輯（含顧客畫面即時預覽）</dd>
+          <dt>未來</dt><dd>MOD-02 排班、MOD-03 財務（高密度）、MOD-07 會員白標</dd>
+          <dt>限制</dt><dd>日文＋繁中；無授權商品照片；顧客端 JS 重量為明文限制</dd>
+        </dl>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="proto">
+    <div class="read stack-sm">
+      <span class="eyebrow">03 · 設計驗證</span>
+      <h2 id="proto">Mobile Order 可操作原型</h2>
+      <p class="muted small">以 DEMO 店 シロナガスクジラ 的 9 個可點餐品項與「ごはんの量」必選選項建構。全部顏色、字級與尺寸都取自上方提案的 token。可切換語言、店家品牌色與網路狀態；點商品 → 選項 → 共用購物車 → 確認金額 → 訂單狀態。此原型不連接任何 API，也不進行付款。</p>
+    </div>
+    <div class="lab">
+      <div class="phone" id="phone">
+        <div class="screen tds" data-surface="guest" id="screen" lang="ja"></div>
+      </div>
+      <div class="controls">
+        <div class="control-group"><span>介面語言（菜單品名維持店家提供的日文）</span>
+          <div class="seg" id="ctl-lang"><button type="button" data-v="ja" aria-pressed="true">日本語</button><button type="button" data-v="zh" aria-pressed="false">繁體中文</button></div></div>
+        <div class="control-group"><span>店家品牌色（除 Tojima 既定外皆為假想色，非店家核准）</span>
+          <div class="seg" id="ctl-brand"></div>
+          <div class="color-row"><input type="color" id="brand-picker" value="#174d3c" aria-label="自訂店家色"><input type="text" id="brand-hex" value="#174d3c" aria-label="自訂店家色 hex" spellcheck="false"><span class="small muted">輸入任意顏色測試閘門</span></div>
+          <div class="gate" id="gate" aria-live="polite"></div></div>
+        <div class="control-group"><span>網路狀態</span>
+          <div class="seg" id="ctl-net"><button type="button" data-v="ok" aria-pressed="true">正常</button><button type="button" data-v="stale" aria-pressed="false">連線不穩</button></div></div>
+        <div class="control-group"><span>C06 例外狀態</span>
+          <div class="seg" id="ctl-exc"><button type="button" data-v="none" aria-pressed="true">一般</button><button type="button" data-v="unknown" aria-pressed="false">付款不明</button><button type="button" data-v="review" aria-pressed="false">已付款・店家確認中</button><button type="button" data-v="cancelled" aria-pressed="false">已取消</button></div></div>
+        <div class="control-group"><span>跳至畫面</span>
+          <div class="seg" id="ctl-screen"><button type="button" data-v="menu">C02 菜單</button><button type="button" data-v="item">C03 選項</button><button type="button" data-v="cart">C04 購物車</button><button type="button" data-v="confirm">C05 確認</button><button type="button" data-v="status">C06 狀態</button></div></div>
+        <ol class="notes">
+          <li><b class="tag">UX-1</b><span><b>菜單優先。</b>首屏即是分類與品項；共用購物車改為底部常駐列（件數＋含稅合計＋同步狀態），點開為 sheet。</span></li>
+          <li><b class="tag">UX-2</b><span><b>文字優先的品項列。</b>沒有授權照片也成立（DEMO-01 禁用第三方照片）；店家提供照片時以 72px 縮圖插槽加入，不改版面。</span></li>
+          <li><b class="tag">UX-3</b><span><b>選項在 sheet 內完成。</b>必選群組未選時按鈕仍可按，按下後以受保護的錯誤色標示群組並移動焦點，而非灰掉按鈕讓人猜原因。</span></li>
+          <li><b class="tag">UX-4</b><span><b>調理狀態與付款狀態分兩條軌道。</b>對應規格「訂單狀態與付款狀態分開顯示」。刷卡先顯示「等待付款」，要明確完成付款（原型以模擬按鈕代替 Stripe）才變成「已付款」；「C06 例外狀態」可切換不明、已付款待店家確認、已取消，不猜測。</span></li>
+          <li><b class="tag">UX-5</b><span><b>連線不穩時誠實降級。</b>顯示最後同步時間、停用送單並說明原因；購物車內容保留。</span></li>
+          <li><b class="tag">UX-6</b><span><b>顧客看到的是店家，不是平台。</b>頂部為店名與桌號，「Powered by Tojima」只在頁尾；為 MOD-07 白標預留。</span></li>
+          <li><b class="tag">UX-7</b><span><b>DEMO／參考價格標示為全域受保護橫幅</b>，不再每個品項重複；購物車與確認 sheet 內也重複一行，避免被 sheet 遮住。不可被品牌色覆蓋。</span></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="band" aria-labelledby="surf">
+    <div class="read stack-sm">
+      <span class="eyebrow">04 · 表面模式</span>
+      <h2 id="surf">同一套元件，四種密度</h2>
+      <p class="muted small">以下三個樣本與上方手機使用相同的 CSS 類別，只有容器上的 <code>data-surface</code> 不同。店家品牌層只作用於顧客端；店員、廚房與後台一律使用平台外觀，避免店家色干擾作業判讀。</p>
+    </div>
+    <div class="specimen">
+      <div class="specimen-label"><b>Floor · S01 桌況（店員手機／平板）</b><span class="muted">內文 15px · 觸控 ≥ 44px · 平台色</span></div>
+      <div class="specimen-body tds" data-surface="floor" lang="ja"><div class="floor-grid" id="floor"></div></div>
+    </div>
+    <div class="specimen">
+      <div class="specimen-label"><b>KDS · K01 廚房看板（暗色）</b><span class="muted">內文 20px · 桌號 40px · 觸控 ≥ 48px · 不顯示價格</span></div>
+      <div class="specimen-body tds" data-surface="kds" lang="ja"><div class="kds-cols" id="kds"></div></div>
+    </div>
+    <div class="specimen">
+      <div class="specimen-label"><b>Office · M01 菜單列表（後台桌面）</b><span class="muted">內文 14px · 列高 36px · 指標裝置</span></div>
+      <div class="specimen-body tds" data-surface="office" lang="ja" id="office"></div>
+    </div>
+  </section>
+
+  <section class="stack" aria-labelledby="tok">
+    <div class="read stack-sm">
+      <span class="eyebrow">05 · Token 與對比度</span>
+      <h2 id="tok">在瀏覽器內即時計算的門檻</h2>
+      <p class="muted small">下表由本頁讀取各表面實際解析後的 token，以 WCAG 2.1 公式即時計算；與附檔 <code>contrast-gate.mjs</code>（Node 版，含 2,000 個隨機店家色模糊測試）使用同一份 <code>tokens.css</code>。</p>
+    </div>
+    <div class="audit-summary" id="audit-summary"></div>
+    <div class="scroll-x"><table class="audit" id="audit"></table></div>
+    <h3>修正前後（顧客端）</h3>
+    <div class="scroll-x"><table class="audit before-after">
+      <thead><tr><th>用途</th><th>現行值</th><th>現行對比</th><th>提案 token</th><th>提案對比</th></tr></thead>
+      <tbody>
+        <tr><td>次要文字（UI CSS 27 處）</td><td><span class="chip">#748079</span></td><td class="r">3.73</td><td><span class="chip">--color-text-muted #56635b</span></td><td class="r">5.81</td></tr>
+        <tr><td>焦點環</td><td><span class="chip">#d2a36b</span></td><td class="r">2.07</td><td><span class="chip">--color-focus #0b5fcc</span></td><td class="r">5.50</td></tr>
+        <tr><td>必選提示</td><td><span class="chip">#d97943</span></td><td class="r">2.99</td><td><span class="chip">--color-danger-ink #a3302a</span></td><td class="r">6.97</td></tr>
+        <tr><td>同步說明</td><td><span class="chip">#8a968e</span></td><td class="r">2.96</td><td><span class="chip">--color-text-muted</span></td><td class="r">6.30</td></tr>
+        <tr><td>停售選項</td><td><span class="chip">#abb1ac</span></td><td class="r">2.11</td><td><span class="chip">--color-text-muted＋文字標示</span></td><td class="r">6.30</td></tr>
+        <tr><td>最小字級</td><td><span class="chip">9px</span></td><td class="r">—</td><td><span class="chip">--text-meta 12px</span></td><td class="r">—</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <section class="stack" aria-labelledby="impl">
+    <div class="read stack-sm">
+      <span class="eyebrow">06 · 後續實施方向（已批准，DS-1 規劃中）</span>
+      <h2 id="impl">五個小包，每包都有第一個真實需求</h2>
+      <p class="muted small">遵守 ADR-0006「第一個真實需求才引入」與「不為統一而重寫已驗收畫面」。實作由 Codex 執行，每包以全新唯讀 Codex 審查同一 SHA，並附實機截圖。</p>
+    </div>
+    <div class="phases">
+      <div class="phase"><span class="phase-id">DS-1</span><div class="stack-sm"><b>Token 基礎＋無障礙修正</b><span class="small muted">新增 <code>web/src/shared/tokens.css</code>，把舊變數（<code>--ink</code>、<code>--muted</code>…）對應到語意 token；修正對比與 9–11px 字級；把對比門檻加入 <code>pnpm check</code>（Vitest）。外觀延續現在的綠色。第一個需求：P-84 無障礙 GAP。</span></div></div>
+      <div class="phase"><span class="phase-id">DS-2</span><div class="stack-sm"><b>顧客端 IA：菜單優先＋sheet＋常駐購物車列＋雙軌狀態</b><span class="small muted">改動 <code>App.tsx</code> 的版面，不改 API 與 cart CAS 邏輯。底部 sheet 是第一個需要焦點收容的複雜元件，依 ADR-0006 於此包引入 React Aria（Dialog/Modal）。需 WebKit＋實機驗收（P-84 7g）。</span></div></div>
+      <div class="phase"><span class="phase-id">DS-3</span><div class="stack-sm"><b>Floor / KDS 表面</b><span class="small muted">暗色 KDS、大字、輪詢失敗與資料過期提示（ADR-0006 已知缺口）。不含店家品牌。</span></div></div>
+      <div class="phase"><span class="phase-id">DS-4</span><div class="stack-sm"><b>店家品牌層（需 Q2 批准）</b><span class="small muted">伺服器端儲存單一店家色，Go 端或建置期執行同一閘門；M02 商品編輯的顧客畫面預覽沿用此層。</span></div></div>
+      <div class="phase"><span class="phase-id">DS-5</span><div class="stack-sm"><b>Office 高密度元件</b><span class="small muted">只在 MOD-02/03 需求成立後擴充表格、篩選、日期區間（React Aria）。</span></div></div>
+    </div>
+    <div class="box small stack-sm">
+      <h3>工具與流程的判斷</h3>
+      <p><b>程式碼是唯一權威；Figma 為選用鏡像。</b>理由：Linear 無設計稿、P-75 鎖定 MVP 範圍、目前沒有專職設計師；而 bridge 能繪製圖層，但不能建立或同步變數。若日後需要 Figma 審查，應建立<b>獨立的 Tojima Figma 檔</b>（目前 bridge 連著的是 Tachiko Sheet 檔，不可寫入本案內容），並先把本機 bridge 由 0.0.19 更新到已驗證的 0.0.22（才有 <code>import_html_layers</code>）。</p>
+      <p><b>本輪研究的工具分工：</b>Claude（Opus）負責研究、決策與原型；Linear／Sheet 調查以平行子代理完成；提案由全新唯讀 Codex 審查。</p>
+    </div>
+  </section>
+
+  <section class="stack" aria-labelledby="ask">
+    <div class="read stack-sm">
+      <span class="eyebrow">07 · Owner 決策（2026-10-19 全數批准）</span>
+      <h2 id="ask">七項決策：全部採用建議預設</h2>
+    </div>
+    <div class="decisions">
+      <div class="decision"><span class="q">Q1</span><div><b>採用方案 D 作為設計系統方向。</b><span class="small muted"> 已採用。DS-1 已進入規劃。</span></div></div>
+      <div class="decision"><span class="q">Q2</span><div><b>店家品牌色在 MOD-05 試營運就開放，還是留到 MOD-07？</b><span class="small muted"> 建議：token 掛勾現在就做（成本低），試營運期間店家色維持 Tojima 既定，試營運後再開放。</span></div></div>
+      <div class="decision"><span class="q">Q3</span><div><b>顧客端語言是否加入英文。</b><span class="small muted"> 建議：MVP 維持日文＋繁中；版面已預留較長字串，英文待觀光客需求確認。</span></div></div>
+      <div class="decision"><span class="q">Q4</span><div><b>顧客端以店家為主、平台僅於頁尾露出。</b><span class="small muted"> 建議：採用（UX-6）。</span></div></div>
+      <div class="decision"><span class="q">Q5</span><div><b>程式碼為設計唯一權威，Figma 為選用鏡像。</b><span class="small muted"> 建議：採用；若需 Figma，另建 Tojima 專用檔案。</span></div></div>
+      <div class="decision"><span class="q">Q6</span><div><b>顧客端不下載網路字型，使用系統日文／繁中字型。</b><span class="small muted"> 建議：採用（顧客端重量限制與低階手機）。</span></div></div>
+      <div class="decision"><span class="q">Q7</span><div><b>商品照片：文字優先，有授權照片時以縮圖插槽加入。</b><span class="small muted"> 建議：採用；照片授權由東島さん提供。</span></div></div>
+    </div>
+  </section>
+
+  <footer class="page-foot">
+    <span>附檔（repo 未追蹤目錄 <code>Claude outputs/design-system-research/</code>）：<code>tokens.css</code>、<code>contrast-gate.mjs</code>、<code>gate-output.txt</code>、<code>evidence/</code>、本頁原始檔。</span>
+    <span>所有店家色除 Tojima 既定 #174d3c 外均為假想示意，非任何店家的品牌。DEMO 菜單價格為歷史參考價，非現行店內價格。</span>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  // ---- WCAG + brand gate (same algorithm as contrast-gate.mjs) ----
+  function rgb(hex) { var h = hex.replace('#', ''); if (h.length === 3) h = h.split('').map(function (c) { return c + c; }).join(''); return [0, 2, 4].map(function (i) { return parseInt(h.slice(i, i + 2), 16); }); }
+  function lum(hex) { var c = rgb(hex).map(function (v) { var s = v / 255; return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4); }); return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]; }
+  function cr(a, b) { var x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  function mix(a, b, t) { var p = rgb(a), q = rgb(b); return '#' + p.map(function (c, i) { return Math.round(c + (q[i] - c) * t).toString(16).padStart(2, '0'); }).join(''); }
+  var INK = '#1b2a23', WHITE = '#ffffff', BG = '#f6f6f1', SURFACE = '#ffffff';
+  function deriveBrand(input) {
+    var primary = input.toLowerCase(), adjusted = false, t;
+    if (cr(WHITE, primary) < 4.5 && cr(INK, primary) < 4.5) {
+      for (t = 0.05; t <= 1.0001 && cr(WHITE, primary) < 4.5; t += 0.05) primary = mix(input, INK, t);
+      adjusted = true;
+    }
+    var on = cr(WHITE, primary) >= 4.5 ? WHITE : INK;
+    var ink = primary;
+    for (t = 0; t <= 1.0001 && (cr(ink, BG) < 4.5 || cr(ink, SURFACE) < 4.5); t += 0.05) ink = mix(primary, INK, t);
+    return { input: input, primary: primary, adjusted: adjusted, onPrimary: on, ink: ink, focus: on };
+  }
+
+  // ---- Data: DEMO-01 orderable items (historical reference prices, tax-inclusive) ----
+  var CATS = [
+    { key: 'lunch', ja: 'ランチ定食', zh: '午間定食' },
+    { key: 'gyoza', ja: '博多餃子', zh: '博多煎餃' },
+    { key: 'small', ja: '酒肴・小皿', zh: '下酒小菜' }
+  ];
+  var ITEMS = [
+    { id: 'shiro', cat: 'lunch', name: 'シロナガスクジラ定食', price: 960, group: true },
+    { id: 'karaage', cat: 'lunch', name: '塩唐揚げ定食', price: 960 },
+    { id: 'gyozateishoku', cat: 'lunch', name: '餃子定食', price: 1200 },
+    { id: 'nanban', cat: 'lunch', name: 'タルタルチキン南蛮定食', price: 980 },
+    { id: 'curry', cat: 'lunch', name: '牛すじカレー定食', price: 1000 },
+    { id: 'saba', cat: 'lunch', name: 'サバの味噌煮定食', price: 1080, soldOut: true },
+    { id: 'teppan', cat: 'gyoza', name: '博多鉄板餃子（12個）', price: 1150 },
+    { id: 'potesara', cat: 'small', name: '高菜明太ポテトサラダ', price: 560 },
+    { id: 'tsukemono', cat: 'small', name: '三種の漬物盛り合わせ', price: 720 }
+  ];
+  var RICE = [
+    { key: 'small', ja: '小（100g）', zh: '小（100g）', delta: 0 },
+    { key: 'regular', ja: '普通', zh: '普通', delta: 20 }
+  ];
+  var T = {
+    ja: {
+      table: '5番テーブル', lang: '繁中', demoT: 'DEMO・参考価格', demoB: '現行の店内価格ではありません。実際の注文・支払いは行われません。',
+      offT: '通信が不安定です', offB: '表示は 14:32 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
+      taxIn: '税込', soldOut: '販売停止中', inCart: '点', viewCart: 'カートを見る', synced: 'テーブルで共有中・2秒前に同期', stale: '同期待ち・14:32 時点',
+      powered: 'Powered by Tojima', menuNote: 'メニュー名は店舗提供の表記です',
+      required: '必須', chooseRice: 'ごはんの量を選んでください', qty: '数量', add: 'カートに追加', close: '閉じる', rice: 'ごはんの量',
+      cartTitle: 'テーブルの共有カート', cartSub: '同じテーブルの全員が編集できます', remove: '削除', total: '合計', taxLine: '内消費税（10%対象）',
+      checkPrice: '金額を確認する', confirmTitle: '注文内容の確認', payWith: 'お支払い方法', payCard: 'クレジットカード（Stripe）', payCash: '現金（レジで後払い）',
+      submit: 'この内容で注文する', blocked: '通信が回復すると注文できます', back: '戻る', added: 'カートに追加しました',
+      orderNo: '注文番号', kitchen: '調理', payment: 'お支払い', kSteps: ['受付待ち', '調理中', '提供済み'], pSteps: ['未払い', '確認中', '支払い済み'],
+      kNow: '店員の受付待ち', pNow: 'レジでお支払いください', pPaid: 'カードで支払い済み', pCardPending: 'カード決済の手続き待ち', payNow: 'カードで支払う（Stripe・シミュレーション）', pUnknown: '確認中・店員が確認します', pReview: '支払い済み・店舗確認中', kReview: '店舗の確認待ち', kCancelled: 'この注文は取り消されました', pCancelledCard: '返金は店舗が対応します', pCancelledCash: 'お支払いは不要です', sheetDemo: 'DEMO・参考価格：実際の注文・支払いは行われません', more: '追加で注文する', copy: '注文リンクをコピー', copied: 'リンクをコピーしました（原型）', empty: 'カートは空です', other: '他の端末で追加'
+    },
+    zh: {
+      table: '5 號桌', lang: '日本語', demoT: 'DEMO・參考價格', demoB: '並非店內現行價格，不會實際下單或付款。',
+      offT: '網路連線不穩', offB: '目前顯示 14:32 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
+      taxIn: '含稅', soldOut: '暫停販售', inCart: '件', viewCart: '查看購物車', synced: '同桌共用中・2 秒前同步', stale: '等待同步・14:32 的內容',
+      powered: 'Powered by Tojima', menuNote: '菜單品名為店家提供的原文',
+      required: '必選', chooseRice: '請選擇白飯份量', qty: '數量', add: '加入購物車', close: '關閉', rice: '白飯份量',
+      cartTitle: '同桌共用購物車', cartSub: '同桌的每個人都可以修改', remove: '刪除', total: '合計', taxLine: '內含消費稅（10% 對象）',
+      checkPrice: '確認金額', confirmTitle: '確認訂單內容', payWith: '付款方式', payCard: '信用卡（Stripe）', payCash: '現金（櫃台後付）',
+      submit: '送出這筆訂單', blocked: '恢復連線後即可送出', back: '返回', added: '已加入購物車',
+      orderNo: '訂單編號', kitchen: '餐點', payment: '付款', kSteps: ['等待接單', '製作中', '已送達'], pSteps: ['未付款', '確認中', '已付款'],
+      kNow: '等待店員接單', pNow: '請至櫃台付款', pPaid: '已用信用卡付款', pCardPending: '等待完成刷卡付款', payNow: '前往刷卡付款（Stripe・模擬）', pUnknown: '確認中・將由店員確認', pReview: '已付款・店家確認中', kReview: '等待店家確認', kCancelled: '此訂單已取消', pCancelledCard: '退款由店家處理', pCancelledCash: '不需付款', sheetDemo: 'DEMO・參考價格：不會實際下單或付款', more: '繼續加點', copy: '複製訂單連結', copied: '已複製連結（原型）', empty: '購物車是空的', other: '其他手機加入'
+    }
+  };
+
+  var state = {
+    lang: 'ja', net: 'ok', view: 'menu', brand: deriveBrand('#174d3c'), cat: 'lunch',
+    item: null, rice: null, qty: 1, riceError: false, pay: 'cash', cardPaid: false, exc: 'none', toast: '',
+    cart: [{ id: 'gyozateishoku', qty: 1, rice: null, by: 'other' }, { id: 'teppan', qty: 2, rice: null, by: 'other' }]
+  };
+  var screen = document.getElementById('screen');
+  var SHEETS = { item: 1, cart: 1, confirm: 1 }, lastView = 'menu', invoker = null;
+  // Animate only when a sheet opens from the page, not on every re-render inside it.
+  function enterCls() { return SHEETS[lastView] ? '' : ' enter'; }
+  function yen(n) { return '¥' + n.toLocaleString('ja-JP'); }
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function itemById(id) { return ITEMS.filter(function (i) { return i.id === id; })[0]; }
+  function linePrice(l) { var it = itemById(l.id); var d = l.rice ? RICE.filter(function (r) { return r.key === l.rice; })[0].delta : 0; return (it.price + d) * l.qty; }
+  function cartCount() { return state.cart.reduce(function (s, l) { return s + l.qty; }, 0); }
+  function cartTotal() { return state.cart.reduce(function (s, l) { return s + linePrice(l); }, 0); }
+  function taxOf(total) { return Math.floor(total * 10 / 110); }
+  function qtyInCart(id) { return state.cart.filter(function (l) { return l.id === id; }).reduce(function (s, l) { return s + l.qty; }, 0); }
+
+  function applyBrand() {
+    var b = state.brand, s = screen.style;
+    s.setProperty('--brand-primary', b.primary); s.setProperty('--brand-on-primary', b.onPrimary);
+    s.setProperty('--brand-ink', b.ink); s.setProperty('--brand-focus', b.focus);
+    var rows = [
+      ['店家輸入色', b.input, null],
+      ['填色 fill' + (b.adjusted ? '（已加深）' : ''), b.primary, null],
+      ['填色上文字', b.onPrimary, cr(b.onPrimary, b.primary), 4.5],
+      ['品牌文字色（頁面底）', b.ink, cr(b.ink, BG), 4.5],
+      ['品牌文字色（卡片）', b.ink, cr(b.ink, SURFACE), 4.5],
+      ['焦點環（填色上）', b.focus, cr(b.focus, b.primary), 3]
+    ];
+    document.getElementById('gate').innerHTML = rows.map(function (r) {
+      var right = r[2] == null ? '' : ' <span class="' + (r[2] >= r[3] ? 'ok' : 'ng') + '">' + r[2].toFixed(2) + ' ≥ ' + r[3] + '</span>';
+      return '<div class="gate-row"><span><span class="swatch-dot" style="background:' + r[1] + '"></span>' + r[0] + '</span><span class="mono">' + r[1] + right + '</span></div>';
+    }).join('') + (b.adjusted ? '<div class="small muted" style="margin-top:4px">此顏色白字與深字都無法達到 4.5:1，閘門已保留色相並加深填色。店家後台需預覽此結果。</div>' : '');
+  }
+
+  function banners(t) {
+    var h = '<div class="t-banner demo" role="note"><div><strong>' + t.demoT + '</strong>' + t.demoB + '</div></div>';
+    if (state.net === 'stale') h += '<div class="t-banner offline" role="status"><div><strong>' + t.offT + '</strong>' + t.offB + '</div></div>';
+    return h;
+  }
+  function header(t) {
+    return '<div class="store-head on-brand"><span class="name" lang="ja">博多餃子酒場 シロナガスクジラ</span><button type="button" class="lang" data-act="lang">' + t.lang + '</button><span class="table">' + t.table + '</span></div>';
+  }
+  function cartbar(t) {
+    if (!cartCount()) return '';
+    return '<div class="cartbar"><button type="button" class="t-btn primary" data-act="open-cart"><span><span class="sync">' + (state.net === 'ok' ? t.synced : t.stale) + '</span><span><span class="count">' + cartCount() + '</span>' + t.viewCart + '</span></span><span class="t-price" style="color:inherit">' + yen(cartTotal()) + '</span></button></div>';
+  }
+  function menu(t) {
+    var h = '<nav class="cat-nav" aria-label="カテゴリ">' + CATS.map(function (c) {
+      return '<button type="button" class="cat-chip" data-act="cat" data-v="' + c.key + '" aria-current="' + (state.cat === c.key) + '">' + c[state.lang] + '</button>';
+    }).join('') + '</nav>';
+    CATS.forEach(function (c) {
+      h += '<section class="menu-section" id="sec-' + c.key + '" data-cat="' + c.key + '"><h2>' + c[state.lang] + '</h2>';
+      ITEMS.filter(function (i) { return i.cat === c.key; }).forEach(function (i) {
+        var q = qtyInCart(i.id);
+        h += '<button type="button" class="menu-row' + (i.soldOut ? ' unavailable' : '') + '" data-act="item" data-v="' + i.id + '"' + (i.soldOut ? ' aria-disabled="true"' : '') + '>' +
+          '<span class="title" lang="ja">' + esc(i.name) + '</span>' +
+          '<span class="add">' + (q ? '<span class="qty-badge" aria-label="' + q + t.inCart + '">' + q + '</span>' : '') + (i.soldOut ? '' : '<span class="plus" aria-hidden="true">+</span>') + '</span>' +
+          '<span class="sub">' + (i.soldOut ? '<span class="t-status neutral">' + t.soldOut + '</span>' : '<span class="t-price">' + yen(i.price) + '<small>' + t.taxIn + '</small></span>' + (i.group ? ' ・ ' + t.rice : '')) + '</span></button>';
+      });
+      h += '</section>';
+    });
+    h += '<div class="powered"><span>' + t.menuNote + '</span><span>' + t.powered + '</span></div>';
+    return h;
+  }
+  function itemSheet(t) {
+    var i = itemById(state.item); if (!i) return '';
+    var d = state.rice ? RICE.filter(function (r) { return r.key === state.rice; })[0].delta : 0;
+    var g = i.group ? '<fieldset class="t-group" id="rice-group" data-invalid="' + state.riceError + '"' + (state.riceError ? ' aria-describedby="rice-err"' : '') + '><legend>' + t.rice + ' <span class="t-status ' + (state.riceError ? 'danger' : 'neutral') + '">' + t.required + '</span></legend>' +
+      RICE.map(function (r) {
+        return '<label class="t-radio-card"><input type="radio" name="rice" value="' + r.key + '"' + (state.rice === r.key ? ' checked' : '') + ' data-act="rice"><span>' + r[state.lang] + '</span><span class="t-price">' + (r.delta ? '+' + yen(r.delta) : '±¥0') + '</span></label>';
+      }).join('') + (state.riceError ? '<span class="field-error" id="rice-err" role="alert">' + t.chooseRice + '</span>' : '') + '</fieldset>' : '';
+    return '<div class="scrim" data-act="close"></div><div class="sheet' + enterCls() + '" role="dialog" aria-modal="true" aria-labelledby="sheet-title">' +
+      '<div class="sheet-head"><div class="stack-sm"><h3 id="sheet-title" lang="ja">' + esc(i.name) + '</h3><span class="t-price">' + yen(i.price) + '<small>' + t.taxIn + '</small></span></div><button type="button" class="close-x" data-act="close" aria-label="' + t.close + '">×</button></div>' +
+      '<div class="sheet-body">' + g + '<div class="qty-row"><b>' + t.qty + '</b><div class="t-stepper"><button type="button" data-act="qty" data-v="-1" aria-label="−">−</button><output aria-live="polite">' + state.qty + '</output><button type="button" data-act="qty" data-v="1" aria-label="+">+</button></div></div></div>' +
+      '<div class="sheet-foot"><p class="sheet-demo">' + t.sheetDemo + '</p><button type="button" class="t-btn primary block" data-act="add">' + t.add + ' · ' + yen((i.price + d) * state.qty) + '</button></div></div>';
+  }
+  function cartSheet(t, confirm) {
+    var lines = state.cart.map(function (l, idx) {
+      var it = itemById(l.id); var r = l.rice ? RICE.filter(function (x) { return x.key === l.rice; })[0] : null;
+      return '<div class="cart-line"><div><b lang="ja">' + esc(it.name) + '</b>' + (r ? '<div class="opt">' + t.rice + '：' + r[state.lang] + '</div>' : '') + (l.by === 'other' ? '<div class="opt">' + t.other + '</div>' : '') + '</div><span class="t-price">' + yen(linePrice(l)) + '</span>' +
+        (confirm ? '<span class="opt">× ' + l.qty + '</span>' : '<div class="t-stepper"><button type="button" data-act="line" data-i="' + idx + '" data-v="-1" aria-label="−">−</button><output>' + l.qty + '</output><button type="button" data-act="line" data-i="' + idx + '" data-v="1" aria-label="+">+</button></div>') + '</div>';
+    }).join('') || '<p class="opt">' + t.empty + '</p>';
+    var total = cartTotal();
+    var totals = '<div class="totals"><div class="grand"><span>' + t.total + '（' + t.taxIn + '）</span><span>' + yen(total) + '</span></div><div class="tax"><span>' + t.taxLine + '</span><span>' + yen(taxOf(total)) + '</span></div></div>';
+    var sync = '<div class="sync-line' + (state.net === 'ok' ? '' : ' stale') + '"><span class="dot"></span>' + (state.net === 'ok' ? t.synced : t.stale) + '</div>';
+    var body, foot, title = confirm ? t.confirmTitle : t.cartTitle;
+    if (!confirm) {
+      body = '<p class="opt" style="font-size:var(--text-meta);color:var(--color-text-muted)">' + t.cartSub + '</p>' + lines + totals;
+      foot = '<p class="sheet-demo">' + t.sheetDemo + '</p>' + sync + '<button type="button" class="t-btn primary block" data-act="confirm"' + (cartCount() ? '' : ' aria-disabled="true"') + '>' + t.checkPrice + '</button>';
+    } else {
+      body = lines + totals + '<fieldset class="t-group"><legend>' + t.payWith + '</legend><div class="pay-options">' +
+        ['card', 'cash'].map(function (k) { return '<label class="t-radio-card"><input type="radio" name="pay" value="' + k + '"' + (state.pay === k ? ' checked' : '') + ' data-act="pay"><span>' + (k === 'card' ? t.payCard : t.payCash) + '</span><span></span></label>'; }).join('') + '</div></fieldset>';
+      var blocked = state.net !== 'ok';
+      foot = '<p class="sheet-demo">' + t.sheetDemo + '</p>' + sync + '<button type="button" class="t-btn primary block" data-act="submit"' + (blocked ? ' aria-disabled="true" aria-describedby="blocked-why"' : '') + '>' + t.submit + ' · ' + yen(total) + '</button>' +
+        (blocked ? '<span class="field-error" id="blocked-why">' + t.blocked + '</span>' : '') + '<button type="button" class="t-btn ghost block" data-act="open-cart">' + t.back + '</button>';
+    }
+    return '<div class="scrim" data-act="close"></div><div class="sheet' + enterCls() + '" role="dialog" aria-modal="true" aria-labelledby="sheet-title"><div class="sheet-head"><h3 id="sheet-title">' + title + '</h3><button type="button" class="close-x" data-act="close" aria-label="' + t.close + '">×</button></div><div class="sheet-body">' + body + '</div><div class="sheet-foot">' + foot + '</div></div>';
+  }
+  function statusScreen(t) {
+    function kitchenTrack(t) {
+      if (state.exc === 'cancelled') return track(t.kitchen, t.kSteps, -1, t.kCancelled, 'danger');
+      if (state.exc === 'review') return track(t.kitchen, t.kSteps, 0, t.kReview, 'warning');
+      return track(t.kitchen, t.kSteps, 0, t.kNow, 'info');
+    }
+    function paymentTrack(t) {
+      var card = state.pay === 'card';
+      if (state.exc === 'cancelled') return track(t.payment, t.pSteps, -1, card ? t.pCancelledCard : t.pCancelledCash, 'neutral');
+      if (state.exc === 'unknown') return track(t.payment, t.pSteps, 1, t.pUnknown, 'warning');
+      if (state.exc === 'review') return track(t.payment, t.pSteps, 3, t.pReview, 'info');
+      if (card) return state.cardPaid ? track(t.payment, t.pSteps, 3, t.pPaid, 'success') : track(t.payment, t.pSteps, 0, t.pCardPending, 'warning');
+      return track(t.payment, t.pSteps, 0, t.pNow, 'warning');
+    }
+    function track(label, steps, cur, now, kind) {
+      return '<div class="track"><div class="track-head"><span>' + label + '</span><span class="t-status ' + kind + '">' + now + '</span></div><ol class="steps">' +
+        steps.map(function (s, i) { return '<li data-state="' + (i < cur ? 'done' : i === cur ? 'current' : 'todo') + '">' + s + '</li>'; }).join('') + '</ol></div>';
+    }
+    return '<div class="status-screen"><span class="opt" style="font-size:var(--text-meta);color:var(--color-text-muted)">' + t.orderNo + '</span><span class="order-no" tabindex="-1">#0012</span>' +
+      kitchenTrack(t) + paymentTrack(t) +
+      (state.pay === 'card' && !state.cardPaid && state.exc === 'none' ? '<button type="button" class="t-btn primary block" data-act="pay-card">' + t.payNow + '</button>' : '') +
+      '<button type="button" class="t-btn primary block" data-act="more">' + t.more + '</button><button type="button" class="t-btn secondary block" data-act="copy">' + t.copy + '</button></div>';
+  }
+
+  function render(focusSel) {
+    var t = T[state.lang];
+    screen.setAttribute('lang', state.lang === 'ja' ? 'ja' : 'zh-Hant');
+    var scrollTop = (screen.querySelector('.scroller') || {}).scrollTop || 0;
+    var hadFocus = screen.contains(document.activeElement);
+    var main = state.view === 'status' ? statusScreen(t) : menu(t);
+    var h = header(t) + banners(t) + '<div class="scroller" id="scroller">' + main + '</div>';
+    if (state.view !== 'status') h += cartbar(t);
+    if (state.view === 'item') h += itemSheet(t);
+    if (state.view === 'cart') h += cartSheet(t, false);
+    if (state.view === 'confirm') h += cartSheet(t, true);
+    if (state.toast) h += '<div class="toast" role="status">' + state.toast + '</div>';
+    screen.innerHTML = h;
+    lastView = state.view;
+    var modal = !!screen.querySelector('.sheet');
+    Array.prototype.forEach.call(screen.children, function (c) { if (modal && !c.matches('.sheet, .scrim, .toast')) c.setAttribute('inert', ''); });
+    var sc = screen.querySelector('.scroller'); if (sc && state.view !== 'status') sc.scrollTop = scrollTop;
+    var f = focusSel ? screen.querySelector(focusSel) : null;
+    if (!f && screen.querySelector('.sheet')) f = screen.querySelector('.sheet .close-x');
+    // Any re-render that removed the focused element must land focus on a surviving control, never on BODY.
+    if (!f && (focusSel || hadFocus)) f = screen.querySelector('.cat-chip[aria-current="true"]') || screen.querySelector('.order-no');
+    if (f) f.focus({ preventScroll: true });
+    syncControls();
+  }
+  function syncControls() {
+    [['ctl-lang', state.lang], ['ctl-net', state.net], ['ctl-exc', state.exc], ['ctl-screen', state.view === 'item' ? 'item' : state.view]].forEach(function (p) {
+      document.querySelectorAll('#' + p[0] + ' button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === p[1])); });
+    });
+    document.querySelectorAll('#ctl-brand button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.v === state.brand.input)); });
+  }
+  var toastTimer;
+  // Toasts are appended without re-rendering so focus stays where the guest is.
+  function toast(msg) { state.toast = msg; var host = screen.querySelector('.toast'); if (host) host.textContent = msg; else screen.insertAdjacentHTML('beforeend', '<div class="toast" role="status">' + msg + '</div>'); clearTimeout(toastTimer); toastTimer = setTimeout(function () { state.toast = ''; var el = screen.querySelector('.toast'); if (el) el.remove(); }, 1600); }
+  function closeSheet() { state.view = 'menu'; render(invoker || '.cat-chip[aria-current="true"]'); }
+  function openItem(id) { state.item = id; state.rice = null; state.qty = 1; state.riceError = false; state.view = 'item'; render(); }
+
+  screen.addEventListener('click', function (e) {
+    var el = e.target.closest('[data-act]'); if (!el) return;
+    var act = el.dataset.act, t = T[state.lang];
+    if (act === 'lang') { state.lang = state.lang === 'ja' ? 'zh' : 'ja'; render('.lang'); }
+    else if (act === 'cat') {
+      state.cat = el.dataset.v; var sec = screen.querySelector('#sec-' + el.dataset.v), sc = screen.querySelector('.scroller');
+      if (sec && sc) sc.scrollTo({ top: sec.offsetTop - 64, behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' });
+      screen.querySelectorAll('.cat-chip').forEach(function (c) { c.setAttribute('aria-current', String(c.dataset.v === state.cat)); });
+    }
+    else if (act === 'item') { var it = itemById(el.dataset.v); if (it && !it.soldOut) { invoker = '[data-act=item][data-v="' + it.id + '"]'; openItem(it.id); } }
+    else if (act === 'close') { closeSheet(); }
+    else if (act === 'rice') { state.rice = el.value; state.riceError = false; render('input[name=rice]:checked'); }
+    else if (act === 'qty') { state.qty = Math.max(1, Math.min(20, state.qty + Number(el.dataset.v))); render('[data-act=qty][data-v="' + el.dataset.v + '"]'); }
+    else if (act === 'add') {
+      var i = itemById(state.item);
+      if (i.group && !state.rice) { state.riceError = true; render('input[name=rice]'); return; }
+      var ex = state.cart.filter(function (l) { return l.id === i.id && l.rice === (i.group ? state.rice : null) && l.by === 'me'; })[0];
+      if (ex) ex.qty += state.qty; else state.cart.push({ id: i.id, qty: state.qty, rice: i.group ? state.rice : null, by: 'me' });
+      state.view = 'menu'; render(invoker); toast(t.added);
+    }
+    else if (act === 'open-cart') { if (!SHEETS[state.view]) invoker = '.cartbar button'; state.view = 'cart'; render(); }
+    else if (act === 'line') { var li = +el.dataset.i, l = state.cart[li]; l.qty += Number(el.dataset.v); var gone = l.qty <= 0; if (gone) state.cart.splice(li, 1); render(gone ? null : '[data-act=line][data-i="' + li + '"][data-v="' + el.dataset.v + '"]'); }
+    else if (act === 'confirm') { if (cartCount()) { state.view = 'confirm'; render(); } }
+    else if (act === 'pay') { state.pay = el.value; }
+    else if (act === 'submit') { if (state.net === 'ok') { state.cart = []; state.cardPaid = false; state.view = 'status'; invoker = null; render('.order-no'); } }
+    else if (act === 'pay-card') { state.cardPaid = true; render('.order-no'); }
+    else if (act === 'more') { state.view = 'menu'; render(); }
+    else if (act === 'copy') { toast(t.copied); }
+  });
+  screen.addEventListener('keydown', function (e) {
+    if (e.key === 'Escape' && !e.isComposing && e.keyCode !== 229 && screen.querySelector('.sheet')) closeSheet();
+    if (e.key === 'Tab' && screen.querySelector('.sheet')) {
+      var f = screen.querySelectorAll('.sheet button, .sheet input'); if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
+      else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
+    }
+  });
+  screen.addEventListener('scroll', function (e) {
+    if (!e.target.classList || !e.target.classList.contains('scroller')) return;
+    var secs = screen.querySelectorAll('.menu-section'), cur = state.cat;
+    secs.forEach(function (s) { if (s.offsetTop - 80 <= e.target.scrollTop) cur = s.dataset.cat; });
+    if (cur !== state.cat) { state.cat = cur; screen.querySelectorAll('.cat-chip').forEach(function (c) { c.setAttribute('aria-current', String(c.dataset.v === cur)); }); }
+  }, true);
+
+  // ---- Controls ----
+  var PRESETS = [['#174d3c', 'Tojima 既定'], ['#1d3b6e', '深海藍（假想）'], ['#b3261e', '朱紅（假想）'], ['#f2c94c', '芥末黃（假想）'], ['#8a7f74', '灰褐（假想・需調整）']];
+  document.getElementById('ctl-brand').innerHTML = PRESETS.map(function (p) { return '<button type="button" data-v="' + p[0] + '" aria-pressed="false"><span class="swatch-dot" style="background:' + p[0] + '"></span>' + p[1] + '</button>'; }).join('');
+  function setBrand(hex) {
+    if (!/^#[0-9a-fA-F]{6}$/.test(hex)) return;
+    state.brand = deriveBrand(hex.toLowerCase());
+    document.getElementById('brand-picker').value = hex.toLowerCase(); document.getElementById('brand-hex').value = hex.toLowerCase();
+    applyBrand(); render();
+  }
+  document.getElementById('ctl-brand').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) setBrand(b.dataset.v); });
+  document.getElementById('brand-picker').addEventListener('input', function (e) { setBrand(e.target.value); });
+  document.getElementById('brand-hex').addEventListener('change', function (e) { var v = e.target.value.trim(); if (v[0] !== '#') v = '#' + v; setBrand(v); });
+  document.getElementById('ctl-lang').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { state.lang = b.dataset.v; render(); } });
+  document.getElementById('ctl-exc').addEventListener('click', function (e) { var b = e.target.closest('button'); if (!b) return; state.exc = b.dataset.v; state.view = 'status'; render(); });
+  document.getElementById('ctl-net').addEventListener('click', function (e) { var b = e.target.closest('button'); if (b) { state.net = b.dataset.v; render(); } });
+  document.getElementById('ctl-screen').addEventListener('click', function (e) {
+    var b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.v === 'item') { invoker = null; openItem('shiro'); return; }
+    if ((b.dataset.v === 'cart' || b.dataset.v === 'confirm') && !cartCount()) state.cart = [{ id: 'gyozateishoku', qty: 1, rice: null, by: 'other' }];
+    state.view = b.dataset.v; render();
+  });
+
+  // ---- Specimens ----
+  document.getElementById('floor').innerHTML = [
+    { no: '5', st: ['info', '使用中'], facts: [['未払い現金', '¥3,090'], ['調理待ち', '2件']], att: false },
+    { no: '6', st: ['warning', '支払済・未閉卓'], facts: [['未払い現金', '¥0'], ['未提供', '0件']], att: true },
+    { no: '7', st: ['neutral', '空席'], facts: [['未払い現金', '—'], ['調理待ち', '—']], att: false },
+    { no: '8', st: ['danger', '確認が必要'], facts: [['決済状態', '不明'], ['調理待ち', '1件']], att: false }
+  ].map(function (c) {
+    return '<div class="floor-card' + (c.att ? ' attention' : '') + '"><div style="display:flex;justify-content:space-between;align-items:center;gap:8px"><span class="tno">' + c.no + '<small style="font-size:var(--text-label);font-weight:600"> 番</small></span><span class="t-status ' + c.st[0] + '">' + c.st[1] + '</span></div><div class="facts">' +
+      c.facts.map(function (f) { return '<span>' + f[0] + '</span><b>' + f[1] + '</b>'; }).join('') + '</div><button type="button" class="t-btn platform">開く</button></div>';
+  }).join('');
+  function kdsCard(cls, no, ord, el, items, btn) {
+    return '<div class="kds-card ' + cls + '"><div class="top"><span class="tno">' + no + '番</span><span class="elapsed">' + el + '</span></div><span style="color:var(--color-text-muted);font-size:var(--text-meta)">' + ord + '</span><ul>' +
+      items.map(function (i) { return '<li>' + i[0] + ' × ' + i[1] + (i[2] ? '<small>' + i[2] + '</small>' : '') + '</li>'; }).join('') + '</ul><button type="button" class="t-btn platform">' + btn + '</button></div>';
+  }
+  document.getElementById('kds').innerHTML =
+    '<div class="kds-col"><h4><span>受付</span><span>2</span></h4>' + kdsCard('new', '5', '#0012 · 14:31', '01:12', [['シロナガスクジラ定食', 1, 'ごはん：小（100g）'], ['博多鉄板餃子（12個）', 2]], '調理開始') + kdsCard('new', '8', '#0013 · 14:32', '00:20', [['塩唐揚げ定食', 1]], '調理開始') + '</div>' +
+    '<div class="kds-col"><h4><span>調理中</span><span>1</span></h4>' + kdsCard('', '3', '#0010 · 14:24', '08:05', [['餃子定食', 2], ['三種の漬物盛り合わせ', 1]], '完成') + '</div>' +
+    '<div class="kds-col"><h4><span>完成・提供待ち</span><span>1</span></h4>' + kdsCard('ready', '2', '#0009 · 14:19', '12:40', [['牛すじカレー定食', 1]], '提供済み') + '</div>';
+  document.getElementById('office').innerHTML =
+    '<div class="office-bar"><select class="office-select" aria-label="店舗"><option>シロナガスクジラ 飯田橋（DEMO）</option></select><button type="button" class="t-btn platform">商品を追加</button></div>' +
+    '<div style="overflow-x:auto"><table class="t-table"><thead><tr><th>商品名</th><th>カテゴリ</th><th class="r">店舗価格（税込）</th><th>状態</th><th>本部連動</th><th class="r">更新</th></tr></thead><tbody>' +
+    [['シロナガスクジラ定食', 'ランチ定食', '¥960', ['success', '公開中'], 'LINKED', '10/18 22:41'],
+     ['サバの味噌煮定食', 'ランチ定食', '¥1,080', ['danger', '販売停止'], 'LINKED', '10/19 11:02'],
+     ['博多鉄板餃子（12個）', '博多餃子', '¥1,150', ['success', '公開中'], 'DETACHED', '10/18 22:41'],
+     ['高菜明太ポテトサラダ', '酒肴・小皿', '¥560', ['warning', '下書き'], 'LINKED', '10/19 09:15']].map(function (r) {
+      return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td><td class="r">' + r[2] + '</td><td><span class="t-status ' + r[3][0] + '">' + r[3][1] + '</span></td><td class="mono" style="font-size:var(--text-meta)">' + r[4] + '</td><td class="r">' + r[5] + '</td></tr>';
+    }).join('') + '</tbody></table></div>';
+
+  // ---- Live audit from resolved tokens ----
+  var PAIRS = [
+    ['--color-text', '--color-bg', 4.5, '內文'], ['--color-text-muted', '--color-bg', 4.5, '次要文字'], ['--color-text-muted', '--color-surface', 4.5, '卡片次要文字'],
+    ['--color-text-muted', '--color-surface-sunken', 4.5, '凹陷底次要文字'], ['--color-on-action', '--color-action', 4.5, '主要按鈕'], ['--color-action-soft-ink', '--color-action-soft', 4.5, '選取 chip'],
+    ['--color-border-control', '--color-surface', 3, '控制項邊界'], ['--color-focus', '--color-bg', 3, '焦點環'], ['--color-focus', '--color-surface', 3, '卡片焦點環'],
+    ['--color-success-ink', '--color-success-bg', 4.5, '狀態：成功'], ['--color-warning-ink', '--color-warning-bg', 4.5, '狀態：警告'],
+    ['--color-danger-ink', '--color-danger-bg', 4.5, '狀態：錯誤'], ['--color-info-ink', '--color-info-bg', 4.5, '狀態：資訊']
+  ];
+  var hosts = { guest: screen, floor: document.querySelector('[data-surface=floor]'), office: document.querySelector('[data-surface=office]'), kds: document.querySelector('[data-surface=kds]') };
+  function toHex(v) {
+    v = v.trim(); if (v[0] === '#') return v.length === 4 ? '#' + v.slice(1).split('').map(function (c) { return c + c; }).join('') : v.slice(0, 7);
+    var m = v.match(/\d+(\.\d+)?/g); return m ? '#' + m.slice(0, 3).map(function (n) { return Math.round(+n).toString(16).padStart(2, '0'); }).join('') : '#000000';
+  }
+  var rows = [], pass = 0, total = 0;
+  Object.keys(hosts).forEach(function (s) {
+    var cs = getComputedStyle(hosts[s]);
+    PAIRS.forEach(function (p) {
+      var fg = toHex(cs.getPropertyValue(p[0])), bg = toHex(cs.getPropertyValue(p[1])), r = cr(fg, bg), ok = r >= p[2];
+      total++; if (ok) pass++;
+      rows.push('<tr><td>' + s + '</td><td>' + p[3] + '</td><td><span class="chip"><span class="swatch-dot" style="background:' + fg + '"></span>' + fg + '</span> / <span class="chip"><span class="swatch-dot" style="background:' + bg + '"></span>' + bg + '</span></td><td class="r">' + r.toFixed(2) + '</td><td class="r">' + p[2] + '</td><td><span class="pill ' + (ok ? 'good' : 'bad') + '">' + (ok ? 'PASS' : 'FAIL') + '</span></td></tr>');
+    });
+  });
+  document.getElementById('audit').innerHTML = '<thead><tr><th>表面</th><th>用途</th><th>前景 / 背景</th><th class="r">對比</th><th class="r">門檻</th><th>結果</th></tr></thead><tbody>' + rows.join('') + '</tbody>';
+  document.getElementById('audit-summary').innerHTML = '<span class="pill ' + (pass === total ? 'good' : 'bad') + '">' + pass + ' / ' + total + ' PASS（本頁即時計算）</span><span class="small muted">Node 版 contrast-gate.mjs：72 組配對＋5 個品牌預設＋2,000 個隨機店家色，0 失敗</span>';
+
+  applyBrand();
+  render();
+})();
+</script>
+
+</body>
+</html>
