@@ -197,7 +197,16 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const menuHeading = useRef<HTMLHeadingElement>(null);
   const orderHeading = useRef<HTMLHeadingElement>(null);
   const entryHeading = useRef<HTMLHeadingElement>(null);
-  const previousView = useRef<{ active: boolean; tab: 'cart' | 'orders'; sheetOpen: boolean; lineCount: number } | null>(null);
+  const previousView = useRef<{ active: boolean; tab: 'cart' | 'orders'; sheetOpen: boolean; lineCount: number; menu: GuestMenu | null } | null>(null);
+  const menuProducts = useMemo(() => {
+    const products = new Map<string, GuestMenu['categories'][number]['products'][number]>();
+    for (const category of entry?.menu.categories ?? []) for (const product of category.products) products.set(product.key, product);
+    return products;
+  }, [entry]);
+  const optionProduct = optionProductKey ? menuProducts.get(optionProductKey) ?? null : null;
+  const sheetViewActive = !!entry && !blocked && !loading && tab === 'cart';
+  const optionSheetOpen = sheetViewActive && !!optionProduct;
+  const cartSheetOpen = sheetViewActive && cartOpen;
   const acceptedOperations = useRef(new Map<string, { sessionID: string; token: string; onAccepted: () => void }>());
   const [selections, setSelections] = useState<Record<string, OptionSelection[]>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -601,17 +610,22 @@ export function App({ demo = false }: DemoSurfaceProps) {
       setOptionProductKey(null);
     }
   }, [entry, tab]);
+  useEffect(() => {
+    if (optionProductKey && !optionProduct) setOptionProductKey(null);
+  }, [optionProductKey, optionProduct]);
   useLayoutEffect(() => {
     const previous = previousView.current;
     const active = !!entry && !blocked && !loading;
     const lineCount = cart?.lines.length ?? 0;
-    previousView.current = { active, tab, sheetOpen: active && tab === 'cart' && (cartOpen || !!optionProductKey), lineCount };
+    const sheetOpen = cartSheetOpen || optionSheetOpen;
+    previousView.current = { active, tab, sheetOpen, lineCount, menu: entry?.menu ?? null };
     // An open sheet restores focus after its exit; page feedback has no overlay lifecycle.
-    if (!previous?.active || previous.sheetOpen) return;
+    if (!previous?.active || previous.sheetOpen || document.querySelector('[data-guest-sheet]')) return;
     if (!active) entryHeading.current?.focus();
     else if (tab === 'orders' && previous.tab !== 'orders') orderHeading.current?.focus();
-    else if (tab === 'cart' && previous.lineCount > 0 && lineCount === 0 && document.activeElement === document.body) menuHeading.current?.focus();
-  }, [entry, blocked, loading, tab, cartOpen, optionProductKey, cart]);
+    else if (tab === 'cart' && !sheetOpen && document.activeElement === document.body
+      && ((previous.lineCount > 0 && lineCount === 0) || previous.menu !== entry?.menu)) menuHeading.current?.focus();
+  }, [entry, blocked, loading, tab, cartSheetOpen, optionSheetOpen, cart]);
   useEffect(() => {
     if (demo && payment === 'STRIPE') setPayment('CASH');
     else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
@@ -711,12 +725,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
       else setError(t.network);
     } finally { inFlight.current = false; setBusy(false); }
   };
-
-  const menuProducts = useMemo(() => {
-    const products = new Map<string, GuestMenu['categories'][number]['products'][number]>();
-    for (const category of entry?.menu.categories ?? []) for (const product of category.products) products.set(product.key, product);
-    return products;
-  }, [entry]);
 
   const chooseOption = (productKey: string, groupKey: string, optionKey: string, max: number) => {
     setSelections((current) => {
@@ -822,7 +830,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
     </section>
   </Shell>;
 
-  const optionProduct = optionProductKey ? menuProducts.get(optionProductKey) ?? null : null;
   const previewMatchesCart = !!preview && !!cart && preview.generation === cart.generation && preview.version === cart.version;
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
@@ -840,9 +847,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
         <MenuList categories={entry.menu.categories} locale={locale} busy={busy} uncertain={uncertain}
           onOpenOptions={(product) => setOptionProductKey(product.key)}
           onAdd={(product) => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, 1, [], key))} />
-        <OptionSheet product={optionProduct} isOpen={!!optionProduct} onOpenChange={(open) => { if (!open) setOptionProductKey(null); }}
+        <OptionSheet product={optionProduct} isOpen={optionSheetOpen} onOpenChange={(open) => { if (!open) setOptionProductKey(null); }}
           locale={locale} selected={selections[optionProductKey ?? ''] ?? []} quantity={quantities[optionProductKey ?? ''] ?? 1}
-          notice={<DemoNotice demo={demo} locale={locale} />} busy={busy} uncertain={uncertain} fallbackFocus={() => entryHeading.current ?? menuHeading.current}
+          notice={<DemoNotice demo={demo} locale={locale} />} busy={busy} uncertain={uncertain} fallbackFocus={() => entryHeading.current ?? orderHeading.current ?? menuHeading.current}
           onChoose={(groupKey, optionKey, max) => { if (optionProduct) chooseOption(optionProduct.key, groupKey, optionKey, max); }}
           onClear={(groupKey) => { if (optionProduct) setSelections((current) => ({ ...current, [optionProduct.key]: (current[optionProduct.key] ?? []).filter((item) => item.group_key !== groupKey) })); }}
           onQuantity={(quantity) => { if (optionProduct) setQuantities((current) => ({ ...current, [optionProduct.key]: quantity })); }}
@@ -855,7 +862,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
         <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)}
           sync={sync.degraded ? `${t.syncWaiting}・${syncTime} ${t.syncAt}` : `${t.synced}・${syncTime}`} />
-        <CartSheet isOpen={cartOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
+        <CartSheet isOpen={cartSheetOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
           locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />}
           degraded={sync.degraded} syncNotice={syncNotice(`${syncID}-cart`)} syncReasonID={`${syncID}-cart`} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
           onPayment={setPayment} busy={busy} uncertain={uncertain} unavailable={unavailable} previewMatchesCart={previewMatchesCart} previewAmountsSafe={previewAmountsSafe}

@@ -89,7 +89,7 @@ export function CartSheet(props: CartSheetProps) {
   useLayoutEffect(() => {
     // Removing the focused cart row must leave keyboard navigation in the sheet.
     if (isOpen && document.activeElement === document.body) heading.current?.focus();
-  }, [isOpen, cart]);
+  }, [isOpen, cart, products]);
   const visibleError = error;
 
   return <GuestSheet isOpen={isOpen} onOpenChange={onOpenChange} title={preview ? t.preview : t.cart} titleRef={heading}

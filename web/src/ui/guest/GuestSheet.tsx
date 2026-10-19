@@ -42,14 +42,17 @@ export function GuestSheet({ isOpen, onOpenChange, title, titleRef, locale, chil
         if (overlay.current || restoration.current !== version) return;
         const opener = trigger.current;
         const interim = fallback.current?.();
+        const active = document.activeElement;
+        if (active instanceof HTMLElement && active !== document.body && active !== document.documentElement
+          && active !== opener && active !== interim && active.isConnected && !active.closest('[hidden], [inert], [aria-hidden="true"]')) return;
         const restore = () => {
           if (!(opener instanceof HTMLElement) || opener === document.body || opener === document.documentElement || !opener.isConnected
             || opener.matches(':disabled, [aria-disabled="true"]') || opener.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
-          opener.focus({ preventScroll: true });
+          if (document.activeElement !== opener) opener.focus({ preventScroll: true });
           return document.activeElement === opener;
         };
         if (restore()) return;
-        interim?.focus({ preventScroll: true });
+        if (document.activeElement !== interim) interim?.focus({ preventScroll: true });
         if (!mounted.current || !opener?.isConnected || opener === document.body) return;
 
         // A replay can close the sheet before busy releases its opener.
@@ -76,7 +79,7 @@ export function GuestSheet({ isOpen, onOpenChange, title, titleRef, locale, chil
     }
   }, []);
 
-  return <ModalOverlay data-surface="guest" ref={overlayRef} isOpen={isOpen} onOpenChange={onOpenChange} isDismissable className={styles.overlay}>
+  return <ModalOverlay data-surface="guest" data-guest-sheet ref={overlayRef} isOpen={isOpen} onOpenChange={onOpenChange} isDismissable className={styles.overlay}>
     <Modal className={styles.modal}>
       <Dialog className={styles.dialog}>
         <header className={styles.header}>

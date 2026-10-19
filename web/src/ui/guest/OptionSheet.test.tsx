@@ -75,4 +75,16 @@ describe('OptionSheet', () => {
     expect(within(dialog).getByRole('alert').textContent).toBe('通信結果を確認できません。');
     await waitFor(() => expect(dialog.isConnected).toBe(true));
   });
+
+  it('keeps focus inside when a menu update removes the focused option', async () => {
+    const view = renderSheet();
+    await userEvent.setup().click(screen.getByRole('radio', { name: /味噌/ }));
+    const updated = { ...product, option_groups: product.option_groups.slice(1) };
+    view.rerender(<OptionSheet product={updated} isOpen locale="ja" selected={[]} quantity={1}
+      onChoose={() => undefined} onQuantity={() => undefined} onAdd={() => undefined} onOpenChange={() => undefined} />);
+    const dialog = screen.getByRole('dialog', { name: 'うどん' });
+    await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
+    await userEvent.setup().tab();
+    expect(document.activeElement).toBe(within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }));
+  });
 });
