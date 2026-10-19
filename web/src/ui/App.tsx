@@ -1,13 +1,23 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
-import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
+import type { Cart, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
 import { operationsClient } from '../api/operations';
 import type { GuestOperations, GuestOrderStatus } from '../api/operations';
 import { checkoutClient, checkoutNavigation } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
-import { DemoBanner } from './DemoBanner';
+import { restoreGuestFocus } from './guest/restore-focus';
+import { CategoryNav } from './guest/CategoryNav';
+import { MenuList } from './guest/MenuList';
+import { OptionSheet } from './guest/OptionSheet';
+import { CartBar } from './guest/CartBar';
+import { CartSheet } from './guest/CartSheet';
+import { initialSyncState, syncReducer } from './guest/sync-state';
+import type { SyncOrigin } from './guest/sync-state';
+import { OrderTracks } from './guest/OrderTracks';
+import guestStyles from './guest/GuestApp.module.css';
+import { DemoBanner, DemoNotice, demoStoreName } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
 import { MyOrders, RequestOrderLink } from './OrderRead';
@@ -15,14 +25,16 @@ import { rememberOrderGrant } from './my-orders';
 
 type Locale = 'ja' | 'zh';
 const MENU_REFRESH_TTL_MS = 15_000;
-const copy = {
-  ja: {
-    brand: '東島', subtitle: 'TABLE ORDER', table: 'テーブル', pending: '共有カート', committed: '注文履歴',
+let guestSurfaceMounts = 0;
+const ja = {
+    backToMenu: 'メニューに戻る',
+    synced: 'テーブルで共有中', syncWaiting: '同期待ち', syncAt: '時点', syncUnstable: '通信が不安定です',
+    syncReason: '表示は {time} 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
+    table: 'テーブル', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
-    menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中', emergencyHold: '販売停止中',
-    choose: '選択してください', required: '必須', noOption: '選択しない', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
-    remove: '削除', quantity: '数量', options: '追加オプション', latest: '最新の共有内容', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
+    menu: 'お品書き',
+    remove: '削除', latest: '共有カートを確認しました', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
     refresh: '共有内容を更新', preview: '金額を確認する', previewHint: '注文を確定する前に最新の金額と内容をご確認ください。',
     total: '税込合計', tax: '内消費税', method: '今回のお支払い方法', stripe: 'クレジットカード', cash: '店頭で現金',
     confirm: 'この内容で注文を確定', working: '送信中…', cancelPreview: 'カートへ戻る',
@@ -33,18 +45,19 @@ const copy = {
     checkoutUnavailable: 'カードのお支払いを準備できませんでした。注文は送信されていません。もう一度お試しください。', resumeError: '支払い画面を開けませんでした。状況を確認してから、スタッフにお声がけください。',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     network: '通信結果を確認できません。再試行すると同じ操作を照合します。', retry: '前回の操作を照合して再試行',
-    error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。', amountError: '金額を安全に表示できません。注文を続けられません。',
-    selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
+    error: '処理できませんでした。内容を確認してもう一度お試しください。', unavailableLines: '注文できない商品があります。削除または内容を変更してから確認してください。',
     operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。', amountUnavailable: '最新の注文内容と金額を確認できません。', changed: '店舗により注文内容が変更されました', cancelled: 'この注文は取り消されました', originalTotal: '注文確定時の税込合計', refundPending: '返金処理中', refundFailed: '返金を確認中です。店舗にお問い合わせください', refunded: '返金済み', refundedTotal: '返金合計',
     noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
-  },
-  zh: {
-    brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
+};
+const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
+    backToMenu: '返回菜單',
+    synced: '同桌共用中', syncWaiting: '等待同步', syncAt: '的內容', syncUnstable: '網路連線不穩',
+    syncReason: '目前顯示 {time} 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
+    table: '桌次', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
-    menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中', emergencyHold: '暫停販售',
-    choose: '請選擇', required: '必選', noOption: '不選擇', add: '加入購物車', cartEmpty: '購物車目前是空的。',
-    remove: '移除', quantity: '數量', options: '加料選項', latest: '最新共用內容', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
+    menu: '菜單',
+    remove: '移除', latest: '已確認共用購物車', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
     refresh: '更新共用內容', preview: '確認金額', previewHint: '送出前請確認最新品項和金額。',
     total: '含稅總額', tax: '其中消費稅', method: '本次付款方式', stripe: '信用卡', cash: '店內現金',
     confirm: '確認並送出訂單', working: '送出中…', cancelPreview: '返回購物車',
@@ -55,12 +68,11 @@ const copy = {
     checkoutUnavailable: '無法準備信用卡付款，訂單尚未送出。請再試一次。', resumeError: '無法開啟付款畫面，請先確認狀態或洽服務人員。',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     network: '目前無法確認連線結果。重試會以相同操作編號查核，不會重複新增。', retry: '查核並重試上一項操作',
-    error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。', amountError: '無法安全顯示金額，暫時不能繼續送單。',
-    selectRequired: '請選擇必選項目。', itemMissing: '菜單中找不到此商品，請移除。',
+    error: '暫時無法處理，請確認內容後重試。', unavailableLines: '有無法點餐的品項，請移除或調整後再確認。',
     operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。', amountUnavailable: '目前無法確認最新訂單內容與金額。', changed: '店家已調整您的訂單', cancelled: '此訂單已取消', originalTotal: '送單時含稅總額', refundPending: '退款處理中', refundFailed: '退款確認中，請洽店家', refunded: '已退款', refundedTotal: '退款總額',
     noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
-} satisfies Record<Locale, Record<string, string>>;
+};
 
 interface Entry {
   locator?: string;
@@ -68,7 +80,7 @@ interface Entry {
   grant: GuestGrant;
   menu: GuestMenu;
 }
-interface Replay { key: string; run: () => Promise<Cart | import('../api/types').CommitResult>; }
+interface Replay { origin: SyncOrigin; key: string; run: () => Promise<Cart | import('../api/types').CommitResult>; }
 
 function entryFromURL(): { locator?: string; sessionID?: string } {
   const query = new URLSearchParams(window.location.search);
@@ -81,6 +93,12 @@ export function displayTableLocator(locator: string, demo: boolean): string {
   return demo && locator === 'demo-shironagasukujira-table-05' ? '05' : locator;
 }
 
+function syncOrigin(current: Entry): SyncOrigin {
+  return { sessionID: current.grant.session.id, token: current.grant.table_join_token };
+}
+function isOrigin(current: Entry | null, origin: SyncOrigin): boolean {
+  return current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token;
+}
 function storageKey(sessionID: string) { return `tojima.table-join.${sessionID}`; }
 function safeAmount(amount: string | number | undefined): string {
   if (typeof amount === 'number' && !Number.isSafeInteger(amount)) return '—';
@@ -146,7 +164,15 @@ export function App({ demo = false }: DemoSurfaceProps) {
   entryRef.current = entry;
   const mode = entry?.grant.session.mode;
   const [status, setStatus] = useState<PublicTable | null>(null);
-  const [{ cart, preview }, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
+  const [cartState, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
+  const { cart, preview } = cartState;
+  const cartStateRef = useRef(cartState);
+  cartStateRef.current = cartState;
+  const [sync, dispatchSync] = useReducer(syncReducer, initialSyncState);
+  const acceptedSyncSequence = useRef(0);
+  const watchdogViewSequence = useRef(0);
+  const [watchdogBase, setWatchdogBase] = useState<number | null>(null);
+  const syncID = useId();
   const [orders, setOrders] = useState<Order[]>([]);
   const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
   const [operationsStale, setOperationsStale] = useState(false);
@@ -166,6 +192,36 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const [uncertain, setUncertain] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [tab, setTab] = useState<'cart' | 'orders'>('cart');
+  const [cartOpen, setCartOpen] = useState(false);
+  const [cartBarHeight, setCartBarHeight] = useState(0);
+  const [optionProductKey, setOptionProductKey] = useState<string | null>(null);
+  const menuHeading = useRef<HTMLHeadingElement>(null);
+  const orderHeading = useRef<HTMLHeadingElement>(null);
+  const entryHeading = useRef<HTMLHeadingElement>(null);
+  const pageRestoration = useRef<(() => void) | null>(null);
+  const focusPage = useCallback((target: () => HTMLElement | null) => {
+    pageRestoration.current?.();
+    pageRestoration.current = restoreGuestFocus(target, { from: document.activeElement });
+  }, []);
+  useEffect(() => () => pageRestoration.current?.(), []);
+  useLayoutEffect(() => {
+    if (cartBarHeight <= 0) return;
+    const root = document.documentElement;
+    const previous = root.style.scrollPaddingBottom;
+    root.style.scrollPaddingBottom = `calc(${cartBarHeight}px + var(--ref-space-4))`;
+    return () => { root.style.scrollPaddingBottom = previous; };
+  }, [cartBarHeight]);
+  const previousView = useRef<{ active: boolean; tab: 'cart' | 'orders'; sheetOpen: boolean; lineCount: number; menu: GuestMenu | null } | null>(null);
+  const menuProducts = useMemo(() => {
+    const products = new Map<string, GuestMenu['categories'][number]['products'][number]>();
+    for (const category of entry?.menu.categories ?? []) for (const product of category.products) products.set(product.key, product);
+    return products;
+  }, [entry]);
+  const optionProduct = optionProductKey ? menuProducts.get(optionProductKey) ?? null : null;
+  const sheetViewActive = !!entry && !blocked && !loading && tab === 'cart';
+  const optionSheetOpen = sheetViewActive && !!optionProduct;
+  const cartSheetOpen = sheetViewActive && cartOpen;
+  const acceptedOperations = useRef(new Map<string, { sessionID: string; token: string; onAccepted: () => void }>());
   const [selections, setSelections] = useState<Record<string, OptionSelection[]>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const strings = useRef(t);
@@ -189,6 +245,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
   }, []);
 
   const invalidateGrant = useCallback((sessionID: string) => {
+    dispatchSync({ type: 'reset', origin: null });
+    acceptedSyncSequence.current++;
+    cartStateRef.current = initialGuestCartState;
     orderRequestSequence.current++;
     setGuestOperations(null); setOperationsStale(false);
     checkoutRequestSequence.current++;
@@ -201,22 +260,50 @@ export function App({ demo = false }: DemoSurfaceProps) {
     setBlocked(true); setError('session_expired');
   }, []);
 
-  const adoptCart = useCallback((incoming: Cart) => {
+  const adoptCart = useCallback((incoming: Cart, origin?: SyncOrigin) => {
+    const next = guestCartReducer(cartStateRef.current, { type: 'cart-received', cart: incoming });
+    // Observe batched responses against the same latest cart that dispatch will adopt.
+    cartStateRef.current = next;
+    const current = entryRef.current;
+    if (origin && isOrigin(current, origin) && next.cart === incoming) {
+      acceptedSyncSequence.current++;
+      dispatchSync({ type: 'success', origin, at: Date.now() });
+    }
     dispatchCart({ type: 'cart-received', cart: incoming });
+  }, []);
+
+  const confirmDisplayedCart = useCallback((latest: Cart, origin: SyncOrigin) => {
+    // Overlapping reads can confirm an identical snapshot without adopting a superseded response.
+    const displayed = cartStateRef.current.cart;
+    if (isOrigin(entryRef.current, origin) && JSON.stringify(displayed) === JSON.stringify(latest)) {
+      acceptedSyncSequence.current++;
+      dispatchSync({ type: 'success', origin, at: Date.now() });
+    }
   }, []);
 
   const clearPreview = () => dispatchCart({ type: 'preview-cleared' });
 
   const refreshCart = useCallback(async (current: Entry) => {
     const sequence = ++cartRequestSequence.current;
+    const origin = syncOrigin(current);
+    // A read begun before an accepted mutation must not count as a later failure.
+    const acceptedAtStart = acceptedSyncSequence.current;
     try {
       const latest = await cartClient.readCart(current.grant.session.id, current.grant.table_join_token);
-      if (sequence === cartRequestSequence.current) adoptCart(latest);
+      if (sequence === cartRequestSequence.current) adoptCart(latest, origin);
+      else confirmDisplayedCart(latest, origin);
     } catch (cause) {
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+      const active = entryRef.current;
+      const syncFailure = cause instanceof ApiError ? cause.status >= 500 && cause.status <= 599
+        : cause instanceof Error && cause.message === 'network_unavailable';
+      if (sequence === cartRequestSequence.current && acceptedAtStart === acceptedSyncSequence.current
+        && isOrigin(active, origin) && syncFailure) {
+        dispatchSync({ type: 'read-failure', origin, ...(cause instanceof ApiError ? { status: cause.status } : {}) });
+      }
       throw cause;
     }
-  }, [adoptCart, invalidateGrant]);
+  }, [adoptCart, confirmDisplayedCart, invalidateGrant]);
 
   const refreshOrders = useCallback(async (current: Entry) => {
     const sequence = ++orderRequestSequence.current;
@@ -304,12 +391,15 @@ export function App({ demo = false }: DemoSurfaceProps) {
   };
 
   const recoverConflict = async (current: Entry, latest?: Cart) => {
-    if (latest) adoptCart(latest);
+    if (latest) adoptCart(latest, syncOrigin(current));
     else await refresh(current);
     await refreshMenu(current, true);
   };
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
+    dispatchSync({ type: 'reset', origin: { sessionID: grant.session.id, token: grant.table_join_token } });
+    acceptedSyncSequence.current++;
+    setWatchdogBase(Date.now());
     menuRequestSequence.current++;
     orderRequestSequence.current++;
     setGuestOperations(null); setOperationsStale(false);
@@ -329,6 +419,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     sessionStorage.setItem(storageKey(grant.session.id), grant.table_join_token);
     const next = { ...(locator ? { locator } : {}), sessionID: grant.session.id, grant, menu };
     menuLastReadAt.current.set(`${grant.session.id}:${grant.table_join_token}`, Date.now());
+    entryRef.current = next;
     setEntry(next);
     await refresh(next);
   }, [invalidateGrant, refresh]);
@@ -492,7 +583,74 @@ export function App({ demo = false }: DemoSurfaceProps) {
     if (entry && tab === 'cart' && document.visibilityState === 'visible') void refreshCart(entry).catch(() => undefined);
   }, [entry, tab, refreshCart]);
 
+  const syncSessionID = entry?.grant.session.id;
+  const syncToken = entry?.grant.table_join_token;
+  useEffect(() => {
+    if (!syncSessionID || !syncToken) return;
+    const origin = { sessionID: syncSessionID, token: syncToken };
+    const offline = () => dispatchSync({ type: 'offline', origin });
+    const online = () => dispatchSync({ type: 'online', origin });
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    return () => {
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', online);
+    };
+  }, [syncSessionID, syncToken]);
+  useEffect(() => {
+    const visibility = () => {
+      watchdogViewSequence.current++;
+      setWatchdogBase(syncSessionID && syncToken && tab === 'cart' && document.visibilityState === 'visible' ? Date.now() : null);
+    };
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    return () => document.removeEventListener('visibilitychange', visibility);
+  }, [syncSessionID, syncToken, tab]);
+  useEffect(() => {
+    if (!syncSessionID || !syncToken || tab !== 'cart' || watchdogBase === null || sync.degraded || document.visibilityState !== 'visible') return;
+    const deadline = Math.max(watchdogBase, sync.lastSyncedAt ?? watchdogBase) + 7500;
+    const acceptedAtSchedule = acceptedSyncSequence.current;
+    const viewAtSchedule = watchdogViewSequence.current;
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === 'visible' && acceptedAtSchedule === acceptedSyncSequence.current && viewAtSchedule === watchdogViewSequence.current) {
+        dispatchSync({ type: 'watchdog', origin: { sessionID: syncSessionID, token: syncToken } });
+      }
+    }, Math.max(0, deadline - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [syncSessionID, syncToken, tab, watchdogBase, sync]);
+
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
+  useEffect(() => {
+    guestSurfaceMounts++;
+    document.documentElement.setAttribute('data-surface', 'guest');
+    return () => {
+      guestSurfaceMounts--;
+      if (guestSurfaceMounts === 0) document.documentElement.removeAttribute('data-surface');
+    };
+  }, []);
+  useEffect(() => {
+    if (!entry || tab === 'orders') {
+      setCartOpen(false);
+      setOptionProductKey(null);
+    }
+  }, [entry, tab]);
+  useEffect(() => {
+    if (optionProductKey && !optionProduct) setOptionProductKey(null);
+  }, [optionProductKey, optionProduct]);
+  useLayoutEffect(() => {
+    const previous = previousView.current;
+    const active = !!entry && !blocked && !loading;
+    const lineCount = cart?.lines.length ?? 0;
+    const sheetOpen = cartSheetOpen || optionSheetOpen;
+    previousView.current = { active, tab, sheetOpen, lineCount, menu: entry?.menu ?? null };
+    if (sheetOpen) { pageRestoration.current?.(); return; }
+    // An open sheet restores focus after its exit; page feedback has no overlay lifecycle.
+    if (!previous?.active || previous.sheetOpen || document.querySelector('[data-guest-sheet]')) return;
+    if (!active) focusPage(() => entryHeading.current);
+    else if (tab === 'orders' && previous.tab !== 'orders') focusPage(() => orderHeading.current);
+    else if (tab === 'cart' && !sheetOpen && document.activeElement === document.body
+      && ((previous.lineCount > 0 && lineCount === 0) || previous.menu !== entry?.menu)) focusPage(() => menuHeading.current);
+  }, [entry, blocked, loading, tab, cartSheetOpen, optionSheetOpen, cart, focusPage]);
   useEffect(() => {
     if (demo && payment === 'STRIPE') setPayment('CASH');
     else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
@@ -531,26 +689,34 @@ export function App({ demo = false }: DemoSurfaceProps) {
     } finally { setBusy(false); }
   };
 
-  const applyMutation = async (run: (key: string) => Promise<Cart>) => {
+  const acceptOperation = (key: string) => {
+    const accepted = acceptedOperations.current.get(key);
+    acceptedOperations.current.delete(key);
+    if (accepted && isOrigin(entryRef.current, accepted)) accepted.onAccepted();
+  };
+
+  const applyMutation = async (run: (key: string) => Promise<Cart>, onAccepted?: () => void) => {
     if (!entry || !cart || inFlight.current || uncertain) return;
     inFlight.current = true; setBusy(true); setError(''); clearPreview(); setNotice('');
     const key = newOperationKey();
+    if (onAccepted) acceptedOperations.current.set(key, { sessionID: entry.grant.session.id, token: entry.grant.table_join_token, onAccepted });
+    const origin = syncOrigin(entry);
     const operation = run(key);
-    replay.current = { key, run: () => run(key) };
+    replay.current = { key, origin, run: () => run(key) };
     try {
       const updated = await operation;
-      adoptCart(updated); replay.current = null; setUncertain(false);
+      adoptCart(updated, origin); acceptOperation(key); replay.current = null; setUncertain(false);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         if (entry) await recoverConflict(entry, cause.body.cart);
         setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
-        replay.current = null;
+        acceptedOperations.current.delete(key); replay.current = null;
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setUncertain(true); setError(t.network);
       } else if (cause instanceof ApiError) {
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
         else setError(t.error);
-        replay.current = null;
+        acceptedOperations.current.delete(key); replay.current = null;
       } else {
         setUncertain(true); setError(t.network);
       }
@@ -565,30 +731,24 @@ export function App({ demo = false }: DemoSurfaceProps) {
       const result = await pending.run();
       if ('outcome' in result) {
         if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
-        adoptCart(result.cart);
+        adoptCart(result.cart, pending.origin);
         setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
         clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       } else {
-        adoptCart(result); setNotice(t.latest);
+        adoptCart(result, pending.origin); acceptOperation(pending.key); setNotice(t.latest);
       }
       replay.current = null; setUncertain(false);
       if (entry) await refresh(entry);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         if (entry) await recoverConflict(entry, cause.body.cart);
-        replay.current = null; setUncertain(false); setError(t.stale);
+        acceptedOperations.current.delete(pending.key); replay.current = null; setUncertain(false); setError(t.stale);
       } else if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) {
         if (entry) invalidateGrant(entry.grant.session.id);
       }
       else setError(t.network);
     } finally { inFlight.current = false; setBusy(false); }
   };
-
-  const menuProducts = useMemo(() => {
-    const products = new Map<string, GuestMenu['categories'][number]['products'][number]>();
-    for (const category of entry?.menu.categories ?? []) for (const product of category.products) products.set(product.key, product);
-    return products;
-  }, [entry]);
 
   const chooseOption = (productKey: string, groupKey: string, optionKey: string, max: number) => {
     setSelections((current) => {
@@ -599,14 +759,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
         ? selected.filter((item) => !(item.group_key === groupKey && item.option_key === optionKey))
         : [...selected.filter((item) => item.group_key !== groupKey), ...inGroup.slice(0, Math.max(0, max - 1)), { group_key: groupKey, option_key: optionKey }];
       return { ...current, [productKey]: next };
-    });
-  };
-
-  const selectionsValid = (productKey: string, selected: OptionSelection[]) => {
-    const product = menuProducts.get(productKey);
-    return !!product?.selectable && product.option_groups.every((group) => {
-      const count = selected.filter((item) => item.group_key === group.key).length;
-      return count >= group.min_select && count <= group.max_select;
     });
   };
 
@@ -633,6 +785,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const confirmOrder = async () => {
     if (!entry || !cart || !preview || preview.version !== cart.version || preview.generation !== cart.generation || busy) return;
+    const origin = syncOrigin(entry);
     setBusy(true); setError(''); setNotice('');
     const key = newOperationKey();
     if (payment === 'STRIPE') {
@@ -649,7 +802,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     try {
       const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, payment, key);
       if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
-      adoptCart(result.cart); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
+      adoptCart(result.cart, origin); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
       selectCheckoutOrder(payment === 'STRIPE' ? result.order.order_id : '');
       clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       await refresh(entry);
@@ -659,7 +812,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         clearPreview(); setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setError(t.network); setUncertain(true);
-        replay.current = createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key));
+        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       } else if (cause instanceof ApiError) {
         clearPreview();
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
@@ -670,135 +823,90 @@ export function App({ demo = false }: DemoSurfaceProps) {
       }
       else {
         setError(t.network); setUncertain(true);
-        replay.current = createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key));
+        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       }
     } finally { setBusy(false); }
   };
 
-  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}><div className="loading-card" role="status">{t.loading}</div></Shell>;
+  const syncTime = sync.lastSyncedAt === null ? '—' : new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(sync.lastSyncedAt);
+  const syncReason = t.syncReason.replace('{time}', syncTime);
+  const syncNotice = (id: string) => sync.degraded ? <div id={id} className={guestStyles.syncNotice} role="status"><strong>{t.syncUnstable}</strong>{syncReason}</div> : null;
+
+  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div>{syncNotice(`${syncID}-page`)}</Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
-  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
+  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <section className="entry-card" aria-labelledby="entry-title">
-      <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title">{t.join}</h1><p>{t.joinHint}</p>
+      <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
-      {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
+      {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input className={guestStyles.entryControl} data-control="guest-entry" autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
       {(!query.locator && !query.sessionID) && <p className="notice">テーブル QR からアクセスしてください。</p>}
-      <button className="button primary wide" disabled={busy || blocked || (!query.locator && !query.sessionID) || !!status?.expired} onClick={() => void submitJoin()}>{busy ? t.loading : t.enter}</button>
+      <button className={`button primary wide ${guestStyles.entryControl}`} data-control="guest-entry" disabled={busy || blocked || (!query.locator && !query.sessionID) || !!status?.expired} onClick={() => void submitJoin()}>{busy ? t.loading : t.enter}</button>
       {visibleError && <p className="error" role="alert">{visibleError}</p>}
     </section>
   </Shell>;
 
-  const lineCount = cart?.lines.reduce((sum, line) => sum + line.quantity, 0) ?? 0;
   const previewMatchesCart = !!preview && !!cart && preview.generation === cart.generation && preview.version === cart.version;
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
-  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
-    <div className="workspace">
-      <header className="welcome">
-        <div><div className="eyebrow">{t.menu}</div><h1>{entry.locator ? `${t.table} ${displayTableLocator(entry.locator, demo)}` : t.brand}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
-        <div className="join-badge"><span className="live-dot" />{t.latest}</div>
+  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} cartBarHeight={cartBarHeight} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+    <div className={guestStyles.workspace}>
+      <header className={guestStyles.welcome}>
+        <div><h1 ref={menuHeading} tabIndex={-1}>{t.menu}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
+        {tab === 'cart' ? <button className={guestStyles.navigation} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}（{orders.length}）</button>
+          : <button className={guestStyles.navigation} onClick={() => { setTab('cart'); clearPreview(); focusPage(() => menuHeading.current); }}>{t.backToMenu}</button>}
       </header>
-      <nav className="tabs" aria-label={locale === 'ja' ? '注文メニュー' : '點餐導覽'}>
-        <button className={tab === 'cart' ? 'tab active' : 'tab'} onClick={() => { setTab('cart'); clearPreview(); }}>{t.pending}<span>{lineCount}</span></button>
-        <button className={tab === 'orders' ? 'tab active' : 'tab'} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}<span>{orders.length}</span></button>
-      </nav>
-
+      {syncNotice(`${syncID}-page`)}
       {tab === 'cart' && <>
-        {!preview && <section className="menu-section"><div className="section-heading"><div><div className="eyebrow">TOJIMA KITCHEN</div><h2>{t.menu}</h2></div><span className="menu-count">{entry.menu.categories.reduce((n, c) => n + c.products.length, 0)}</span></div>
-          {entry.menu.categories.map((category) => <section className="category" key={category.key}>
-            <h3>{category.name}</h3><div className="product-grid">
-              {category.products.map((product) => {
-                const selected = selections[product.key] ?? [];
-                const amountSafe = isSafeAmount(product.effective_price_minor) && product.option_groups.every((group) => group.options.every((option) => isSafeAmount(option.price_delta_minor)));
-                const held = product.company_emergency_hold_active === true;
-                const allowed = product.selectable && !held && amountSafe && selectionsValid(product.key, selected);
-                return <article className="product-card" key={product.key}>
-                  <div className="product-top"><div><h4>{product.name}</h4>{product.description && <p>{product.description}</p>}</div><strong className="price">{safeAmount(product.effective_price_minor)}</strong></div>
-                  <span className={`availability ${product.selectable && !held ? 'is-available' : ''}`}>{held ? t.emergencyHold : product.selectable ? t.available : product.availability === 'PENDING_CONFIRMATION' ? t.pendingAvailability : t.unavailable}</span>
-                  {product.option_groups.map((group) => <fieldset className="option-group" key={group.key}>
-                    <legend>{group.name} {group.min_select > 0 && <small>{t.required}</small>}</legend>
-                    <div className="option-list">{group.options.map((option) => {
-                      const checked = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
-                      return <label className={`option ${!option.availability || option.availability !== 'AVAILABLE' ? 'option-muted' : ''}`} key={option.key}>
-                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || held || option.availability !== 'AVAILABLE' || (group.max_select !== 1 && !checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
-                        <span>{option.name}</span><small>{safeAmount(option.price_delta_minor)}</small>
-                      </label>;
-                    })}</div>
-                    {group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" onClick={() => setSelections((current) => ({ ...current, [product.key]: (current[product.key] ?? []).filter((item) => item.group_key !== group.key) }))}>{t.noOption}</button>}
-                  </fieldset>)}
-                  <div className="product-actions"><label className="quantity-select">{t.quantity}<select aria-label={`${product.name} ${t.quantity}`} value={quantities[product.key] ?? 1} onChange={(event) => setQuantities((values) => ({ ...values, [product.key]: Number(event.target.value) }))}>{Array.from({ length: 10 }, (_, i) => i + 1).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-                    <button className="button small primary" disabled={busy || !allowed || uncertain} onClick={() => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, quantities[product.key] ?? 1, selected, key))}>{t.add}</button>
-                  </div>
-                  {product.selectable && !amountSafe && <small className="field-hint" role="alert">{t.amountError}</small>}
-                  {product.selectable && amountSafe && !allowed && <small className="field-hint">{t.selectRequired}</small>}
-                </article>;
-              })}
-            </div>
-          </section>)}
-        </section>}
+        <CategoryNav categories={entry.menu.categories} locale={locale} />
+        <MenuList categories={entry.menu.categories} locale={locale} busy={busy} uncertain={uncertain}
+          onOpenOptions={(product) => setOptionProductKey(product.key)}
+          onAdd={(product) => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, 1, [], key))} />
+        <OptionSheet product={optionProduct} isOpen={optionSheetOpen} onOpenChange={(open) => { if (!open) setOptionProductKey(null); }}
+          locale={locale} selected={selections[optionProductKey ?? ''] ?? []} quantity={quantities[optionProductKey ?? ''] ?? 1}
+          notice={<DemoNotice demo={demo} locale={locale} />} busy={busy} uncertain={uncertain} fallbackFocus={() => entryHeading.current ?? orderHeading.current ?? menuHeading.current}
+          onChoose={(groupKey, optionKey, max) => { if (optionProduct) chooseOption(optionProduct.key, groupKey, optionKey, max); }}
+          onClear={(groupKey) => { if (optionProduct) setSelections((current) => ({ ...current, [optionProduct.key]: (current[optionProduct.key] ?? []).filter((item) => item.group_key !== groupKey) })); }}
+          onQuantity={(quantity) => { if (optionProduct) setQuantities((current) => ({ ...current, [optionProduct.key]: quantity })); }}
+          onAdd={() => { if (optionProduct) void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, optionProduct.key, quantities[optionProduct.key] ?? 1, selections[optionProduct.key] ?? [], key), () => setOptionProductKey(null)); }}>
+          {syncNotice(`${syncID}-option`)}
+          {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
+          {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
+          {notice && <p role="status">{notice}</p>}
+        </OptionSheet>
 
-        <aside className={`cart-panel ${preview ? 'preview-mode' : ''}`}>
-          {preview ? <>
-            <div className="eyebrow">{t.preview}</div><h2>{t.preview}</h2><p className="muted">{t.previewHint}</p>
-            <div className="quote-lines">{preview.quote.lines.map((line) => <article className="quote-line" key={line.line_id}>
-              <div><strong>{line.name}</strong><span>{line.options.map((option) => option.name).join(' · ')}</span><small>{safeAmount(line.base_gross_jpy)} × {line.quantity}</small></div>
-              <strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong>
-              {line.options.map((option) => <small className="quote-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>＋ {option.name} · {safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}
-            </article>)}</div>
-            <div className="total-row"><span>{t.total}</span><strong>{safeAmount(preview.quote.tax.total_gross_jpy)}</strong></div>
-            <div className="tax-row"><span>{t.tax}</span><span>{safeAmount(preview.quote.tax.total_tax_jpy)}</span></div>
-            <fieldset className="payment-choice"><legend>{t.method}</legend>{!demo && <label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label>}{guestOperations?.cash_enabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{demo ? t.demoCash : t.cash}</label>}</fieldset>
-            <p className="payment-note">{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>
-            {!previewAmountsSafe && <p className="error" role="alert">{t.amountError}</p>}
-            {previewMatchesCart && <button className="button primary wide" disabled={busy || unavailable || uncertain || !previewAmountsSafe} onClick={() => void confirmOrder()}>{busy ? t.working : t.confirm}</button>}
-            <button className="button quiet wide" disabled={busy} onClick={clearPreview}>{t.cancelPreview}</button>
-          </> : <>
-            <div className="cart-panel-head"><div><div className="eyebrow">OPEN TABLE</div><h2>{t.pending}</h2></div><button className="icon-button" aria-label={t.refresh} title={t.refresh} disabled={busy} onClick={() => void refreshCurrent(entry)}>↻</button></div>
-            {!cart || cart.lines.length === 0 ? <div className="empty-state"><div className="empty-icon">＋</div><p>{t.cartEmpty}</p></div> : <div className="cart-lines">
-              {cart.lines.map((line: CartLine) => {
-                const product = menuProducts.get(line.product_key);
-                if (!product) return <article className="cart-line unavailable-line" key={line.line_id}><div><strong>{line.product_name || line.product_key}</strong><p>{line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' ? t.emergencyHold : t.itemMissing}</p><p>{line.options.map((option) => option.option_name).join(' · ')}</p></div><button className="text-button" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></article>;
-                const selected = line.options;
-                const held = line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' || product.company_emergency_hold_active === true;
-                const lineAvailable = line.product_available && product.selectable && !held && line.options.every((option) => option.available);
-                return <article className="cart-line" key={line.line_id}>
-                  <div className="cart-line-head"><div><strong>{line.product_name || product.name}</strong><p>{held ? t.emergencyHold : lineAvailable ? t.available : t.unavailable}</p>{selected.length > 0 && <p className="cart-selected-options">{selected.map((option) => `${option.group_name}: ${option.option_name}${option.available ? '' : ` · ${t.unavailable}`}`).join('、')}</p>}</div><button className="text-button danger" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></div>
-                  {product.option_groups.map((group) => <fieldset className="compact-options" key={group.key}><legend>{group.name}</legend>{group.options.map((option) => <label key={option.key}><input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${line.line_id}-${group.key}`} checked={selected.some((item) => item.group_key === group.key && item.option_key === option.key)} disabled={busy || uncertain || !product.selectable || held || option.availability !== 'AVAILABLE'} onChange={() => {
-                    const exists = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
-                    const groupSelections = selected.filter((item) => item.group_key !== group.key);
-                    const sameGroup = selected.filter((item) => item.group_key === group.key);
-                    const next = exists ? selected.filter((item) => !(item.group_key === group.key && item.option_key === option.key)) : [...groupSelections, ...sameGroup.slice(0, Math.max(0, group.max_select - 1)), { group_key: group.key, option_key: option.key }];
-                    const count = next.filter((item) => item.group_key === group.key).length;
-                    if (count >= group.min_select && count <= group.max_select) void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
-                  }} />{option.name}</label>)}{group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" disabled={busy || uncertain} onClick={() => {
-                    const next = selected.filter((item) => item.group_key !== group.key);
-                    void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
-                  }}>{t.noOption}</button>}</fieldset>)}
-                  <div className="cart-line-foot"><span>{amountJPY(product.effective_price_minor)}</span><div className="stepper"><button aria-label={`${product.name} −`} disabled={busy || uncertain || line.quantity <= 1} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity - 1, line.options, key))}>−</button><span>{line.quantity}</span><button aria-label={`${product.name} +`} disabled={busy || uncertain || line.quantity >= 99} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity + 1, line.options, key))}>＋</button></div></div>
-                </article>;
-              })}
-            </div>}
-            {unavailable && <p className="notice">{t.unavailableLines}</p>}
-            <button className="button primary wide checkout-button" disabled={!cart?.lines.length || busy || uncertain || unavailable} onClick={() => void openPreview()}>{busy ? t.loading : t.preview}</button>
-            <p className="sync-caption"><span className="live-dot" />{locale === 'ja' ? '同じテーブルと共有中' : '與同桌即時共用'}</p>
-          </>}
-          {uncertain && <button className="button retry wide" disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
-          {visibleError && <p className="error" role="alert">{visibleError}</p>}{notice && <p className="notice" role="status">{notice}</p>}
-        </aside>
+        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)} onHeightChange={setCartBarHeight}
+          sync={sync.degraded ? `${t.syncWaiting}・${syncTime} ${t.syncAt}` : `${t.synced}・${syncTime}`} />
+        <CartSheet isOpen={cartSheetOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
+          locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />}
+          degraded={sync.degraded} syncNotice={syncNotice(`${syncID}-cart`)} syncReasonID={`${syncID}-cart`} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
+          onPayment={setPayment} busy={busy} uncertain={uncertain} unavailable={unavailable} previewMatchesCart={previewMatchesCart} previewAmountsSafe={previewAmountsSafe}
+          error={visibleError} notice={notice} onPreview={() => void openPreview()} onClearPreview={clearPreview} onInvalidated={() => setError((current) => current || t.stale)} onConfirm={() => void confirmOrder()}
+          onRefresh={() => void refreshCurrent(entry)} onRetry={() => void retryUncertain()}
+          onRemove={(line) => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, key))}
+          onSetLine={(line, quantity, options) => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, quantity, options, key))}
+          fallbackFocus={() => entryHeading.current ?? orderHeading.current ?? menuHeading.current} />
+        {!cartOpen && !optionProduct && <div className={guestStyles.feedback} style={cartBarHeight > 0 ? { bottom: `calc(${cartBarHeight}px + var(--ref-space-2))` } : undefined}>
+          {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
+          {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
+          {notice && <p role="status">{notice}</p>}
+        </div>}
       </>}
 
-      {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+      {tab === 'orders' && <section className={guestStyles.orders}><div className="section-heading"><div><h2 ref={orderHeading} tabIndex={-1}>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+        {notice && <p role="status">{notice}</p>}
         {operationsStale && <p className="notice" role="status">{guestOperations ? t.operationsStale : t.amountUnavailable}</p>}
-        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
+        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" data-order-card={order.order_id} key={order.order_id}>
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
-          <p className="guest-order-status" role="status">{guestOrderLabel(operations, locale)}</p>
-          {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel">
+          <OrderTracks order={operations} paymentMethod={order.payment_method}
+            checkout={checkoutStatus?.order_id === order.order_id ? checkoutStatus : null}
+            operationsStale={operationsStale} locale={locale} statusLabel={guestOrderLabel(operations, locale)} />
+          {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel" data-checkout-panel>
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>
-              {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status">{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
+              {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status" data-checkout-status>{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
               {!checkoutStatus && !checkoutError && <p className="muted" role="status">{t.checkoutLoading}</p>}
               {checkoutError && <p className="error" role="alert">{checkoutError}</p>}
               {checkoutStatus?.order_id === order.order_id && checkoutStatus.resume_available && <button className="button small primary" disabled={resumingOrderID === order.order_id} onClick={() => void resumeCheckout(order.order_id)}>{resumingOrderID === order.order_id ? t.checkoutLoading : t.continueCheckout}</button>}
@@ -815,11 +923,10 @@ export function App({ demo = false }: DemoSurfaceProps) {
           <small>{new Date(order.created_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW')}</small>
         </article>; })}
       </section>}
-      <footer className="workspace-footer">{t.brand} <span>·</span> {locale === 'ja' ? 'おいしい時間を、みんなで。' : '與同桌一起享用好味道。'}</footer>
     </div>
   </Shell>;
 }
 
-function Shell({ children, demo = false, locale, setLocale, t }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
-  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /></main>;
+function Shell({ children, demo = false, locale, setLocale, t, tableLabel, cartBarHeight = 0 }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string; cartBarHeight?: number }) {
+  return <main className={guestStyles.shell} data-surface="guest" style={cartBarHeight > 0 ? { paddingBottom: `calc(${cartBarHeight}px + var(--ref-space-4))` } : undefined}><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{demo && <strong data-store-slot="demo">{demoStoreName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
 }

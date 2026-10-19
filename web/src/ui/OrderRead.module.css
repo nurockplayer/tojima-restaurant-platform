@@ -1,6 +1,82 @@
+.page {
+  min-height: 100vh;
+  padding-inline: var(--space-gutter);
+  font-family: var(--font-sans);
+}
+
+.header {
+  display: flex;
+  justify-content: flex-end;
+  max-width: 44rem;
+  margin-inline: auto;
+  padding-block: var(--ref-space-3);
+}
+
+.language {
+  flex: 0 0 auto;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+  padding: var(--ref-space-2) var(--ref-space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  white-space: nowrap;
+}
+
+.language:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.language:focus:not(:focus-visible) {
+  outline: none;
+}
+
 .panel { margin: 1.5rem auto; padding: 1.25rem; max-width: 44rem; border: 1px solid var(--color-border); border-radius: 1rem; background: var(--color-surface); overflow-wrap: anywhere; }
-.panel button, .panel a { min-height: 44px; display: inline-flex; align-items: center; padding: .6rem; }
+.control {
+  box-sizing: border-box;
+  display: inline-flex;
+  min-inline-size: var(--size-target-min);
+  min-block-size: var(--size-target-min);
+  align-items: center;
+  justify-content: center;
+  padding: .6rem;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  text-decoration: none;
+}
+
+.control:focus-visible, .sharedInput:focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: 2px;
+}
+
+.control:focus:not(:focus-visible) { outline: none; }
 .panel dl { display: grid; grid-template-columns: 1fr 1fr; gap: .75rem; }
 .panel dd { margin: 0; }
 .panel ul { padding-left: 1.25rem; }
-.panel input { width: 100%; }
+.sharedInput {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-inline-size: var(--size-target-min);
+  min-block-size: var(--size-target-min);
+  padding: .6rem;
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+@media (forced-colors: active) {
+  .language { border-color: ButtonText; }
+  .language:focus-visible { outline-color: Highlight; }
+  .control, .sharedInput { border-color: ButtonText; }
+  .control:focus-visible, .sharedInput:focus-visible { outline-color: Highlight; }
+}

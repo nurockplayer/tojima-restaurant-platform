@@ -2,9 +2,10 @@
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { grantFromFragment, orderReadLink, type OrderReadGrant } from '../api/order-read';
-import { MyOrders, OrderPage, OrderStatusView, orderPollInterval } from './OrderRead';
+import { grantFromFragment, orderReadClient, orderReadLink, type OrderReadGrant } from '../api/order-read';
+import { MyOrders, OrderPage, OrderStatusView, orderPollInterval, RequestOrderLink } from './OrderRead';
 import { loadMyOrders, rememberOrderGrant } from './my-orders';
+import styles from './OrderRead.module.css';
 
 const grant: OrderReadGrant = { order_id: 'a'.repeat(32), order_read_token: 'A'.repeat(43), expires_at: '2099-10-19T00:00:00Z' };
 const state = { display_state: 'STANDARD', version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '9007199254740993', effective_total_gross_jpy: '9007199254740993', effective_lines: [], adjusted: false, refunds: [], refunded_total_jpy: '0', currency: 'JPY', is_terminal: false };
@@ -325,5 +326,41 @@ describe('same-browser my orders', () => {
     expect(loadMyOrders()).toEqual([]);
     localStorage.setItem('tojima.my-orders.v1', 'broken');
     expect(loadMyOrders()).toEqual([]);
+  });
+});
+
+describe('order-link target sizing', () => {
+  it.each([
+    ['ja', 'この注文の閲覧リンクを保存', '注文状況'],
+    ['zh', '儲存此筆訂單的查閱連結', '訂單狀態'],
+  ] as const)('sizes the request and resulting order link in %s', async (locale, requestName, resultName) => {
+    vi.spyOn(orderReadClient, 'issue').mockResolvedValue(grant);
+    render(<RequestOrderLink sessionID="session" token="join-token" orderID={grant.order_id} locale={locale} />);
+
+    const request = screen.getByRole('button', { name: requestName });
+    expect(request.className).toContain(styles.control);
+    expect(request.getAttribute('data-control')).toBe('order-link-action');
+    await act(async () => { fireEvent.click(request); });
+
+    const result = screen.getByRole('link', { name: resultName });
+    expect(result.className).toContain(styles.control);
+    expect(result.getAttribute('data-control')).toBe('order-link-result');
+    expect(result.getAttribute('href')).toBe(orderReadLink(grant));
+  });
+
+  it('uses the same sized control treatment for sharing, saved links, and the shared URL field', async () => {
+    vi.useRealTimers();
+    const user = userEvent.setup();
+    vi.spyOn(orderReadClient, 'status').mockResolvedValue({ ...state, currency: 'JPY' });
+    rememberOrderGrant(grant);
+    render(<><OrderStatusView grant={grant} locale="ja" /><MyOrders locale="ja" /></>);
+
+    const savedLink = screen.getByRole('link', { name: grant.order_id });
+    expect(savedLink.className).toContain(styles.control);
+    const shareButton = await screen.findByRole('button', { name: '共有リンクをコピー' });
+    expect(shareButton.className).toContain(styles.control);
+    await user.click(shareButton);
+    const sharedInput = await screen.findByRole('textbox', { name: '共有リンク' });
+    expect(sharedInput.className).toContain(styles.sharedInput);
   });
 });

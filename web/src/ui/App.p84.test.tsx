@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { App } from './App';
 
@@ -34,9 +35,12 @@ it('P84 renders untrusted menu category, product and description as literal text
       root.render(<App />);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(host.querySelector('h3')?.textContent).toBe(category);
-    expect(host.querySelector('.product-card h4')?.textContent).toBe(name);
-    expect(host.querySelector('.product-card p')?.textContent).toBe(description);
+    const queries = within(host);
+    expect(queries.getByRole('heading', { level: 2, name: category }).textContent).toBe(category);
+    const product = host.querySelector<HTMLElement>('[data-product-key="meal"]');
+    expect(product).not.toBeNull();
+    expect(within(product!).getByRole('heading', { level: 3, name }).textContent).toBe(name);
+    expect(within(product!).getByText(description).textContent).toBe(description);
     // Assert DOM structure as well as non-execution: jsdom does not execute
     // every injected script/event, so absence of a side effect alone is weak.
     expect(host.querySelector('script, img, svg, [onerror], [onload]')).toBeNull();

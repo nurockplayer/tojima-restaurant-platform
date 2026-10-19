@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Cart } from '../api/types';
 import { checkoutNavigation } from '../api/checkout';
@@ -65,14 +66,15 @@ describe('guest app mount', () => {
 
     await act(async () => { root?.render(<App demo />); for (let i = 0; i < 30; i++) await Promise.resolve(); });
     expect(menuReads).toBe(1);
-    const previewButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('金額を確認する'))!;
+    await openCartSheet(host);
+    const previewButton = getButton(host, '金額を確認する');
     await act(async () => { previewButton.click(); for (let i = 0; i < 20; i++) await Promise.resolve(); });
-    expect(host.textContent).toContain('¥900');
+    expect(document.body.textContent).toContain('¥900');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(menuReads).toBe(2);
     expect(activeMenuReads).toBe(1);
-    const confirmButton = [...host.querySelectorAll('button')].find((button) => button.textContent?.includes('この内容で注文を確定'))!;
+    const confirmButton = getButton(host, 'この内容で注文を確定');
     await act(async () => { confirmButton.click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
     expect(menuReads).toBe(2);
 
@@ -81,8 +83,8 @@ describe('guest app mount', () => {
     expect(activeMenuReads).toBe(0);
     expect(maxActiveMenuReads).toBe(1);
     expect(host.textContent).toContain('販売停止中');
-    expect(host.textContent).toContain('注文できない商品があります');
-    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+    expect(document.body.textContent).toContain('注文できない商品があります');
+    expect(host.querySelector('[data-product-key] button')?.hasAttribute('disabled')).toBe(true);
   });
 
   it('revalidates the menu only while visible and reflects ON then OFF without clearing store PAUSED state', async () => {
@@ -126,11 +128,11 @@ describe('guest app mount', () => {
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); await vi.advanceTimersByTimeAsync(15_000); });
     expect(menuReads).toBe(2);
     expect(host.textContent).toContain('販売停止中');
-    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+    expect(host.querySelector('[data-product-key] button')?.hasAttribute('disabled')).toBe(true);
 
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
     expect(menuReads).toBe(3);
-    const productCard = host.querySelector('.product-card');
+    const productCard = host.querySelector('[data-product-key]');
     expect(productCard?.textContent).not.toContain('販売停止中');
     expect(productCard?.textContent).toContain('現在注文できません');
     expect(productCard?.querySelector('button')?.hasAttribute('disabled')).toBe(true);
@@ -164,14 +166,15 @@ describe('guest app mount', () => {
     await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
 
     expect(host.textContent).toContain('販売停止中');
-    expect(host.querySelector('.product-card button')?.hasAttribute('disabled')).toBe(true);
+    expect(host.querySelector('[data-product-key] button')?.hasAttribute('disabled')).toBe(true);
     expect(host.textContent).toContain('定食');
-    expect(host.querySelector('.cart-line')?.textContent).toContain('販売停止中');
-    const previewButton = [...(host.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('金額を確認する'));
+    await openCartSheet(host);
+    expect(document.body.querySelector('[data-cart-line]')?.textContent).toContain('販売停止中');
+    const previewButton = within(document.body).queryByRole('button', { name: '金額を確認する' });
     expect(previewButton?.hasAttribute('disabled')).toBe(true);
 
-    await clickButton(host, '削除');
-    expect(host.textContent).toContain('カートはまだ空です。');
+    await clickButton(document.body, '削除');
+    expect(document.body.querySelector('[data-cart-line]')).toBeNull();
     expect(requested.some((call) => call.includes('/cart/preview'))).toBe(false);
     expect(requested.some((call) => call.startsWith('DELETE ') && call.includes('/cart/lines/held-line'))).toBe(true);
   });
@@ -203,16 +206,16 @@ describe('guest app mount', () => {
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
 
     await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await openCartSheet(host);
     await clickButton(host, '金額を確認する');
-    expect(host.textContent).toContain('¥900');
-    const cashOption = [...(host.querySelectorAll('label') ?? [])].find((label) => label.textContent?.includes('店頭で現金'))?.querySelector('input');
-    expect(cashOption).not.toBeNull();
+    expect(document.body.textContent).toContain('¥900');
+    const cashOption = within(document.body).getByRole('radio', { name: /店頭で現金/ });
     await act(async () => { cashOption?.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     await clickButton(host, 'この内容で注文を確定');
 
-    expect(host.textContent).toContain('販売停止中');
-    expect(host.textContent).not.toContain('この内容で注文を確定');
-    expect(host.textContent).toContain('注文できない商品があります');
+    expect(document.body.textContent).toContain('販売停止中');
+    expect(document.body.textContent).not.toContain('この内容で注文を確定');
+    expect(document.body.textContent).toContain('注文できない商品があります');
     expect(menuReads).toBeGreaterThan(1);
     expect(requested.some((call) => call.endsWith('/cart/commit'))).toBe(true);
   });
@@ -244,10 +247,12 @@ describe('guest app mount', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    expect(host.textContent).toContain('東島');
-    expect(host.textContent).toContain('共有カート');
+    await openCartSheet(host!);
+    expect(host.textContent).toContain('Powered by Tojima');
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+    expect(document.body.textContent).toContain('共有カート');
     expect(host.textContent).toContain('お食事');
-    expect(host.textContent).toContain('Previously added item');
+    expect(document.body.textContent).toContain('Previously added item');
     expect(host.textContent).toContain('テーブルの QR から参加');
     expect(host.textContent).not.toContain('DIRECT_SCAN');
     const requested = fetchMock.mock.calls.map(([url]) => String(url));
@@ -258,8 +263,9 @@ describe('guest app mount', () => {
     expect(requested).toContain('/v1/guest/sessions/session-1/orders');
     expect(sessionStorage.getItem('tojima.table-join.session-1')).toBe('memory-only-grant');
 
+    await clickButton(host!, '閉じる');
     await act(async () => {
-      [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('注文履歴'))?.click();
+      getButton(host!, '注文履歴').click();
     });
     expect(host.textContent).toContain('カレー × 1');
     expect(host.textContent).toContain('¥1,210');
@@ -299,9 +305,10 @@ describe('guest app mount', () => {
     expect(host.textContent).toContain('テーブル 05');
     expect(host.textContent).not.toContain(demoLocator);
     await clickButton(host, 'カートに追加');
+    await openCartSheet(host);
     await clickButton(host, '金額を確認する');
-    expect(host.textContent).not.toContain('クレジットカード');
-    expect(host.textContent).toContain('現金（デモ・テスト専用）');
+    expect(document.body.textContent).not.toContain('クレジットカード');
+    expect(document.body.textContent).toContain('現金（デモ・テスト専用）');
     await clickButton(host, 'この内容で注文を確定');
 
     expect(JSON.parse(writes.find((write) => write.url.endsWith('/cart/commit'))!.body).payment_method).toBe('CASH');
@@ -338,14 +345,14 @@ describe('guest app mount', () => {
     const guestOperation = { display_state: 'STANDARD', id: 'order-1', payment_status: 'UNPAID', fulfillment_status: scenario.fulfillment, requires_staff_acceptance: scenario.requires, staff_accepted: false, ...(scenario.cashMode ? { cash_mode: scenario.cashMode } : {}) };
     await mountGuestStatus(mode, order, guestOperation);
     await act(async () => {
-      [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('注文履歴'))?.click();
+      getButton(host!, '注文履歴').click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(host?.querySelector('.guest-order-status')?.textContent, host?.textContent).toBe(scenario.expected);
-    if (!scenario.requires) expect(host?.querySelector('.guest-order-status')?.textContent).not.toContain('店員の受付待ち');
+    expect(host?.querySelector('[data-order-status]')?.textContent, host?.textContent).toBe(scenario.expected);
+    if (!scenario.requires) expect(host?.querySelector('[data-order-status]')?.textContent).not.toContain('店員の受付待ち');
     if (scenario.cashMode === 'PREPAID') {
       await clickButton(host!, '繁中');
-      expect(host?.querySelector('.guest-order-status')?.textContent).toBe('等待開始製作 · 尚未付款');
+      expect(host?.querySelector('[data-order-status]')?.textContent).toBe('等待開始製作 · 尚未付款');
     }
   });
 
@@ -409,27 +416,27 @@ describe('guest app mount', () => {
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state: 'CANCELLED', payment_status: 'UNKNOWN', fulfillment_status: 'CANCELLED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '1100', effective_total_gross_jpy: '0', effective_lines: [], adjusted: true, refunds: [{ status: 'SUCCEEDED', amount_jpy: '1100', method: 'STRIPE' }], refunded_total_jpy: '1100' });
     if (locale === 'zh') await clickButton(host!, '繁中');
     await clickButton(host!, locale === 'ja' ? '注文履歴' : '已送出訂單');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe(message);
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe(message);
     expect(host?.textContent).toContain(refunded);
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
   });
 
   it('shows a VOIDED guest order as cancelled without implying payment succeeded', async () => {
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state: 'CANCELLED', payment_status: 'VOIDED', fulfillment_status: 'CANCELLED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '1100', effective_total_gross_jpy: '0', effective_lines: [], adjusted: true, refunds: [], refunded_total_jpy: '0' });
     await clickButton(host!, '注文履歴');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('この注文は取り消されました');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('この注文は取り消されました');
     expect(host?.textContent).not.toContain('支払済み');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
   });
 
   it('shows paid review in both history languages and follows the ordinary session poll through release', async () => {
     const operation = { id: 'order-1', display_state: 'PAID_UNDER_REVIEW', payment_status: 'PAID', fulfillment_status: 'WAITING', requires_staff_acceptance: false, staff_accepted: true };
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation);
     await clickButton(host!, '注文履歴');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
     expect(host?.textContent).not.toMatch(/調理中|返金/);
     await clickButton(host!, '繁中');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
     expect(host?.textContent).not.toMatch(/製作中|退款/);
     // Reschedule the existing visible history interval onto the fake clock.
     vi.useFakeTimers();
@@ -438,19 +445,19 @@ describe('guest app mount', () => {
     const before = fetcher.mock.calls.filter(([url]) => String(url).endsWith('/operations')).length;
     await act(async () => { await vi.advanceTimersByTimeAsync(20_001); });
     expect(fetcher.mock.calls.filter(([url]) => String(url).endsWith('/operations')).length).toBeGreaterThan(before);
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
     operation.display_state = 'STANDARD'; operation.fulfillment_status = 'PREPARING';
     await act(async () => { await vi.advanceTimersByTimeAsync(20_001); });
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('製作中 · 已付款');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('製作中 · 已付款');
   });
 
   it.each(['FUTURE_SUCCESS', 'UNKNOWN', undefined])('keeps unsupported history display state %s neutral despite paid/served raw states', async (display_state) => {
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state, payment_status: 'PAID', fulfillment_status: 'SERVED', requires_staff_acceptance: false, staff_accepted: true });
     await clickButton(host!, '注文履歴');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('店舗に確認してください');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('店舗に確認してください');
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
     await clickButton(host!, '繁中');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('請洽服務人員確認');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('請洽服務人員確認');
   });
 
   it.each(['network', '503'] as const)('retains confirmed review through a %s operations poll failure and recovers on the next poll', async (failure) => {
@@ -465,27 +472,27 @@ describe('guest app mount', () => {
     });
     await clickButton(host!, '注文履歴');
     expect(reads).toBe(1);
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
 
     vi.useFakeTimers();
     await act(async () => { setVisibilityState('hidden'); document.dispatchEvent(new Event('visibilitychange')); setVisibilityState('visible'); document.dispatchEvent(new Event('visibilitychange')); });
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(2);
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('お支払いを確認しました。店舗でご注文を確認中です');
     expect(host?.textContent).toContain('最新の状況を確認できません。表示は前回確認時の内容です。');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
     expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes('/checkout'))).toBe(false);
 
-    await act(async () => { [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('繁中'))!.click(); });
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
+    await act(async () => { getButton(host!, '繁中').click(); });
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('已確認付款，店家正在確認您的訂單');
     expect(host?.textContent).toContain('無法確認最新狀態，目前顯示上次確認的內容。');
 
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(3);
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('製作中 · 已付款');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('製作中 · 已付款');
     expect(host?.textContent).not.toContain('無法確認最新狀態，目前顯示上次確認的內容。');
-    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
+    expect(host?.querySelector('[data-checkout-panel]')).not.toBeNull();
   });
 
   it.each(['missing', 'network', '503'] as const)('renders %s initial operations neutrally without checkout controls', async (result) => {
@@ -494,11 +501,11 @@ describe('guest app mount', () => {
       return result === '503' ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [], cash_enabled: false });
     });
     await clickButton(host!, '注文履歴');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('店舗に確認してください');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('店舗に確認してください');
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
     expect(host?.textContent).not.toContain('表示は前回確認時の内容です');
     await clickButton(host!, '繁中');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('請洽服務人員確認');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('請洽服務人員確認');
   });
 
   it('withholds checkout controls while a confirmed STANDARD snapshot is stale', async () => {
@@ -508,13 +515,13 @@ describe('guest app mount', () => {
       return reads === 2 ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [standardOperation(stripeOrder('order-1'))], cash_enabled: false });
     });
     await clickButton(host!, '注文履歴');
-    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
-    await clickButton(host!, '↻');
-    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('調理開始待ち · 支払確認中');
+    expect(host?.querySelector('[data-checkout-panel]')).not.toBeNull();
+    await clickButton(host!, '共有内容を更新');
+    expect(host?.querySelector('[data-order-status]')?.textContent).toBe('調理開始待ち · 支払確認中');
     expect(host?.textContent).toContain('最新の状況を確認できません。表示は前回確認時の内容です。');
-    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
-    await clickButton(host!, '↻');
-    expect(host?.querySelector('.checkout-status-panel')).not.toBeNull();
+    expect(host?.querySelector('[data-checkout-panel]')).toBeNull();
+    await clickButton(host!, '共有内容を更新');
+    expect(host?.querySelector('[data-checkout-panel]')).not.toBeNull();
     expect(host?.textContent).not.toContain('表示は前回確認時の内容です');
   });
 
@@ -580,8 +587,9 @@ describe('guest app mount', () => {
     expect(host.textContent).toContain('¥100');
     expect(host.textContent).toContain('定食');
 
+    await openCartSheet(host!);
     await act(async () => {
-      host?.querySelector<HTMLButtonElement>('button[aria-label="共有内容を更新"]')?.click();
+      getButton(host!, '共有内容を更新').click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(host.textContent).toContain('¥150');
@@ -589,24 +597,24 @@ describe('guest app mount', () => {
     expect(menuReads).toBe(2);
 
     await act(async () => {
-      [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('金額を確認する'))?.click();
+      getButton(host!, '金額を確認する').click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    expect(host.textContent).toContain('この内容で注文を確定');
-    expect(host.textContent).toContain('クレジットカード');
+    expect(document.body.textContent).toContain('この内容で注文を確定');
+    expect(document.body.textContent).toContain('クレジットカード');
 
     await act(async () => {
-      [...(host?.querySelectorAll('button') ?? [])].find((button) => button.textContent?.includes('この内容で注文を確定'))?.click();
+      getButton(host!, 'この内容で注文を確定').click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(menuReads).toBe(3);
     expect(previewCalls).toBe(1);
     expect(commitCalls).toBe(1);
     expect(paymentFlow).toEqual(['checkout-context', 'commit']);
-    expect(host.textContent).toContain('¥200');
-    expect(host.textContent).toContain('定食');
-    expect(host.textContent).not.toContain('この内容で注文を確定');
-    expect(host.textContent).toContain('金額を確認する');
+    expect(document.body.textContent).toContain('¥200');
+    expect(document.body.textContent).toContain('定食');
+    expect(document.body.textContent).not.toContain('この内容で注文を確定');
+    expect(document.body.textContent).toContain('金額を確認する');
   });
 
   it('checks one Stripe order on demand and navigates only to its private resume response', async () => {
@@ -653,12 +661,13 @@ describe('guest app mount', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await openCartSheet(host!);
     await clickButton(host!, '金額を確認する');
     await clickButton(host!, 'この内容で注文を確定');
     expect(calls).toEqual(['context']);
     expect(commits).toBe(0);
-    expect(host?.textContent).toContain('注文は送信されていません');
-    expect(host?.textContent).not.toContain('前回の操作を照合して再試行');
+    expect(document.body.textContent).toContain('注文は送信されていません');
+    expect(document.body.textContent).not.toContain('前回の操作を照合して再試行');
   });
 
   it('bootstraps before a new Stripe commit and selects only that attempt for status polling', async () => {
@@ -687,11 +696,12 @@ describe('guest app mount', () => {
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await openCartSheet(host!);
     await clickButton(host!, '金額を確認する');
     await clickButton(host!, 'この内容で注文を確定');
     expect(flow.slice(0, 3)).toEqual(['bootstrap', 'commit', 'status']);
-    expect(host?.textContent).toContain('注文を確認しています');
-    expect(host?.textContent).not.toContain('支払いを続ける');
+    expect(document.body.textContent).toContain('注文を確認しています');
+    expect(document.body.textContent).not.toContain('支払いを続ける');
   });
 
   it.each([
@@ -717,9 +727,9 @@ describe('guest app mount', () => {
       if (url.endsWith('/orders/order-new/checkout')) return json(checkoutStatus('order-new', 'PAID', false));
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
-    const cards = host!.querySelectorAll<HTMLElement>('.order-card');
-    await act(async () => { cards.item(0)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
-    await act(async () => { host!.querySelectorAll<HTMLElement>('.order-card').item(1)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const cards = host!.querySelectorAll<HTMLElement>('[data-order-card]');
+    await act(async () => { getButton(cards.item(0)!, '支払い状況を確認').click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { getButton(cards.item(1)!, '支払い状況を確認').click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(host?.textContent).toContain('お支払い済み');
     await act(async () => { oldStatus.resolve(json(checkoutStatus('order-old', 'OPEN', true))); await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(host?.textContent).toContain('お支払い済み');
@@ -736,10 +746,10 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
 
-    const cards = host!.querySelectorAll<HTMLElement>('.order-card');
-    await act(async () => { cards.item(0)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const cards = host!.querySelectorAll<HTMLElement>('[data-order-card]');
+    await act(async () => { getButton(cards.item(0)!, '支払い状況を確認').click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     await clickButton(host!, '支払いを続ける');
-    await act(async () => { host!.querySelectorAll<HTMLElement>('.order-card').item(1)!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await act(async () => { getButton(host!.querySelectorAll<HTMLElement>('[data-order-card]').item(1)!, '支払い状況を確認').click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     resumeResponse.resolve(json({ url: 'https://checkout.example.test/stale-session' }));
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
 
@@ -756,7 +766,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(1);
     await act(async () => { pendingStatus.resolve(json(checkoutStatus('order-slow', 'UNKNOWN', false))); await Promise.resolve(); });
@@ -769,7 +779,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     expect(reads).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(19_999); });
     expect(reads).toBe(1);
@@ -795,7 +805,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     expect(reads).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(2);
@@ -813,7 +823,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     expect(reads).toBe(1);
 
     setVisibilityState('hidden');
@@ -838,7 +848,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     expect(reads).toBe(1);
     setVisibilityState('hidden');
     await act(async () => { document.dispatchEvent(new Event('visibilitychange')); });
@@ -859,7 +869,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    const refreshButton = host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!;
+    const refreshButton = getButton(host!, '支払い状況を確認');
     await act(async () => { refreshButton.click(); await Promise.resolve(); });
     expect(reads).toBe(1);
     expect(host?.textContent).toContain('お支払いを完了できませんでした');
@@ -907,7 +917,7 @@ describe('guest app mount', () => {
       throw new Error(`Unexpected checkout API request: ${url}`);
     });
     vi.useFakeTimers();
-    await act(async () => { host!.querySelector<HTMLButtonElement>('.checkout-status-panel button')!.click(); await Promise.resolve(); });
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
     expect(reads).toBe(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(reads).toBe(2);
@@ -970,11 +980,20 @@ describe('guest app mount', () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
-    const productCard = host.querySelector<HTMLElement>('.product-card')!;
-    const addButton = productCard.querySelector<HTMLButtonElement>('button.small')!;
-    const productSauce = [...productCard.querySelectorAll('fieldset.option-group')].find((fieldset) => fieldset.querySelector('legend')?.textContent?.includes('ソース'))!;
-    const productSize = [...productCard.querySelectorAll('fieldset.option-group')].find((fieldset) => fieldset.querySelector('legend')?.textContent?.includes('サイズ'))!;
-    expect(addButton.disabled).toBe(true);
+    const productRow = host.querySelector<HTMLElement>('[data-product-key="meal"]')!;
+    const addButton = within(productRow).getByRole('button', { name: 'カートに追加' });
+    expect((addButton as HTMLButtonElement).disabled).toBe(false);
+    await clickButton(host, 'カートに追加');
+    const optionDialog = within(document.body).getByRole('dialog', { name: '定食' });
+    const productSauce = getOptionGroup(optionDialog, 'ソース');
+    const productSize = getOptionGroup(optionDialog, 'サイズ');
+    const cartLinePosts = () => fetchMock.mock.calls.filter(([url, init]) => String(url).endsWith('/cart/lines') && init?.method === 'POST').length;
+    const cartLinePostsBeforeRequiredAttempt = cartLinePosts();
+    await clickButton(optionDialog, 'カートに追加');
+    expect(cartLinePosts()).toBe(cartLinePostsBeforeRequiredAttempt);
+    expect(productSize.getAttribute('aria-invalid')).toBe('true');
+    expect(within(optionDialog).getByRole('alert').textContent).toContain('必須オプションを選択してください');
+    expect(document.activeElement).toBe(within(productSize).getByRole('radio', { name: /小/ }));
     await clickOption(productSauce, 'A');
     expect(findOption(productSauce, 'B').disabled).toBe(false);
     await clickOption(productSauce, 'B');
@@ -983,15 +1002,16 @@ describe('guest app mount', () => {
     await clickButton(productSauce, '選択しない');
     expect(findOption(productSauce, 'A').checked).toBe(false);
     expect(findOption(productSauce, 'B').checked).toBe(false);
-    expect(addButton.disabled).toBe(true);
     await clickOption(productSize, '小');
-    expect(addButton.disabled).toBe(false);
+    expect(productSize.getAttribute('aria-invalid')).toBeNull();
+    await clickButton(optionDialog, '閉じる');
+    await openCartSheet(host);
 
-    const cartSauce = [...host.querySelectorAll('fieldset.compact-options')].find((fieldset) => fieldset.querySelector('legend')?.textContent?.includes('ソース'))!;
+    const cartSauce = getOptionGroup(document.body, 'ソース');
     await clickOption(cartSauce, 'B');
-    expect(host.textContent).toContain('前回の操作を照合して再試行');
+    expect(document.body.textContent).toContain('前回の操作を照合して再試行');
     await act(async () => {
-      host?.querySelector<HTMLButtonElement>('button.retry')?.click();
+      within(document.body).getByRole('button', { name: /前回の操作を照合して再試行/ }).click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     expect(mutationCalls).toHaveLength(2);
@@ -1001,9 +1021,9 @@ describe('guest app mount', () => {
     expect(JSON.parse(mutationCalls[1]!.body).options).toEqual([{ group_key: 'size', option_key: 'small' }, { group_key: 'sauce', option_key: 'b' }]);
     expect(currentCart.lines[0]?.options.map((option) => option.option_key)).toEqual(['small', 'b']);
 
-    const updatedCartSauce = [...host.querySelectorAll('fieldset.compact-options')].find((fieldset) => fieldset.querySelector('legend')?.textContent?.includes('ソース'))!;
+    const updatedCartSauce = getOptionGroup(document.body, 'ソース');
     await clickOption(updatedCartSauce, 'A');
-    const selectedAGroup = [...host.querySelectorAll('fieldset.compact-options')].find((fieldset) => fieldset.querySelector('legend')?.textContent?.includes('ソース'))!;
+    const selectedAGroup = getOptionGroup(document.body, 'ソース');
     expect(findOption(selectedAGroup, 'A').checked).toBe(true);
     expect(JSON.parse(mutationCalls[2]!.body).options).toEqual([{ group_key: 'size', option_key: 'small' }, { group_key: 'sauce', option_key: 'a' }]);
     await clickButton(selectedAGroup, '選択しない');
@@ -1088,30 +1108,44 @@ function checkoutStatus(orderID: string, state: string, resumeAvailable: boolean
   };
 }
 
-async function setTextField(container: Element, label: string, value: string) {
-  const field = [...container.querySelectorAll('label.field')].find((item) => item.textContent?.includes(label));
-  const input = field?.querySelector('input');
+async function setTextField(container: HTMLElement, label: string, value: string) {
+  const input = within(container).getByRole('textbox', { name: new RegExp(escapeRegex(label)) }) as HTMLInputElement;
   if (!input) throw new Error(`Missing field: ${label}`);
   const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
   await act(async () => { setter?.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })); input.dispatchEvent(new Event('change', { bubbles: true })); });
 }
 
-async function clickOption(fieldset: Element, name: string) {
+async function clickOption(fieldset: HTMLElement, name: string) {
   const input = findOption(fieldset, name);
   await act(async () => { input.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-async function clickButton(container: Element, label: string) {
-  const button = [...container.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes(label));
-  if (!button) throw new Error(`Missing button: ${label}`);
+async function clickButton(container: HTMLElement, label: string) {
+  const button = getButton(container, label);
   await act(async () => { button.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
 }
 
-function findOption(fieldset: Element, name: string): HTMLInputElement {
-  const label = [...fieldset.querySelectorAll('label')].find((candidate) => candidate.textContent?.includes(name));
-  const input = label?.querySelector('input');
-  if (!input) throw new Error(`Missing option: ${name}`);
-  return input;
+async function openCartSheet(container: HTMLElement) {
+  const button = within(container).getByRole('button', { name: /カートを開く|開啟購物車/ });
+  await act(async () => { button.click(); for (let i = 0; i < 10; i++) await Promise.resolve(); });
+}
+
+function getButton(container: HTMLElement, label: string): HTMLButtonElement {
+  const matcher = new RegExp(escapeRegex(label));
+  return (within(container).queryByRole('button', { name: matcher }) ?? within(document.body).getByRole('button', { name: matcher })) as HTMLButtonElement;
+}
+
+function findOption(fieldset: HTMLElement, name: string): HTMLInputElement {
+  const matcher = new RegExp(escapeRegex(name));
+  return (within(fieldset).queryByRole('radio', { name: matcher }) ?? within(fieldset).getByRole('checkbox', { name: matcher })) as HTMLInputElement;
+}
+
+function getOptionGroup(container: HTMLElement, name: string): HTMLElement {
+  return within(container).getByRole('group', { name: new RegExp(escapeRegex(name)) }) as HTMLElement;
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function deferred<T>() {

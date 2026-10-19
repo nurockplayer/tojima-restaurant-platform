@@ -1,0 +1,168 @@
+{
+  "engine": "playwright-webkit-2370",
+  "viewport": "390x844",
+  "runs": [
+    {
+      "locale": "ja",
+      "steps": {
+        "menu": {
+          "stickyNav": "sticky",
+          "overflowX": false
+        },
+        "optionSheet": {
+          "opened": true,
+          "focusOnOpen": {
+            "tag": "SECTION",
+            "text": "シロナガスクジラ定食閉じるDEMO・参考価格：実際の注文・支払いは行われませんD",
+            "inDialog": true
+          },
+          "scroll": {
+            "pageScrollBefore": 0,
+            "afterInnerScroll": 0,
+            "afterWindowScrollBy": 400,
+            "backgroundMovedByInnerScroll": false,
+            "innerScroller": null,
+            "htmlOverflow": "hidden",
+            "bodyOverflow": "visible",
+            "overflowX": false
+          },
+          "tabEscapes": 0,
+          "shiftTabEscapes": 0,
+          "closedAfterAdd": true,
+          "focusAfterClose": {
+            "tag": "BUTTON",
+            "text": "カートに追加",
+            "inDialog": false
+          }
+        },
+        "bottom": {
+          "navTop": 0,
+          "barBottom": 844,
+          "innerHeight": 844,
+          "navVisible": true,
+          "barVisible": true
+        },
+        "cartSheet": {
+          "focusOnOpen": {
+            "tag": "SECTION",
+            "text": "共有カート閉じるDEMO・参考価格：実際の注文・支払いは行われません↻シロナガス",
+            "inDialog": true
+          },
+          "lines": 2,
+          "scroll": {
+            "pageScrollBefore": 1037,
+            "afterInnerScroll": 1037,
+            "afterWindowScrollBy": 1037,
+            "backgroundMovedByInnerScroll": false,
+            "innerScroller": {
+              "scrollTop": 50,
+              "scrollHeight": 421,
+              "clientHeight": 371
+            },
+            "htmlOverflow": "hidden",
+            "bodyOverflow": "visible",
+            "overflowX": false
+          },
+          "tabEscapes": 0,
+          "shiftTabEscapes": 0
+        },
+        "preview": {
+          "focus": {
+            "tag": "H2",
+            "text": "金額を確認する",
+            "inDialog": true
+          },
+          "tabEscapes": 0,
+          "closedByEsc": true,
+          "focusAfterEsc": {
+            "tag": "BUTTON",
+            "text": "カートを開く",
+            "inDialog": false
+          },
+          "leftoverInert": 0
+        }
+      }
+    },
+    {
+      "locale": "zh",
+      "steps": {
+        "menu": {
+          "stickyNav": "sticky",
+          "overflowX": false
+        },
+        "optionSheet": {
+          "opened": true,
+          "focusOnOpen": {
+            "tag": "SECTION",
+            "text": "シロナガスクジラ定食關閉DEMO・參考價格：不會實際下單或付款DEMO / 歴史",
+            "inDialog": true
+          },
+          "scroll": {
+            "pageScrollBefore": 0,
+            "afterInnerScroll": 0,
+            "afterWindowScrollBy": 400,
+            "backgroundMovedByInnerScroll": false,
+            "innerScroller": null,
+            "htmlOverflow": "hidden",
+            "bodyOverflow": "visible",
+            "overflowX": false
+          },
+          "tabEscapes": 0,
+          "shiftTabEscapes": 0,
+          "closedAfterAdd": true,
+          "focusAfterClose": {
+            "tag": "BUTTON",
+            "text": "加入購物車",
+            "inDialog": false
+          }
+        },
+        "bottom": {
+          "navTop": 0,
+          "barBottom": 844,
+          "innerHeight": 844,
+          "navVisible": true,
+          "barVisible": true
+        },
+        "cartSheet": {
+          "focusOnOpen": {
+            "tag": "SECTION",
+            "text": "共用購物車關閉DEMO・參考價格：不會實際下單或付款↻シロナガスクジラ定食可點選",
+            "inDialog": true
+          },
+          "lines": 4,
+          "scroll": {
+            "pageScrollBefore": 1032,
+            "afterInnerScroll": 1032,
+            "afterWindowScrollBy": 1032,
+            "backgroundMovedByInnerScroll": false,
+            "innerScroller": {
+              "scrollTop": 463,
+              "scrollHeight": 834,
+              "clientHeight": 371
+            },
+            "htmlOverflow": "hidden",
+            "bodyOverflow": "visible",
+            "overflowX": false
+          },
+          "tabEscapes": 0,
+          "shiftTabEscapes": 0
+        },
+        "preview": {
+          "focus": {
+            "tag": "H2",
+            "text": "確認金額",
+            "inDialog": true
+          },
+          "tabEscapes": 0,
+          "closedByEsc": true,
+          "focusAfterEsc": {
+            "tag": "BUTTON",
+            "text": "開啟購物車",
+            "inDialog": false
+          },
+          "leftoverInert": 0
+        }
+      }
+    }
+  ]
+}

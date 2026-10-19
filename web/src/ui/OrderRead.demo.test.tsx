@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { orderReadClient, orderReadLink, type OrderReadGrant } from '../api/order-read';
 import { OrderPage } from './OrderRead';
+import styles from './OrderRead.module.css';
 import { loadMyOrders } from './my-orders';
 
 const grant: OrderReadGrant = { order_id: 'a'.repeat(32), order_read_token: 'A'.repeat(43), expires_at: '2099-10-19T00:00:00Z' };
@@ -40,8 +41,12 @@ describe('ORDER_READ demo notice', () => {
     expect(banner.textContent).toContain('参考価格 · 現行店内価格未確認 · 実店舗への注文・支払いは行われません');
     expect(banner.compareDocumentPosition(screen.getByRole('region', { name: '注文状況' })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(await screen.findByText('¥980')).toBeTruthy();
+    const languageButton = screen.getByRole('button', { name: '繁體中文' });
+    expect(languageButton.className).toContain(styles.language);
+    expect(languageButton.getAttribute('lang')).toBe('zh-Hant');
 
-    await user.click(screen.getByRole('button', { name: '繁體中文' }));
+    await user.click(languageButton);
+    expect(screen.getByRole('button', { name: '日本語' }).getAttribute('lang')).toBe('ja');
 
     const translatedBanner = screen.getByRole('note', { name: 'DEMO' });
     expect(translatedBanner.textContent).toContain('DEMO · 博多餃子酒場 シロナガスクジラ');

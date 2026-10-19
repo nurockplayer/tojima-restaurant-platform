@@ -18,10 +18,12 @@
   "dependencies": {
     "@tanstack/react-query": "5.104.3",
     "react": "19.3.1",
+    "react-aria-components": "1.21.1",
     "react-dom": "19.3.1",
     "react-hook-form": "7.90.0"
   },
   "devDependencies": {
+    "@react-aria/optimize-locales-plugin": "2.0.2",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
     "@testing-library/user-event": "14.6.8",

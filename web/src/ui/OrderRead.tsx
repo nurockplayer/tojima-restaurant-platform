@@ -107,8 +107,8 @@ function Status({ grant, locale, pollMs, onRead }: OrderStatusProps) {
       {/^\d+$/.test(query.data.refunded_total_jpy ?? '') && BigInt(query.data.refunded_total_jpy) > 0n && <p>{t.refundedTotal}: {amountJPY(query.data.refunded_total_jpy)}</p>}
     </>}
     <p>{t.expires}: {new Date(grant.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW', { timeZone: 'Asia/Tokyo', timeZoneName: 'short' })}</p>
-    <p>{t.privacy}</p><button type="button" onClick={() => void share()}>{copied ? t.copied : t.copy}</button>
-    {shared && <label>{t.link}<input readOnly value={orderReadLink(grant)} onFocus={(e) => e.currentTarget.select()} /></label>}
+    <p>{t.privacy}</p><button className={styles.control} type="button" onClick={() => void share()}>{copied ? t.copied : t.copy}</button>
+    {shared && <label>{t.link}<input className={styles.sharedInput} readOnly value={orderReadLink(grant)} onFocus={(e) => e.currentTarget.select()} /></label>}
   </section>;
 }
 
@@ -122,7 +122,7 @@ export function MyOrders({ locale }: { locale: Locale }) {
     return () => { window.removeEventListener(myOrdersChanged, refresh); window.removeEventListener('storage', refresh); };
   }, []);
   return <aside className={styles.panel} aria-label={t.mine}><h2>{t.mine}</h2><p>{t.saved}</p>
-    {orders.length === 0 ? <p>{t.empty}</p> : <ul>{orders.map((g) => <li key={g.order_id}><a href={orderReadLink(g)} referrerPolicy="no-referrer">{g.order_id}</a></li>)}</ul>}
+    {orders.length === 0 ? <p>{t.empty}</p> : <ul>{orders.map((g) => <li key={g.order_id}><a className={styles.control} href={orderReadLink(g)} referrerPolicy="no-referrer">{g.order_id}</a></li>)}</ul>}
   </aside>;
 }
 export function RequestOrderLink({ sessionID, token, orderID, locale }: { sessionID: string; token: string; orderID: string; locale: Locale }) {
@@ -137,8 +137,8 @@ export function RequestOrderLink({ sessionID, token, orderID, locale }: { sessio
     catch { setFailed(true); }
     finally { setBusy(false); }
   };
-  return <div><button type="button" disabled={busy} onClick={() => void issue()}>{t.request}</button>
-    {failed && <p role="alert">{t.failed}</p>}{grant && <a href={orderReadLink(grant)} referrerPolicy="no-referrer">{t.title}</a>}
+  return <div><button className={styles.control} data-control="order-link-action" type="button" disabled={busy} onClick={() => void issue()}>{t.request}</button>
+    {failed && <p role="alert">{t.failed}</p>}{grant && <a className={styles.control} data-control="order-link-result" href={orderReadLink(grant)} referrerPolicy="no-referrer">{t.title}</a>}
   </div>;
 }
 export function OrderPage({ demo = false }: DemoSurfaceProps) {
@@ -150,7 +150,7 @@ export function OrderPage({ demo = false }: DemoSurfaceProps) {
     return () => window.removeEventListener('hashchange', changed);
   }, []);
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
-  return <main><meta name="referrer" content="no-referrer" /><button type="button" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button>
+  return <main className={styles.page}><meta name="referrer" content="no-referrer" /><header className={styles.header}><button className={styles.language} type="button" lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{locale === 'ja' ? '繁體中文' : '日本語'}</button></header>
     <DemoBanner demo={demo} locale={locale} />
     {grant ? <OrderStatusView grant={grant} locale={locale} onRead={rememberOrderGrant} /> : <p role="alert">{copy[locale].invalid}</p>}
     <MyOrders locale={locale} />
