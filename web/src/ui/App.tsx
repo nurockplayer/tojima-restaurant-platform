@@ -273,9 +273,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
   }, []);
 
   const confirmDisplayedCart = useCallback((latest: Cart, origin: SyncOrigin) => {
-    // Overlapping reads can confirm the displayed cart without adopting a superseded snapshot.
+    // Overlapping reads can confirm an identical snapshot without adopting a superseded response.
     const displayed = cartStateRef.current.cart;
-    if (isOrigin(entryRef.current, origin) && displayed?.generation === latest.generation && displayed.version === latest.version) {
+    if (isOrigin(entryRef.current, origin) && JSON.stringify(displayed) === JSON.stringify(latest)) {
       acceptedSyncSequence.current++;
       dispatchSync({ type: 'success', origin, at: Date.now() });
     }

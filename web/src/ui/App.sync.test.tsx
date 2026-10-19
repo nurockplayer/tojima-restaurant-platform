@@ -377,6 +377,46 @@ describe('guest App sync acceptance', () => {
     expect((within(dialog).getByRole('button', { name: '金額を確認する' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('keeps preview and confirmation disabled when superseded same-version reads change product availability', async () => {
+    useFakeClock();
+    let cartReads = 0;
+    let slow = false;
+    const unavailableCart = { ...cartWithMeal, lines: [{ ...cartWithMeal.lines[0]!, product_available: false }] };
+    installFetch({ cart: () => {
+      cartReads++;
+      if (!slow) return json(cartWithMeal);
+      return new Promise<Response>((resolve) => { setTimeout(() => resolve(json(unavailableCart)), 3_000); });
+    } });
+    startPage();
+    await advanceClock(0);
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^カートを開く / })); });
+    const dialog = screen.getByRole('dialog');
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: '金額を確認する' })); });
+    const confirm = within(dialog).getByRole('button', { name: 'この内容で注文を確定' }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+    const baselineReads = cartReads;
+    slow = true;
+
+    for (let elapsed = 500; elapsed <= 7_000; elapsed += 500) await advanceClock(500);
+    await advanceClock(499);
+    expect(document.body.textContent).not.toContain('通信が不安定です');
+    await advanceClock(1);
+    expect(cartReads).toBe(baselineReads + 3);
+    expect(document.body.textContent).toContain('通信が不安定です');
+    expect(confirm.disabled).toBe(true);
+
+    for (let elapsed = 8_000; elapsed <= 12_000; elapsed += 500) {
+      await advanceClock(500);
+      expect(document.body.textContent).toContain('通信が不安定です');
+      expect(confirm.disabled).toBe(true);
+    }
+    await act(async () => { fireEvent.click(within(dialog).getByRole('button', { name: 'カートへ戻る' })); });
+    expect(within(dialog).getByText('定食')).toBeTruthy();
+    expect(within(dialog).getByText('注文できます')).toBeTruthy();
+    expect(within(dialog).queryByText('現在注文できません')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: '金額を確認する' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('restarts the exact watchdog from an accepted success between schedules', async () => {
     useFakeClock();
     let cartReads = 0;
