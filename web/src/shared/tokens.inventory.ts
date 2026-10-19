@@ -33,52 +33,28 @@ export const hexInventory: string[] = [
   "../ui/styles.css |  | .button.quiet | color | #617269",
   "../ui/styles.css |  | .button.retry | background | #f6eadc",
   "../ui/styles.css |  | .button.retry | color | #7a4e2d",
-  "../ui/styles.css |  | .cart-line | border-top | #edf0eb",
-  "../ui/styles.css |  | .cart-line-foot | color | #557063",
-  "../ui/styles.css |  | .cart-panel | border | #e5e9e3",
   "../ui/styles.css |  | .cash-order-list,.blocker-list | color | #56675d",
   "../ui/styles.css |  | .cash-settings-card .field select | background | #fff",
-  "../ui/styles.css |  | .compact-options label | color | #637268",
   "../ui/styles.css |  | .empty-icon | background | #edf2ec",
   "../ui/styles.css |  | .empty-state | border | #dfe5de",
   "../ui/styles.css |  | .field input | background | #fff",
   "../ui/styles.css |  | .field | color | #53665b",
-  "../ui/styles.css |  | .join-badge | background | #e8efe8",
-  "../ui/styles.css |  | .join-badge | color | #537060",
   "../ui/styles.css |  | .kds-column | background | #eef1eb",
   "../ui/styles.css |  | .kds-column>h3 span | background | #fff",
-  "../ui/styles.css |  | .live-dot | background | #4b956e",
-  "../ui/styles.css |  | .option | color | #4a5a51",
-  "../ui/styles.css |  | .option-group legend,.compact-options legend | color | #55675d",
   "../ui/styles.css |  | .order-line,.order-total | color | #59685f",
-  "../ui/styles.css |  | .payment-choice label:has(input:checked) | background | #f2f7f1",
-  "../ui/styles.css |  | .product-actions | border-top | #eef0ec",
-  "../ui/styles.css |  | .product-card | border | #e7e9e4",
-  "../ui/styles.css |  | .quantity-select select | background | #fff",
   "../ui/styles.css |  | .receipt-card | background | #f2f5f0",
   "../ui/styles.css |  | .staff-order-lines li | border-bottom | #edf0eb",
   "../ui/styles.css |  | .status-chip | background | #edf1ec",
   "../ui/styles.css |  | .status-chip | color | #53665b",
-  "../ui/styles.css |  | .stepper button | background | #f5f7f3",
   "../ui/styles.css |  | .tab span | background | #e9ede7",
   "../ui/styles.css |  | .tab.active span | background | #e0ebe3",
   "../ui/styles.css |  | .table-chip | background | #f0f4ef",
   "../ui/styles.css |  | .topbar | border-bottom | #dfe4db",
-  "../ui/styles.css |  | .total-row | border-top | #dfe5de",
   "../ui/styles.css |  | .workspace-footer | border-top | #dfe4db",
   "../ui/styles.css |  | ::selection | background | #c6dfcf"
 ];
 
-export const fontExceptions: { key: string; reason: string }[] = [
-  {
-    "key": "../ui/styles.css | @media(max-width:760px) | .join-badge | font-size | 0",
-    "reason": "Narrow-screen join badge deliberately hides its redundant label; the visible live dot remains and table context is shown separately."
-  },
-  {
-    "key": "../ui/styles.css | @media(max-width:760px) | .join-badge .live-dot | font-size | initial",
-    "reason": "Reset the empty decorative live dot after the parent hides badge text with font-size:0; it contains no readable text."
-  }
-];
+export const fontExceptions: { key: string; reason: string }[] = [];
 
 export const unsupportedInventory: { key: string; reason: string }[] = [
   {
@@ -122,10 +98,6 @@ export const unsupportedInventory: { key: string; reason: string }[] = [
     "reason": "Existing inactive controls deliberately use 0.5 opacity; inactive controls are exempt from WCAG contrast. No active-state exemption."
   },
   {
-    "key": "../ui/styles.css |  | .live-dot | background:#4b956e | background with inherited foreground",
-    "reason": "Empty decorative live indicator has no text; its green fill is not a text/background pair."
-  },
-  {
     "key": "../ui/styles.css |  | .tab | background:none;color:var(--color-text-muted) | Error: unsupported colour none -> none",
     "reason": "Transparent tab text inherits the page surface; muted ink is checked on both light defaults through the semantic pair checks."
   },
@@ -138,14 +110,6 @@ export const unsupportedInventory: { key: string; reason: string }[] = [
     "reason": "Empty active-tab underline is a decorative pseudo-element with no text."
   },
   {
-    "key": "../ui/styles.css |  | .category h3:after | background:var(--line) | background with inherited foreground",
-    "reason": "Empty category divider is a decorative pseudo-element with no text."
-  },
-  {
-    "key": "../ui/styles.css |  | .product-card | background:var(--cream) | background with inherited foreground",
-    "reason": "Cream product card inherits body ink; explicit muted/action descendants require rendered verification against this surface."
-  },
-  {
     "key": "../ui/styles.css |  | .button.primary:not(:disabled):hover | background:var(--green-2) | background with inherited foreground",
     "reason": "Hover inherits white primary-button text; on-action/action-hover is explicitly checked by the semantic usage pairs."
   },
@@ -156,14 +120,6 @@ export const unsupportedInventory: { key: string; reason: string }[] = [
   {
     "key": "../ui/styles.css |  | .text-button | background:none;color:var(--color-text-muted) | Error: unsupported colour none -> none",
     "reason": "Transparent text button inherits page/card surface; muted ink is checked on both light defaults by semantic usage pairs."
-  },
-  {
-    "key": "../ui/styles.css |  | .cart-panel | background:var(--cream) | background with inherited foreground",
-    "reason": "Cream cart container inherits body ink; child status and action colours need rendered cascade verification."
-  },
-  {
-    "key": "../ui/styles.css |  | .payment-choice label:has(input:checked) | background:#f2f7f1 | background with inherited foreground",
-    "reason": "Checked label retains inherited body ink on a pale green tint; native radio and cascade need rendered verification."
   },
   {
     "key": "../ui/styles.css |  | .order-card | background:var(--cream) | background with inherited foreground",
