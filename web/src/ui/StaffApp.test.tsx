@@ -1130,6 +1130,134 @@ describe('staff operations', () => {
     expect(paymentRequests).toBe(0);
   });
 
+  it('shows the unpaid Stripe void action only for an approving manager and eligible order state', async () => {
+    const cases = [
+      { name: 'eligible manager order', canApprove: true, order: staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' }), visible: true },
+      { name: 'unknown Stripe payment', canApprove: true, order: staffOrder({ payment_method: 'STRIPE', payment_status: 'UNKNOWN' }), visible: true },
+      { name: 'cashier', canApprove: false, order: staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' }), visible: false },
+      { name: 'paid order', canApprove: true, order: staffOrder({ payment_method: 'STRIPE', payment_status: 'PAID' }), visible: false },
+      { name: 'accepted order', canApprove: true, order: staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING', fulfillment_status: 'ACCEPTED' }), visible: false },
+      { name: 'cash order', canApprove: true, order: staffOrder({ payment_status: 'UNPAID' }), visible: false },
+    ];
+    for (const item of cases) {
+      const routes: Route = async (url) => {
+        if (url === `${base}/operations/access`) return json({ can_cash: !item.canApprove, can_serve: false, can_kitchen: false, can_manage: item.canApprove, can_approve_fulfillment: item.canApprove });
+        if (url === `${base}/operations/tables`) return json({ tables: [table] });
+        if (url === `${base}/cash-settings`) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+        if (url.endsWith('/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [item.order], receipts: [], close_blockers: [] });
+        if (url.endsWith('/operations/cash-settings')) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+        throw new Error(`Unexpected request ${url}`);
+      };
+      await mountStaff(routes); await click(host!, '詳細');
+      expect(within(host!).queryByRole('button', { name: '未払いとして取消' }) !== null, item.name).toBe(item.visible);
+      if (root) await act(async () => root?.unmount()); root = undefined; host?.remove(); host = undefined; sessionStorage.clear();
+    }
+  });
+
+  it('confirms an unpaid Stripe void with a per-dialog idempotency key and refreshes the order', async () => {
+    const original = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
+    let current = original; let detailReads = 0; let submitted: { body: unknown; key: string | null } | undefined;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations/cash-settings')) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+      if (url.endsWith('/tables/table-1/sessions/session-1/operations')) { detailReads++; return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [current], receipts: [], close_blockers: [] }); }
+      if (url.endsWith('/orders/order-1/payment/void-unpaid')) {
+        submitted = { body: JSON.parse(String(init.body)), key: new Headers(init.headers).get('Idempotency-Key') };
+        current = { ...original, payment_status: 'VOIDED', fulfillment_status: 'CANCELLED', version: 4 };
+        return json(current);
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細');
+    await click(host!, '未払いとして取消');
+    expect(host?.textContent).toContain('Stripe に支払状況を再確認し');
+    const confirm = [...host!.querySelectorAll('button')].find((button) => button.textContent?.includes('取消を確定'))!;
+    expect(confirm.disabled).toBe(true);
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Guest cancelled');
+    await click(host!, '取消を確定');
+    await waitFor(() => expect(submitted).toBeTruthy());
+    expect(submitted?.body).toEqual({ expected_version: 3, reason: 'Guest cancelled' });
+    expect(submitted?.key).toBeTruthy();
+    await waitFor(() => expect(host?.textContent).toContain('未払い取消'));
+    expect(detailReads).toBeGreaterThan(1);
+  });
+
+  it('closes stale void consent and requires a fresh version and idempotency key', async () => {
+    let detailReads = 0; const requests: Array<{ body: { expected_version: number; reason: string }; key: string | null }> = [];
+    const order = (version: number) => staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING', version });
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations/cash-settings')) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+      if (url.endsWith('/tables/table-1/sessions/session-1/operations')) {
+        detailReads++; return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order(detailReads === 1 ? 3 : 4)], receipts: [], close_blockers: [] });
+      }
+      if (url.endsWith('/orders/order-1/payment/void-unpaid')) {
+        requests.push({ body: JSON.parse(String(init.body)), key: new Headers(init.headers).get('Idempotency-Key') });
+        return requests.length === 1 ? json({ error: 'stale_version' }, 409) : json({ ...order(5), payment_status: 'VOIDED', fulfillment_status: 'CANCELLED' });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '未払いとして取消');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'First confirmation'); await click(host!, '取消を確定');
+    await waitFor(() => expect(host?.querySelector('.confirm-dialog')).toBeNull());
+    expect(requests).toHaveLength(1);
+    await click(host!, '未払いとして取消');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Confirm after refresh'); await click(host!, '取消を確定');
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests.map((request) => request.body.expected_version)).toEqual([3, 4]);
+    expect(requests[0]?.key).toBeTruthy(); expect(requests[1]?.key).toBeTruthy();
+    expect(requests[1]?.key).not.toBe(requests[0]?.key);
+  });
+
+  it('invalidates stale void consent before a failed refresh can leave a retry dialog', async () => {
+    let failNextTableRead = false; let detailReads = 0; let voidCalls = 0;
+    const order = (version: number) => staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING', version });
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) {
+        if (failNextTableRead) { failNextTableRead = false; return json({ error: 'temporarily_unavailable' }, 503); }
+        return json({ tables: [table] });
+      }
+      if (url.endsWith('/operations/cash-settings')) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+      if (url.endsWith('/tables/table-1/sessions/session-1/operations')) {
+        detailReads++; return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order(detailReads === 1 ? 3 : 4)], receipts: [], close_blockers: [] });
+      }
+      if (url.endsWith('/orders/order-1/payment/void-unpaid')) { voidCalls++; failNextTableRead = true; return json({ error: 'stale_version' }, 409); }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '未払いとして取消');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Old consent'); await click(host!, '取消を確定');
+    await waitFor(() => expect(host?.querySelector('.confirm-dialog')).toBeNull());
+    await click(host!, '未払いとして取消');
+    const reopened = host!.querySelector<HTMLDialogElement>('.confirm-dialog')!;
+    expect(reopened.querySelector('textarea')?.value).toBe('');
+    expect(within(reopened).getByRole('button', { name: '取消を確定' }).hasAttribute('disabled')).toBe(true);
+    expect(within(reopened).queryByRole('button', { name: '同じ操作を確認して再試行' })).toBeNull();
+    expect(voidCalls).toBe(1);
+    expect(detailReads).toBe(2);
+  });
+
+  it('shows localized refusal and Stripe unavailable messages for unpaid void', async () => {
+    const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' }); let code = 'void_not_eligible';
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: false, can_kitchen: false, can_manage: true, can_approve_fulfillment: true });
+      if (url === `${base}/operations/tables`) return json({ tables: [table] });
+      if (url.endsWith('/operations/cash-settings')) return json({ enabled: true, mode: 'PAY_LATER', version: 1 });
+      if (url.endsWith('/tables/table-1/sessions/session-1/operations')) return json({ session: { id: 'session-1', status: 'OPEN', mode: 'DIRECT_SCAN' }, orders: [order], receipts: [], close_blockers: [] });
+      if (url.endsWith('/payment/void-unpaid')) return code === 'void_not_eligible' ? json({ error: code }, 409) : json({ error: code }, 503);
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes); await click(host!, '詳細'); await click(host!, '未払いとして取消');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Reason'); await click(host!, '取消を確定');
+    await waitFor(() => expect(host?.textContent).toContain('支払いが完了しているか処理中のため取り消せません。照合結果を確認してください。'));
+    code = 'temporarily_unavailable';
+    await click(host!, '未払いとして取消');
+    await setTextarea(host!.querySelector('.confirm-dialog textarea')!, 'Reason'); await click(host!, '取消を確定');
+    await waitFor(() => expect(host?.textContent).toContain('Stripe に接続できません。時間をおいて再試行してください。'));
+  });
+
   it('shows an error on the order card when the first payment status read fails', async () => {
     const order = staffOrder({ payment_method: 'STRIPE', payment_status: 'PENDING' });
     const routes: Route = async (url, init) => {

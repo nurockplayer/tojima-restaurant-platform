@@ -132,6 +132,7 @@ func NewPaymentsRuntime(sessions *tablesession.Service, menus *catalog.Service, 
 	staffMux := http.NewServeMux()
 	staffMux.HandleFunc("GET /v1/staff/tenants/{tenantID}/stores/{storeID}/tables/{tableID}/sessions/{sessionID}/orders/{orderID}/payment", a.staffPaymentStatus)
 	staffMux.HandleFunc("POST /v1/staff/tenants/{tenantID}/stores/{storeID}/tables/{tableID}/sessions/{sessionID}/orders/{orderID}/payment/reconcile", a.reconcilePayment)
+	staffMux.HandleFunc("POST /v1/staff/tenants/{tenantID}/stores/{storeID}/tables/{tableID}/sessions/{sessionID}/orders/{orderID}/payment/void-unpaid", a.voidUnpaidPayment)
 	operationsHandler := NewOperationsHandler(ops, sessions, identity, authorizer)
 	const staffBase = "/v1/staff/tenants/{tenantID}/stores/{storeID}"
 	const staffSession = staffBase + "/tables/{tableID}/sessions/{sessionID}"
@@ -272,6 +273,26 @@ func (a PaymentsAPI) reconcilePayment(w http.ResponseWriter, r *http.Request) {
 	writePaymentStatus(w, state, false, true)
 }
 
+func (a PaymentsAPI) voidUnpaidPayment(w http.ResponseWriter, r *http.Request) {
+	scope, actor, ok := a.Operations.tableAuthorize(w, r, "payments.void_unpaid", fulfillmentApprovalRoles)
+	if !ok {
+		return
+	}
+	var body struct {
+		ExpectedVersion int64  `json:"expected_version"`
+		Reason          string `json:"reason"`
+	}
+	if !operationBody(w, r, &body) {
+		return
+	}
+	result, err := a.Payments.VoidUnpaidCheckout(r.Context(), payments.VoidRequest{Scope: scope, SessionID: r.PathValue("sessionID"), OrderID: r.PathValue("orderID"), Actor: actor.SubjectID, ExpectedVersion: body.ExpectedVersion, Reason: body.Reason, IdempotencyKey: r.Header.Get("Idempotency-Key")})
+	if err != nil {
+		writePaymentError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, result)
+}
+
 func (a PaymentsAPI) webhook(w http.ResponseWriter, r *http.Request) {
 	raw, err := stripeprovider.ReadWebhookBody(r.Body)
 	if err != nil {
@@ -332,6 +353,16 @@ func writePaymentError(w http.ResponseWriter, err error) {
 		return
 	}
 	switch {
+	case errors.Is(err, payments.ErrVoidNotEligible):
+		writeError(w, http.StatusConflict, "void_not_eligible")
+	case errors.Is(err, operations.ErrConflict):
+		writeError(w, http.StatusConflict, "stale_version")
+	case errors.Is(err, operations.ErrIdempotencyConflict):
+		writeError(w, http.StatusConflict, "idempotency_conflict")
+	case errors.Is(err, operations.ErrInvalid):
+		writeError(w, http.StatusBadRequest, "invalid_request")
+	case errors.Is(err, operations.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found")
 	case errors.Is(err, payments.ErrDenied), errors.Is(err, tablesession.ErrDenied), errors.Is(err, authz.ErrDenied):
 		writeError(w, http.StatusForbidden, "forbidden")
 	case errors.Is(err, payments.ErrNotFound), errors.Is(err, tablesession.ErrNotFound), errors.Is(err, ordering.ErrNotFound):

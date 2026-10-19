@@ -414,6 +414,14 @@ describe('guest app mount', () => {
     expect(host?.querySelector('.checkout-status-panel')).toBeNull();
   });
 
+  it('shows a VOIDED guest order as cancelled without implying payment succeeded', async () => {
+    await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), { id: 'order-1', display_state: 'CANCELLED', payment_status: 'VOIDED', fulfillment_status: 'CANCELLED', requires_staff_acceptance: false, staff_accepted: true, total_gross_jpy: '1100', effective_total_gross_jpy: '0', effective_lines: [], adjusted: true, refunds: [], refunded_total_jpy: '0' });
+    await clickButton(host!, '注文履歴');
+    expect(host?.querySelector('.guest-order-status')?.textContent).toBe('この注文は取り消されました');
+    expect(host?.textContent).not.toContain('支払済み');
+    expect(host?.querySelector('.checkout-status-panel')).toBeNull();
+  });
+
   it('shows paid review in both history languages and follows the ordinary session poll through release', async () => {
     const operation = { id: 'order-1', display_state: 'PAID_UNDER_REVIEW', payment_status: 'PAID', fulfillment_status: 'WAITING', requires_staff_acceptance: false, staff_accepted: true };
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation);

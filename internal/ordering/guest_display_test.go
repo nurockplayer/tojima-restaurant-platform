@@ -6,7 +6,7 @@ import (
 )
 
 func TestGuestDisplayState(t *testing.T) {
-	payments := []string{"UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED"}
+	payments := []string{"UNPAID", "PENDING", "PAID", "UNKNOWN", "REFUND_PENDING", "REFUNDED", "VOIDED"}
 	fulfillments := []string{"WAITING", "ACCEPTED", "PREPARING", "READY", "SERVED", "CANCELLED"}
 
 	for _, payment := range payments {
@@ -16,7 +16,7 @@ func TestGuestDisplayState(t *testing.T) {
 					name := fmt.Sprintf("payment=%s/fulfillment=%s/review=%t/card=%t", payment, fulfillment, review, card)
 					t.Run(name, func(t *testing.T) {
 						want := "STANDARD"
-						if fulfillment == "CANCELLED" {
+						if payment == "VOIDED" || fulfillment == "CANCELLED" {
 							want = "CANCELLED"
 						} else if payment == "UNKNOWN" || payment == "REFUND_PENDING" || payment == "REFUNDED" {
 							want = "UNKNOWN"

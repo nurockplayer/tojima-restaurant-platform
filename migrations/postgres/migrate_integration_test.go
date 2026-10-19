@@ -62,9 +62,54 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("012 pending-session-close guard trigger missing after up: exists=%v err=%v", exists, err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 13 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 14 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
+	var voidConstraint string
+	if err = target.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='operation_order_state'::regclass AND conname='operation_order_state_check'`).Scan(&voidConstraint); err != nil || !strings.Contains(voidConstraint, "VOIDED") {
+		t.Fatalf("014 payment status constraint missing VOIDED: %s err=%v", voidConstraint, err)
+	}
+	down014, err := os.ReadFile("014_stripe_unpaid_void.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx014, err := target.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx014.Exec(ctx, string(down014)); err != nil {
+		t.Fatalf("014 down: %v", err)
+	}
+	if _, err = tx014.Exec(ctx, "DELETE FROM schema_migrations WHERE version=14"); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx014.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = target.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid='operation_order_state'::regclass AND conname='operation_order_state_check'`).Scan(&voidConstraint); err != nil || strings.Contains(voidConstraint, "VOIDED") {
+		t.Fatalf("014 down did not restore payment status constraint: %s err=%v", voidConstraint, err)
+	}
+	if err = postgres.Up(ctx, target); err != nil {
+		t.Fatalf("014 reapply: %v", err)
+	}
+	rollback014 := func() {
+		t.Helper()
+		tx, e := target.Begin(ctx)
+		if e != nil {
+			t.Fatal(e)
+		}
+		defer tx.Rollback(ctx)
+		if _, e = tx.Exec(ctx, string(down014)); e != nil {
+			t.Fatal(e)
+		}
+		if _, e = tx.Exec(ctx, "DELETE FROM schema_migrations WHERE version=14"); e != nil {
+			t.Fatal(e)
+		}
+		if e = tx.Commit(ctx); e != nil {
+			t.Fatal(e)
+		}
+	}
+	rollback014()
 	// 013 must be reversible independently, and Up must upgrade an installed
 	// 012 ledger rather than skipping an amended historical migration.
 	down013, err := os.ReadFile("013_stop_request_state_lock.down.sql")
@@ -119,9 +164,10 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<=12`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
 		t.Fatalf("013 upgrade changed the 012 ledger: %v", err)
 	}
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 13 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 14 {
 		t.Fatalf("upgraded migration version %d err %v", version, err)
 	}
+	rollback014()
 	rollback013()
 	// Paired C2 rollback restores exactly the C1 transition guard before C1 down.
 	down012, err := os.ReadFile("012_stop_requests.down.sql")
