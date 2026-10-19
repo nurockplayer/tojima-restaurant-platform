@@ -14,7 +14,7 @@ Authority: Linear [D-DS-20261019 in doc 02](https://linear.app/higashijima-manag
 | `ds-1-acceptance/capture.mjs` | Rendered acceptance harness. It drives headless Chrome over CDP with no npm dependencies. It captures screenshots, a computed-style contrast audit (text and form controls), overflow, focus-ring clipping and DEMO-notice presence across ja/zh × 375/1280 + 320. | **Reuse and extend for DS-2** (P-89 §5.4) |
 | `ds-1-acceptance/acceptance-summary.md`, `report-*.json`, `shots/` | DS-1 before/after evidence (`78baf00` → `cebe5b3`). | Baseline for the DS-2 regression check on staff, KDS and catalog |
 | `ds-2-baseline/measure-baseline.mjs` | DS-2 entry measurements: first-viewport rows, card heights, sticky elements, Tab count, ORDER_READ button size. | Starting point for the DS-2 harness |
-| `ds-2-baseline/baseline-3c47f7a/` | `report.json` and first-viewport screenshots at `3c47f7a`. These are the numbers in P-89 §2. | DS-2 "before" |
+| `ds-2-baseline/baseline-3c47f7a/` | `report.json` and first-viewport screenshots at `3c47f7a`. These are the numbers in P-89 §2. `tabsToPreviewButton` is `null` because the Preview button is disabled while the cart is empty; P-89 does not use it, and the script no longer records it. | DS-2 "before" |
 | `ds-2-baseline/plan-reviews/r1…r5.txt` | Fresh read-only Codex reviews of the DS-2 plan: BLOCKED ×4, then PASS. All findings were applied in P-89. | Done; do not redo |
 
 ## Running the harnesses

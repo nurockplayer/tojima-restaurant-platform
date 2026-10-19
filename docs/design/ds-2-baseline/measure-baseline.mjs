@@ -121,7 +121,8 @@ async function guest(locale, width, height) {
   // Screenshot the true first viewport before Tab navigation scrolls the page.
   if (width !== 1280) await p.shot(`${tag}-first-viewport`, false);
   m.tabsToFirstEnabledAdd = await tabsTo(p, `(e) => e.matches('.product-card button.primary')`);
-  m.tabsToPreviewButton = await tabsTo(p, `(e) => e.matches('.checkout-button')`);
+  // No Preview-button Tab count: with an empty cart the Preview button is disabled and unfocusable.
+  // (The committed baseline-3c47f7a/report.json has tabsToPreviewButton: null for this reason; P-89 does not use it.)
   report.states[tag] = m;
   console.log(tag, JSON.stringify(m));
   await p.close();
