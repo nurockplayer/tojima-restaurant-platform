@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import { demoEnabled, initialStaffViewFor, Surface, surfaceFor } from './surface';
+import './shared/tokens.css';
 import './ui/styles.css';
 
 const rootElement = document.getElementById('root')!;
