@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
 import type { Cart, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
@@ -197,6 +197,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const menuHeading = useRef<HTMLHeadingElement>(null);
   const orderHeading = useRef<HTMLHeadingElement>(null);
   const entryHeading = useRef<HTMLHeadingElement>(null);
+  const previousView = useRef<{ active: boolean; tab: 'cart' | 'orders'; sheetOpen: boolean; lineCount: number } | null>(null);
   const acceptedOperations = useRef(new Map<string, { sessionID: string; token: string; onAccepted: () => void }>());
   const [selections, setSelections] = useState<Record<string, OptionSelection[]>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
@@ -600,6 +601,17 @@ export function App({ demo = false }: DemoSurfaceProps) {
       setOptionProductKey(null);
     }
   }, [entry, tab]);
+  useLayoutEffect(() => {
+    const previous = previousView.current;
+    const active = !!entry && !blocked && !loading;
+    const lineCount = cart?.lines.length ?? 0;
+    previousView.current = { active, tab, sheetOpen: active && tab === 'cart' && (cartOpen || !!optionProductKey), lineCount };
+    // An open sheet restores focus after its exit; page feedback has no overlay lifecycle.
+    if (!previous?.active || previous.sheetOpen) return;
+    if (!active) entryHeading.current?.focus();
+    else if (tab === 'orders' && previous.tab !== 'orders') orderHeading.current?.focus();
+    else if (tab === 'cart' && previous.lineCount > 0 && lineCount === 0 && document.activeElement === document.body) menuHeading.current?.focus();
+  }, [entry, blocked, loading, tab, cartOpen, optionProductKey, cart]);
   useEffect(() => {
     if (demo && payment === 'STRIPE') setPayment('CASH');
     else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');

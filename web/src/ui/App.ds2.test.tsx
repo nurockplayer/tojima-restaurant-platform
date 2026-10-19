@@ -577,6 +577,7 @@ describe('guest App cart sheet focus and destinations', () => {
     };
     installCartFetch({ onCommit: () => json(result) });
     const user = userEvent.setup();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
     render(<App demo />);
 
     await openCartSheet(user);
@@ -589,6 +590,7 @@ describe('guest App cart sheet focus and destinations', () => {
     expect(screen.queryByRole('button', { name: 'カートを開く' })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
+    expect(focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
   });
 
   it('closes after replay confirms the order, focuses orders, and preserves the commit key and body', async () => {
@@ -601,6 +603,7 @@ describe('guest App cart sheet focus and destinations', () => {
     let commitCount = 0;
     const { calls } = installCartFetch({ onCommit: () => ++commitCount === 1 ? json({ error: 'temporary' }, 503) : json(result) });
     const user = userEvent.setup();
+    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
     render(<App demo />);
 
     const dialog = await openCartSheet(user);
@@ -617,6 +620,145 @@ describe('guest App cart sheet focus and destinations', () => {
     expect(screen.queryByRole('button', { name: 'カートを開く' })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
+    expect(focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
+  });
+
+  it('focuses orders after keyboard replay from page feedback when the confirmation sheet was dismissed', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    const result = {
+      outcome: 'COMMITTED',
+      order: { order_id: 'order-page-replay', session_id: 'session-1', generation: 1, payment_method: 'CASH', quote: previewForMeal.quote, created_at: '2026-10-20T00:00:00Z' },
+      cart: { ...emptyCart, version: 1 },
+    };
+    const replayResponse = deferred<Response>();
+    let commitCount = 0;
+    const { calls } = installCartFetch({ onCommit: () => ++commitCount === 1 ? json({ error: 'temporary' }, 503) : replayResponse.promise });
+    const user = userEvent.setup();
+    render(<App demo />);
+
+    await openCartSheet(user);
+    await user.click(screen.getByRole('button', { name: '金額を確認する' }));
+    await screen.findByRole('heading', { name: '金額を確認する' });
+    await user.click(screen.getByRole('button', { name: 'この内容で注文を確定' }));
+    const dialog = screen.getByRole('dialog');
+    await within(dialog).findByRole('button', { name: '前回の操作を照合して再試行' });
+    within(dialog).getByRole('button', { name: '閉じる' }).focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+
+    const ordersFocusEvents: Element[] = [];
+    const trackOrdersFocus = (event: FocusEvent) => {
+      const target = event.target;
+      if (target instanceof HTMLElement && target === screen.queryByRole('heading', { name: '注文履歴' })) ordersFocusEvents.push(target);
+    };
+    document.addEventListener('focusin', trackOrdersFocus);
+    const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
+    pageRetry.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(commitCount).toBe(2));
+    await act(async () => { replayResponse.resolve(json(result)); await Promise.resolve(); });
+
+    const ordersHeading = await screen.findByRole('heading', { name: '注文履歴' });
+    await waitFor(() => expect(document.activeElement).toBe(ordersHeading));
+    expect(ordersFocusEvents).toEqual([ordersHeading]);
+    document.removeEventListener('focusin', trackOrdersFocus);
+    await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
+    const commits = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/commit'));
+    expect(commits).toHaveLength(2);
+    expectSameOperation(commits[0]!.init, commits[1]!.init);
+  });
+
+  it('focuses the entry heading when a page-level replay expires the session after the sheet closes', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    let addCount = 0;
+    const { calls } = installGuestFetch(() => ++addCount === 1 ? json({ error: 'temporary' }, 503) : json({ error: 'expired' }, 403));
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openOptions(user);
+    await user.click(within(dialog).getByRole('radio', { name: /普通/ }));
+    await user.click(within(dialog).getByRole('button', { name: 'カートに追加' }));
+    await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
+    within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }).focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'お品書き' })));
+
+    const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
+    pageRetry.focus();
+    await user.keyboard('{Enter}');
+    const entryHeading = await screen.findByRole('heading', { name: 'ご注文を始める' });
+    await waitFor(() => expect(document.activeElement).toBe(entryHeading));
+    await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
+    const adds = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
+    expect(adds).toHaveLength(2);
+    expectSameOperation(adds[0]!.init, adds[1]!.init);
+  });
+
+  it('focuses the menu when a page-level remove replay empties the cart after the sheet closes', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    const replayResponse = deferred<Response>();
+    const emptiedCart = { ...emptyCart, version: 1 };
+    let removeCount = 0;
+    const { calls } = installCartFetch({
+      onRemove: () => ++removeCount === 1 ? json({ error: 'temporary' }, 503) : replayResponse.promise,
+      onCartRead: () => removeCount > 1 ? json(emptiedCart) : json(cartWithMeal),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openCartSheet(user);
+    await user.click(within(dialog).getByRole('button', { name: '削除' }));
+    await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
+    within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }).focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+
+    const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
+    pageRetry.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(removeCount).toBe(2));
+    await act(async () => { replayResponse.resolve(json(emptiedCart)); await Promise.resolve(); });
+    const menuHeading = await screen.findByRole('heading', { name: 'お品書き' });
+    await waitFor(() => expect(document.activeElement).toBe(menuHeading));
+    await waitFor(() => expect(screen.queryByRole('button', { name: '前回の操作を照合して再試行' })).toBeNull());
+    const removes = calls.filter(({ url, init }) => init.method === 'DELETE' && url.includes('/cart/lines/'));
+    expect(removes).toHaveLength(2);
+    expectSameOperation(removes[0]!.init, removes[1]!.init);
+  });
+
+  it('keeps focus on a connected page control if it moves during an empty-cart replay', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    const replayResponse = deferred<Response>();
+    const emptiedCart = { ...emptyCart, version: 1 };
+    let removeCount = 0;
+    installCartFetch({
+      onRemove: () => ++removeCount === 1 ? json({ error: 'temporary' }, 503) : replayResponse.promise,
+      onCartRead: () => removeCount > 1 ? json(emptiedCart) : json(cartWithMeal),
+    });
+    const user = userEvent.setup();
+    render(<App />);
+
+    const dialog = await openCartSheet(user);
+    await user.click(within(dialog).getByRole('button', { name: '削除' }));
+    await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
+    within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }).focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+
+    const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
+    pageRetry.focus();
+    await user.keyboard('{Enter}');
+    await waitFor(() => expect(removeCount).toBe(2));
+    const languageButton = screen.getByRole('button', { name: '繁中' });
+    languageButton.focus();
+    await act(async () => { replayResponse.resolve(json(emptiedCart)); await Promise.resolve(); });
+
+    await waitFor(() => expect(screen.queryByRole('button', { name: '前回の操作を照合して再試行' })).toBeNull());
+    expect(document.activeElement).toBe(languageButton);
   });
 
   it('returns focus to the entry heading after a cart action expires the session', async () => {
