@@ -79,3 +79,14 @@
   max-width: 688px;
   margin-inline: auto;
 }
+
+.syncNotice {
+  padding: var(--ref-space-3);
+  border: 1px solid var(--color-warning-ink);
+  border-radius: var(--radius-control);
+  background: var(--color-warning-bg);
+  color: var(--color-warning-ink);
+  overflow-wrap: anywhere;
+}
+
+.syncNotice strong { display: block; }

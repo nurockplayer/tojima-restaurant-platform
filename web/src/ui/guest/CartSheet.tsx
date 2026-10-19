@@ -36,6 +36,9 @@ export interface CartSheetProps {
   locale: 'ja' | 'zh';
   demo: boolean;
   demoNotice?: ReactNode;
+  syncNotice?: ReactNode;
+  syncReasonID?: string;
+  degraded?: boolean;
   payment: 'CASH' | 'STRIPE';
   cashEnabled: boolean;
   onPayment: (payment: 'CASH' | 'STRIPE') => void;
@@ -62,7 +65,7 @@ function safeAmount(amount: string | number | undefined): string {
 }
 
 export function CartSheet(props: CartSheetProps) {
-  const { isOpen, onOpenChange, cart, preview, products, locale, demo, demoNotice, payment, cashEnabled, onPayment, busy, uncertain, unavailable,
+  const { isOpen, onOpenChange, cart, preview, products, locale, demo, demoNotice, syncNotice, syncReasonID, degraded = false, payment, cashEnabled, onPayment, busy, uncertain, unavailable,
     previewMatchesCart, previewAmountsSafe, error, notice, onPreview, onClearPreview, onInvalidated, onConfirm, onRefresh, onRetry, onRemove, onSetLine, fallbackFocus } = props;
   const t = copy[locale];
   const heading = useRef<HTMLHeadingElement>(null);
@@ -92,6 +95,7 @@ export function CartSheet(props: CartSheetProps) {
   return <GuestSheet isOpen={isOpen} onOpenChange={onOpenChange} title={preview ? t.preview : t.cart} titleRef={heading}
     locale={locale} notice={demoNotice} fallbackFocus={fallbackFocus}>
     <div className={styles.content}>
+      {syncNotice}
       {preview ? <>
         <p>{t.previewHint}</p>
         <div className={styles.quoteLines}>{preview.quote.lines.map((line) => <article className={styles.quoteLine} key={line.line_id}>
@@ -107,7 +111,7 @@ export function CartSheet(props: CartSheetProps) {
         </fieldset>
         <p>{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>
         {!previewAmountsSafe && <p className={styles.error} role="alert">{t.amountError}</p>}
-        {previewMatchesCart && <button className={styles.primary} disabled={busy || unavailable || uncertain || !previewAmountsSafe} onClick={onConfirm}>{busy ? t.working : t.confirm}</button>}
+        {previewMatchesCart && <button className={styles.primary} aria-describedby={degraded ? syncReasonID : undefined} disabled={busy || unavailable || uncertain || !previewAmountsSafe || degraded} onClick={onConfirm}>{busy ? t.working : t.confirm}</button>}
         <button className={styles.control} disabled={busy} onClick={() => { returning.current = true; onClearPreview(); }}>{t.back}</button>
       </> : <>
         <button className={styles.control} aria-label={t.refresh} disabled={busy} onClick={onRefresh}>↻</button>
@@ -146,7 +150,7 @@ export function CartSheet(props: CartSheetProps) {
           </article>;
         })}</div>}
         {unavailable && <p>{t.unavailableLines}</p>}
-        <button className={styles.primary} ref={previewButton} disabled={!cart?.lines.length || busy || uncertain || unavailable} onClick={onPreview}>{busy ? t.loading : t.preview}</button>
+        <button className={styles.primary} ref={previewButton} aria-describedby={degraded ? syncReasonID : undefined} disabled={!cart?.lines.length || busy || uncertain || unavailable || degraded} onClick={onPreview}>{busy ? t.loading : t.preview}</button>
       </>}
       {uncertain && <button className={styles.control} disabled={busy} onClick={onRetry}>{t.retry}</button>}
       {visibleError && <p className={styles.error} role="alert">{visibleError}</p>}

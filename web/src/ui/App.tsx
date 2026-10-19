@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState } from 'react';
 import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
 import type { Cart, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
@@ -12,6 +12,8 @@ import { MenuList } from './guest/MenuList';
 import { OptionSheet } from './guest/OptionSheet';
 import { CartBar } from './guest/CartBar';
 import { CartSheet } from './guest/CartSheet';
+import { initialSyncState, syncReducer } from './guest/sync-state';
+import type { SyncOrigin } from './guest/sync-state';
 import { OrderTracks } from './guest/OrderTracks';
 import guestStyles from './guest/GuestApp.module.css';
 import { DemoBanner, DemoNotice, demoStoreName } from './DemoBanner';
@@ -25,12 +27,14 @@ const MENU_REFRESH_TTL_MS = 15_000;
 let guestSurfaceMounts = 0;
 const ja = {
     backToMenu: 'メニューに戻る',
+    synced: 'テーブルで共有中', syncWaiting: '同期待ち', syncAt: '時点', syncUnstable: '通信が不安定です',
+    syncReason: '表示は {time} 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
     brand: '東島', subtitle: 'TABLE ORDER', table: 'テーブル', pending: '共有カート', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
     menu: 'お品書き', available: '注文できます', unavailable: '現在注文できません', pendingAvailability: '店舗確認中', emergencyHold: '販売停止中',
     choose: '選択してください', required: '必須', noOption: '選択しない', add: 'カートに追加', cartEmpty: 'カートはまだ空です。',
-    remove: '削除', quantity: '数量', options: '追加オプション', latest: '最新の共有内容', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
+    remove: '削除', quantity: '数量', options: '追加オプション', latest: '共有カートを確認しました', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
     refresh: '共有内容を更新', preview: '金額を確認する', previewHint: '注文を確定する前に最新の金額と内容をご確認ください。',
     total: '税込合計', tax: '内消費税', method: '今回のお支払い方法', stripe: 'クレジットカード', cash: '店頭で現金',
     confirm: 'この内容で注文を確定', working: '送信中…', cancelPreview: 'カートへ戻る',
@@ -48,12 +52,14 @@ const ja = {
 };
 const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
     backToMenu: '返回菜單',
+    synced: '同桌共用中', syncWaiting: '等待同步', syncAt: '的內容', syncUnstable: '網路連線不穩',
+    syncReason: '目前顯示 {time} 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
     brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
     menu: '菜單', available: '可點選', unavailable: '目前無法點選', pendingAvailability: '門店確認中', emergencyHold: '暫停販售',
     choose: '請選擇', required: '必選', noOption: '不選擇', add: '加入購物車', cartEmpty: '購物車目前是空的。',
-    remove: '移除', quantity: '數量', options: '加料選項', latest: '最新共用內容', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
+    remove: '移除', quantity: '數量', options: '加料選項', latest: '已確認共用購物車', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
     refresh: '更新共用內容', preview: '確認金額', previewHint: '送出前請確認最新品項和金額。',
     total: '含稅總額', tax: '其中消費稅', method: '本次付款方式', stripe: '信用卡', cash: '店內現金',
     confirm: '確認並送出訂單', working: '送出中…', cancelPreview: '返回購物車',
@@ -77,7 +83,7 @@ interface Entry {
   grant: GuestGrant;
   menu: GuestMenu;
 }
-interface Replay { key: string; run: () => Promise<Cart | import('../api/types').CommitResult>; }
+interface Replay { origin: SyncOrigin; key: string; run: () => Promise<Cart | import('../api/types').CommitResult>; }
 
 function entryFromURL(): { locator?: string; sessionID?: string } {
   const query = new URLSearchParams(window.location.search);
@@ -90,6 +96,9 @@ export function displayTableLocator(locator: string, demo: boolean): string {
   return demo && locator === 'demo-shironagasukujira-table-05' ? '05' : locator;
 }
 
+function syncOrigin(current: Entry): SyncOrigin {
+  return { sessionID: current.grant.session.id, token: current.grant.table_join_token };
+}
 function storageKey(sessionID: string) { return `tojima.table-join.${sessionID}`; }
 function safeAmount(amount: string | number | undefined): string {
   if (typeof amount === 'number' && !Number.isSafeInteger(amount)) return '—';
@@ -155,7 +164,15 @@ export function App({ demo = false }: DemoSurfaceProps) {
   entryRef.current = entry;
   const mode = entry?.grant.session.mode;
   const [status, setStatus] = useState<PublicTable | null>(null);
-  const [{ cart, preview }, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
+  const [cartState, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
+  const { cart, preview } = cartState;
+  const cartStateRef = useRef(cartState);
+  cartStateRef.current = cartState;
+  const [sync, dispatchSync] = useReducer(syncReducer, initialSyncState);
+  const acceptedSyncSequence = useRef(0);
+  const watchdogViewSequence = useRef(0);
+  const [watchdogBase, setWatchdogBase] = useState<number | null>(null);
+  const syncID = useId();
   const [orders, setOrders] = useState<Order[]>([]);
   const [guestOperations, setGuestOperations] = useState<GuestOperations | null>(null);
   const [operationsStale, setOperationsStale] = useState(false);
@@ -204,6 +221,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
   }, []);
 
   const invalidateGrant = useCallback((sessionID: string) => {
+    dispatchSync({ type: 'reset', origin: null });
+    acceptedSyncSequence.current++;
+    cartStateRef.current = initialGuestCartState;
     orderRequestSequence.current++;
     setGuestOperations(null); setOperationsStale(false);
     checkoutRequestSequence.current++;
@@ -216,7 +236,15 @@ export function App({ demo = false }: DemoSurfaceProps) {
     setBlocked(true); setError('session_expired');
   }, []);
 
-  const adoptCart = useCallback((incoming: Cart) => {
+  const adoptCart = useCallback((incoming: Cart, origin?: SyncOrigin) => {
+    const next = guestCartReducer(cartStateRef.current, { type: 'cart-received', cart: incoming });
+    // Observe batched responses against the same latest cart that dispatch will adopt.
+    cartStateRef.current = next;
+    const current = entryRef.current;
+    if (origin && current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token && next.cart === incoming) {
+      acceptedSyncSequence.current++;
+      dispatchSync({ type: 'success', origin, at: Date.now() });
+    }
     dispatchCart({ type: 'cart-received', cart: incoming });
   }, []);
 
@@ -224,11 +252,21 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const refreshCart = useCallback(async (current: Entry) => {
     const sequence = ++cartRequestSequence.current;
+    const origin = syncOrigin(current);
+    // A read begun before an accepted mutation must not count as a later failure.
+    const acceptedAtStart = acceptedSyncSequence.current;
     try {
       const latest = await cartClient.readCart(current.grant.session.id, current.grant.table_join_token);
-      if (sequence === cartRequestSequence.current) adoptCart(latest);
+      if (sequence === cartRequestSequence.current) adoptCart(latest, origin);
     } catch (cause) {
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
+      const active = entryRef.current;
+      const syncFailure = cause instanceof ApiError ? cause.status >= 500 && cause.status <= 599
+        : cause instanceof Error && cause.message === 'network_unavailable';
+      if (sequence === cartRequestSequence.current && acceptedAtStart === acceptedSyncSequence.current
+        && active?.grant.session.id === origin.sessionID && active.grant.table_join_token === origin.token && syncFailure) {
+        dispatchSync({ type: 'read-failure', origin, ...(cause instanceof ApiError ? { status: cause.status } : {}) });
+      }
       throw cause;
     }
   }, [adoptCart, invalidateGrant]);
@@ -319,12 +357,15 @@ export function App({ demo = false }: DemoSurfaceProps) {
   };
 
   const recoverConflict = async (current: Entry, latest?: Cart) => {
-    if (latest) adoptCart(latest);
+    if (latest) adoptCart(latest, syncOrigin(current));
     else await refresh(current);
     await refreshMenu(current, true);
   };
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
+    dispatchSync({ type: 'reset', origin: { sessionID: grant.session.id, token: grant.table_join_token } });
+    acceptedSyncSequence.current++;
+    setWatchdogBase(Date.now());
     menuRequestSequence.current++;
     orderRequestSequence.current++;
     setGuestOperations(null); setOperationsStale(false);
@@ -344,6 +385,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     sessionStorage.setItem(storageKey(grant.session.id), grant.table_join_token);
     const next = { ...(locator ? { locator } : {}), sessionID: grant.session.id, grant, menu };
     menuLastReadAt.current.set(`${grant.session.id}:${grant.table_join_token}`, Date.now());
+    entryRef.current = next;
     setEntry(next);
     await refresh(next);
   }, [invalidateGrant, refresh]);
@@ -507,6 +549,42 @@ export function App({ demo = false }: DemoSurfaceProps) {
     if (entry && tab === 'cart' && document.visibilityState === 'visible') void refreshCart(entry).catch(() => undefined);
   }, [entry, tab, refreshCart]);
 
+  const syncSessionID = entry?.grant.session.id;
+  const syncToken = entry?.grant.table_join_token;
+  useEffect(() => {
+    if (!syncSessionID || !syncToken) return;
+    const origin = { sessionID: syncSessionID, token: syncToken };
+    const offline = () => dispatchSync({ type: 'offline', origin });
+    const online = () => dispatchSync({ type: 'online', origin });
+    window.addEventListener('offline', offline);
+    window.addEventListener('online', online);
+    return () => {
+      window.removeEventListener('offline', offline);
+      window.removeEventListener('online', online);
+    };
+  }, [syncSessionID, syncToken]);
+  useEffect(() => {
+    const visibility = () => {
+      watchdogViewSequence.current++;
+      setWatchdogBase(syncSessionID && syncToken && tab === 'cart' && document.visibilityState === 'visible' ? Date.now() : null);
+    };
+    visibility();
+    document.addEventListener('visibilitychange', visibility);
+    return () => document.removeEventListener('visibilitychange', visibility);
+  }, [syncSessionID, syncToken, tab]);
+  useEffect(() => {
+    if (!syncSessionID || !syncToken || tab !== 'cart' || watchdogBase === null || sync.degraded || document.visibilityState !== 'visible') return;
+    const deadline = Math.max(watchdogBase, sync.lastSyncedAt ?? watchdogBase) + 7500;
+    const acceptedAtSchedule = acceptedSyncSequence.current;
+    const viewAtSchedule = watchdogViewSequence.current;
+    const timer = window.setTimeout(() => {
+      if (document.visibilityState === 'visible' && acceptedAtSchedule === acceptedSyncSequence.current && viewAtSchedule === watchdogViewSequence.current) {
+        dispatchSync({ type: 'watchdog', origin: { sessionID: syncSessionID, token: syncToken } });
+      }
+    }, Math.max(0, deadline - Date.now()));
+    return () => window.clearTimeout(timer);
+  }, [syncSessionID, syncToken, tab, watchdogBase, sync]);
+
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
   useEffect(() => {
     guestSurfaceMounts++;
@@ -572,11 +650,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
     inFlight.current = true; setBusy(true); setError(''); clearPreview(); setNotice('');
     const key = newOperationKey();
     if (onAccepted) acceptedOperations.current.set(key, { sessionID: entry.grant.session.id, token: entry.grant.table_join_token, onAccepted });
+    const origin = syncOrigin(entry);
     const operation = run(key);
-    replay.current = { key, run: () => run(key) };
+    replay.current = { key, origin, run: () => run(key) };
     try {
       const updated = await operation;
-      adoptCart(updated); acceptOperation(key); replay.current = null; setUncertain(false);
+      adoptCart(updated, origin); acceptOperation(key); replay.current = null; setUncertain(false);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         if (entry) await recoverConflict(entry, cause.body.cart);
@@ -602,11 +681,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
       const result = await pending.run();
       if ('outcome' in result) {
         if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
-        adoptCart(result.cart);
+        adoptCart(result.cart, pending.origin);
         setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
         clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       } else {
-        adoptCart(result); acceptOperation(pending.key); setNotice(t.latest);
+        adoptCart(result, pending.origin); acceptOperation(pending.key); setNotice(t.latest);
       }
       replay.current = null; setUncertain(false);
       if (entry) await refresh(entry);
@@ -670,6 +749,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   const confirmOrder = async () => {
     if (!entry || !cart || !preview || preview.version !== cart.version || preview.generation !== cart.generation || busy) return;
+    const origin = syncOrigin(entry);
     setBusy(true); setError(''); setNotice('');
     const key = newOperationKey();
     if (payment === 'STRIPE') {
@@ -686,7 +766,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     try {
       const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, payment, key);
       if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
-      adoptCart(result.cart); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
+      adoptCart(result.cart, origin); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
       selectCheckoutOrder(payment === 'STRIPE' ? result.order.order_id : '');
       clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       await refresh(entry);
@@ -696,7 +776,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         clearPreview(); setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setError(t.network); setUncertain(true);
-        replay.current = createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key));
+        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       } else if (cause instanceof ApiError) {
         clearPreview();
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
@@ -707,12 +787,16 @@ export function App({ demo = false }: DemoSurfaceProps) {
       }
       else {
         setError(t.network); setUncertain(true);
-        replay.current = createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key));
+        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       }
     } finally { setBusy(false); }
   };
 
-  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div></Shell>;
+  const syncTime = sync.lastSyncedAt === null ? '—' : new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(sync.lastSyncedAt);
+  const syncReason = t.syncReason.replace('{time}', syncTime);
+  const syncNotice = (id: string) => sync.degraded ? <div id={id} className={guestStyles.syncNotice} role="status"><strong>{t.syncUnstable}</strong>{syncReason}</div> : null;
+
+  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div>{syncNotice(`${syncID}-page`)}</Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
   if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <section className="entry-card" aria-labelledby="entry-title">
@@ -738,6 +822,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         {tab === 'cart' ? <button className={guestStyles.navigation} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}（{orders.length}）</button>
           : <button className={guestStyles.navigation} onClick={() => { setTab('cart'); clearPreview(); requestAnimationFrame(() => menuHeading.current?.focus()); }}>{t.backToMenu}</button>}
       </header>
+      {syncNotice(`${syncID}-page`)}
       {tab === 'cart' && <>
         <CategoryNav categories={entry.menu.categories} locale={locale} />
         <MenuList categories={entry.menu.categories} locale={locale} busy={busy} uncertain={uncertain}
@@ -750,14 +835,17 @@ export function App({ demo = false }: DemoSurfaceProps) {
           onClear={(groupKey) => { if (optionProduct) setSelections((current) => ({ ...current, [optionProduct.key]: (current[optionProduct.key] ?? []).filter((item) => item.group_key !== groupKey) })); }}
           onQuantity={(quantity) => { if (optionProduct) setQuantities((current) => ({ ...current, [optionProduct.key]: quantity })); }}
           onAdd={() => { if (optionProduct && selectionsValid(optionProduct.key, selections[optionProduct.key] ?? [])) void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, optionProduct.key, quantities[optionProduct.key] ?? 1, selections[optionProduct.key] ?? [], key), () => setOptionProductKey(null)); }}>
+          {syncNotice(`${syncID}-option`)}
           {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
           {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
           {notice && <p role="status">{notice}</p>}
         </OptionSheet>
 
-        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)} />
+        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)}
+          sync={sync.degraded ? `${t.syncWaiting}・${syncTime} ${t.syncAt}` : `${t.synced}・${syncTime}`} />
         <CartSheet isOpen={cartOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
-          locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
+          locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />}
+          degraded={sync.degraded} syncNotice={syncNotice(`${syncID}-cart`)} syncReasonID={`${syncID}-cart`} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
           onPayment={setPayment} busy={busy} uncertain={uncertain} unavailable={unavailable} previewMatchesCart={previewMatchesCart} previewAmountsSafe={previewAmountsSafe}
           error={visibleError} notice={notice} onPreview={() => void openPreview()} onClearPreview={clearPreview} onInvalidated={() => setError((current) => current || t.stale)} onConfirm={() => void confirmOrder()}
           onRefresh={() => void refreshCurrent(entry)} onRetry={() => void retryUncertain()}
