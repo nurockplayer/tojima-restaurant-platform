@@ -269,6 +269,17 @@ export function App({ demo = false }: DemoSurfaceProps) {
     dispatchCart({ type: 'cart-received', cart: incoming });
   }, []);
 
+  const confirmDisplayedCart = useCallback((latest: Cart, origin: SyncOrigin) => {
+    // Overlapping reads can confirm the displayed cart without adopting a superseded snapshot.
+    const current = entryRef.current;
+    const displayed = cartStateRef.current.cart;
+    if (current?.grant.session.id === origin.sessionID && current.grant.table_join_token === origin.token
+      && displayed && displayed.generation === latest.generation && displayed.version === latest.version) {
+      acceptedSyncSequence.current++;
+      dispatchSync({ type: 'success', origin, at: Date.now() });
+    }
+  }, []);
+
   const clearPreview = () => dispatchCart({ type: 'preview-cleared' });
 
   const refreshCart = useCallback(async (current: Entry) => {
@@ -279,6 +290,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     try {
       const latest = await cartClient.readCart(current.grant.session.id, current.grant.table_join_token);
       if (sequence === cartRequestSequence.current) adoptCart(latest, origin);
+      else confirmDisplayedCart(latest, origin);
     } catch (cause) {
       if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) invalidateGrant(current.grant.session.id);
       const active = entryRef.current;
@@ -290,7 +302,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
       }
       throw cause;
     }
-  }, [adoptCart, invalidateGrant]);
+  }, [adoptCart, confirmDisplayedCart, invalidateGrant]);
 
   const refreshOrders = useCallback(async (current: Entry) => {
     const sequence = ++orderRequestSequence.current;

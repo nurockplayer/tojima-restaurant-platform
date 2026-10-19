@@ -323,6 +323,60 @@ describe('guest App sync acceptance', () => {
     expect(document.body.textContent).toContain('通信が不安定です');
   });
 
+  it('stays healthy when overlapping cart reads each succeed after three seconds with the displayed version', async () => {
+    useFakeClock();
+    let cartReads = 0;
+    let slow = false;
+    const { calls } = installFetch({ cart: () => {
+      cartReads++;
+      if (!slow) return json(cartWithMeal);
+      return new Promise<Response>((resolve) => { setTimeout(() => resolve(json(cartWithMeal)), 3_000); });
+    } });
+    startPage();
+    await act(async () => { for (let index = 0; index < 40; index++) await Promise.resolve(); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^カートを開く / })); });
+    const dialog = screen.getByRole('dialog');
+    const baselineReads = cartReads;
+    const pollStart = Date.now();
+    slow = true;
+
+    for (let elapsed = 500; elapsed <= 12_000; elapsed += 500) {
+      await advanceClock(500);
+      expect(document.body.textContent).not.toContain('通信が不安定です');
+      expect(cartReads).toBe(baselineReads + Math.floor(elapsed / 2_500));
+    }
+    expect(within(dialog).getAllByText('定食')).toHaveLength(1);
+    expect((within(dialog).getByRole('button', { name: '金額を確認する' }) as HTMLButtonElement).disabled).toBe(false);
+    expect(calls.filter(({ url, at }) => url.endsWith('/cart') && at > pollStart).map(({ at }) => at - pollStart)).toEqual([2_500, 5_000, 7_500, 10_000]);
+  });
+
+  it('does not record success from a superseded read whose version differs from the displayed cart', async () => {
+    useFakeClock();
+    let cartReads = 0;
+    let slow = false;
+    const differentCart = { ...cartWithMeal, version: cartWithMeal.version + 1, lines: [{ ...cartWithMeal.lines[0]!, product_name: '異なる共有内容', quantity: 2 }] };
+    installFetch({ cart: () => {
+      cartReads++;
+      if (!slow) return json(cartWithMeal);
+      return new Promise<Response>((resolve) => { setTimeout(() => resolve(json(differentCart)), 3_000); });
+    } });
+    startPage();
+    await act(async () => { for (let index = 0; index < 40; index++) await Promise.resolve(); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^カートを開く / })); });
+    const dialog = screen.getByRole('dialog');
+    const baselineReads = cartReads;
+    slow = true;
+
+    await advanceClock(7_499);
+    expect(document.body.textContent).not.toContain('通信が不安定です');
+    await advanceClock(1);
+    expect(cartReads).toBe(baselineReads + 3);
+    expect(document.body.textContent).toContain('通信が不安定です');
+    expect(within(dialog).getAllByText('定食')).toHaveLength(1);
+    expect(within(dialog).queryByText('異なる共有内容')).toBeNull();
+    expect((within(dialog).getByRole('button', { name: '金額を確認する' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
   it('restarts the exact watchdog from an accepted success between schedules', async () => {
     useFakeClock();
     let cartReads = 0;
