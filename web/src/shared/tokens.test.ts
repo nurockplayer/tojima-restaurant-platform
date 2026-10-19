@@ -8,7 +8,9 @@ const sources = import.meta.glob<string>('../**/*.css', {
 const expectedFiles = [
   './tokens.css', '../ui/styles.css', '../ui/CatalogApp.module.css',
   '../ui/OrderRead.module.css', '../ui/DemoBanner.module.css',
-  '../ui/guest/GuestSheet.module.css',
+  '../ui/guest/GuestSheet.module.css', '../ui/guest/GuestApp.module.css',
+  '../ui/guest/CategoryNav.module.css', '../ui/guest/MenuList.module.css', '../ui/guest/OptionSheet.module.css',
+  '../ui/guest/CartBar.module.css', '../ui/guest/CartSheet.module.css',
 ];
 const normal = (value: string) => value.trim().replace(/\s+/g, ' ');
 type Declaration = { property: string; value: string };
@@ -298,23 +300,40 @@ function checkGuestDensity(input: Rule[]) {
   }
 }
 
-function checkGuestFocus(input: Rule[]) {
+function checkGuestFocus(input: Rule[], file: string, focusSelector: string, whiteSelectors: string[], scrollAreas: Array<{ selector: string; overflow: 'auto' | 'y' }>) {
   const base = input.filter((r) => isGuestModule(r.file) && !r.context);
-  const inset = base.filter((r) => declarations(r, 'outline-offset').some((d) => d.value === '-3px'));
-  if (!inset.length) throw new Error('Guest scroll areas require inset focus');
-  for (const rule of inset) {
-    if (rule.selector !== '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible') throw new Error('Guest inset focus selector regressed');
-    if (!declarations(rule, 'outline').some((d) => d.value === '3px solid var(--color-focus)')) throw new Error('Guest inset focus requires a 3px token outline');
-    for (const element of ['button', 'a', 'input', 'select', 'textarea', '[tabindex]']) {
-      if (compareSpecificity(specificity(rule.selector), specificity(`${element}:focus-visible`)) <= 0) throw new Error('Guest inset focus must outrank global focus');
-    }
-    const white = base.find((r) => r.file === rule.file && r.selector === '.dialog input:checked:focus-visible');
+  const inset = base.filter((r) => r.file === file && declarations(r, 'outline-offset').some((d) => d.value === '-3px'));
+  if (inset.length !== 1 || inset[0]!.selector !== focusSelector) throw new Error('Guest inset focus selector regressed');
+  const focusRule = inset[0]!;
+  if (!declarations(focusRule, 'outline').some((d) => d.value === '3px solid var(--color-focus)')) throw new Error('Guest inset focus requires a 3px token outline');
+  for (const element of ['button', 'a', 'input', 'select', 'textarea', '[tabindex]']) {
+    if (compareSpecificity(specificity(focusRule.selector), specificity(`${element}:focus-visible`)) <= 0) throw new Error('Guest inset focus must outrank global focus');
+  }
+  for (const selector of whiteSelectors) {
+    const white = base.find((r) => r.file === file && split(r.selector, ',').map(normal).includes(selector));
     if (!white || !declarations(white, 'outline-color').some((d) => d.value === 'var(--color-on-action)')
-      || compareSpecificity(specificity(white.selector), specificity(rule.selector)) <= 0) throw new Error('Guest filled input focus override regressed');
-    const scroll = base.find((r) => r.file === rule.file && r.selector === '.body');
-    if (!scroll || !declarations(scroll, 'overflow-y').some((d) => d.value === 'auto')) throw new Error('Guest sheet scroll area is missing');
+      || compareSpecificity(specificity(selector), specificity(focusRule.selector)) <= 0) throw new Error('Guest filled input focus override regressed');
+  }
+  for (const area of scrollAreas) {
+    const scroll = base.find((r) => r.file === file && split(r.selector, ',').map(normal).includes(area.selector));
+    const overflowProperty = area.overflow === 'y' ? 'overflow-y' : 'overflow';
+    if (!scroll || !declarations(scroll, overflowProperty).some((d) => d.value === 'auto')) throw new Error('Guest sheet scroll area is missing');
     const padding = scroll && declarations(scroll, 'padding')[0]?.value.split(' ')[0];
     if (!padding || fontPixels(resolve(padding, [], 'guest')) < 3) throw new Error('Guest scroll padding must protect focus outlines');
+  }
+}
+
+function checkCartStepper(input: Rule[]) {
+  const stepper = input.find((rule) => rule.file === '../ui/guest/CartSheet.module.css' && !rule.context && rule.selector === '.stepper button');
+  if (!stepper) throw new Error('Cart stepper styles are missing');
+  const background = declarations(stepper, 'background')[0]?.value;
+  const foreground = declarations(stepper, 'color')[0]?.value;
+  if (!background || !foreground) throw new Error('Cart stepper needs explicit foreground and background tokens');
+  if (contrast('var(--color-focus)', background, 'guest') < 3 || contrast(foreground, background, 'guest') < 3) {
+    throw new Error('Cart stepper focus and text contrast must reach 3:1');
+  }
+  for (const dimension of ['width', 'height']) {
+    if (!declarations(stepper, dimension).some((d) => d.value === 'var(--size-target-min)')) throw new Error(`Cart stepper ${dimension} must use the guest target token`);
   }
 }
 
@@ -328,10 +347,7 @@ describe('DS-1 static design-token regression gate', () => {
     for (const [fg, bg, minimum] of usagePairs) {
       expect(contrast(`var(${fg})`, `var(${bg})`), `${fg} / ${bg} must reach ${minimum}:1`).toBeGreaterThanOrEqual(minimum);
     }
-    const stepper = allRules.find((r) => r.file === '../ui/styles.css' && r.selector === '.stepper button' && !r.context);
-    const background = stepper && declarations(stepper, 'background')[0]?.value;
-    expect(background, 'Inset stepper focus must contrast with the button fill').toBeDefined();
-    expect(contrast('var(--color-focus)', background!)).toBeGreaterThanOrEqual(3);
+    checkCartStepper(allRules);
   });
 
   it('overrides UA small shrinking with an unconditional base rule of at least 12px', () => {
@@ -348,7 +364,7 @@ describe('DS-1 static design-token regression gate', () => {
     const insetRules = base.filter((r) => declarations(r, 'outline-offset').some((d) => d.value === '-3px'));
     expect(insetRules).toHaveLength(1);
     const inset = insetRules[0]!;
-    expect(inset.selector).toMatch(/^:(?:is|where)\(\.cart-lines, \.quote-lines, \.confirm-dialog\) :is\(button, a, input, select, textarea, \[tabindex\]\):focus-visible$/);
+    expect(inset.selector).toMatch(/^:(?:is|where)\(\.confirm-dialog\) :is\(button, a, input, select, textarea, \[tabindex\]\):focus-visible$/);
     const insetWeight = specificity(inset.selector);
     for (const element of ['button', 'a', 'input', 'select', 'textarea', '[tabindex]']) {
       const selector = `${element}:focus-visible`;
@@ -363,8 +379,8 @@ describe('DS-1 static design-token regression gate', () => {
     expect(whiteRules).toHaveLength(1);
     const whiteSelectors = split(whiteRules[0]!.selector, ',').map(normal);
     expect(whiteSelectors).toEqual([
-      ':is(.cart-lines, .quote-lines, .confirm-dialog) .button.primary:focus-visible',
-      ':is(.cart-lines, .quote-lines, .confirm-dialog) input:checked:focus-visible',
+      ':is(.confirm-dialog) .button.primary:focus-visible',
+      ':is(.confirm-dialog) input:checked:focus-visible',
     ]);
     for (const selector of whiteSelectors) {
       const weight = specificity(selector);
@@ -438,7 +454,14 @@ describe('DS-2 guest token contexts and safeguards', () => {
   });
 
   it('protects sheet scroll-area inset focus and filled-input overrides', () => {
-    checkGuestFocus(allRules);
+    checkGuestFocus(allRules, '../ui/guest/GuestSheet.module.css', '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.dialog input:checked:focus-visible'], [{ selector: '.body', overflow: 'y' }]);
+    checkGuestFocus(allRules, '../ui/guest/CartSheet.module.css', '.content :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.content button.primary:focus-visible', '.content input:checked:focus-visible'],
+      [{ selector: '.cartLines', overflow: 'auto' }, { selector: '.quoteLines', overflow: 'auto' }]);
+    const optionWhite = allRules.find((r) => r.file === '../ui/guest/OptionSheet.module.css' && !r.context && r.selector === '.content button.add:focus-visible');
+    expect(optionWhite && declarations(optionWhite, 'outline-color')[0]?.value).toBe('var(--color-on-action)');
+    expect(compareSpecificity(specificity(optionWhite!.selector), specificity('.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible'))).toBeGreaterThan(0);
     expect(contrast('var(--color-focus)', 'var(--color-surface)', 'guest')).toBeGreaterThanOrEqual(3);
     expect(contrast('var(--color-on-action)', 'var(--color-action)', 'guest')).toBeGreaterThanOrEqual(3);
     expect(allRules.filter((r) => isGuestModule(r.file)).every((r) => !r.selector.includes(':global('))).toBe(true);
@@ -474,12 +497,35 @@ describe('DS-2 guest token contexts and safeguards', () => {
     const css = sources['../ui/guest/GuestSheet.module.css']!.replace(
       '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible',
       ':where(.dialog) :where(button, a, input, select, textarea, [tabindex]):focus-visible');
-    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css))).toThrow('Guest inset focus selector regressed');
+    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css), '../ui/guest/GuestSheet.module.css', '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.dialog input:checked:focus-visible'], [{ selector: '.body', overflow: 'y' }])).toThrow('Guest inset focus selector regressed');
   });
 
   it('rejects a missing guest filled-input focus override', () => {
     const css = sources['../ui/guest/GuestSheet.module.css']!.replace('outline-color: var(--color-on-action);', 'outline-color: var(--color-focus);');
-    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css))).toThrow('Guest filled input focus override regressed');
+    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css), '../ui/guest/GuestSheet.module.css', '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.dialog input:checked:focus-visible'], [{ selector: '.body', overflow: 'y' }])).toThrow('Guest filled input focus override regressed');
+  });
+
+  it('rejects weaker CartSheet inset focus specificity', () => {
+    const css = sources['../ui/guest/CartSheet.module.css']!.replace(
+      '.content :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ':where(.content) :where(button, a, input, select, textarea, [tabindex]):focus-visible');
+    expect(() => checkGuestFocus(rules('../ui/guest/CartSheet.module.css', css), '../ui/guest/CartSheet.module.css', '.content :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.content button.primary:focus-visible', '.content input:checked:focus-visible'],
+      [{ selector: '.cartLines', overflow: 'auto' }, { selector: '.quoteLines', overflow: 'auto' }])).toThrow('Guest inset focus selector regressed');
+  });
+
+  it('rejects a missing CartSheet filled-control white focus override', () => {
+    const css = sources['../ui/guest/CartSheet.module.css']!.replace('outline-color: var(--color-on-action);', 'outline-color: var(--color-focus);');
+    expect(() => checkGuestFocus(rules('../ui/guest/CartSheet.module.css', css), '../ui/guest/CartSheet.module.css', '.content :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ['.content button.primary:focus-visible', '.content input:checked:focus-visible'],
+      [{ selector: '.cartLines', overflow: 'auto' }, { selector: '.quoteLines', overflow: 'auto' }])).toThrow('Guest filled input focus override regressed');
+  });
+
+  it('rejects a CartSheet stepper fill that clips focus contrast', () => {
+    const css = sources['../ui/guest/CartSheet.module.css']!.replace('background: var(--color-surface-sunken);', 'background: var(--color-focus);');
+    expect(() => checkCartStepper(rules('../ui/guest/CartSheet.module.css', css))).toThrow('Cart stepper focus and text contrast must reach 3:1');
   });
 
   it('rejects an undefined variable even in the guest context', () => {

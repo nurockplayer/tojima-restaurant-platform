@@ -1,0 +1,51 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { Cart, GuestMenu } from '../../api/types';
+import { CartBar } from './CartBar';
+
+const menu: GuestMenu = {
+  currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'main', name: '主菜', position: 0, products: [{
+    key: 'meal', name: '定食', effective_price_minor: 960, position: 0, availability: 'AVAILABLE', selectable: true,
+    option_groups: [{ key: 'size', name: 'サイズ', min_select: 0, max_select: 1, position: 0, options: [
+      { key: 'large', name: '大盛', price_delta_minor: 20, position: 0, availability: 'AVAILABLE' },
+    ] }],
+  }] }],
+};
+const category = menu.categories[0]!;
+const product = category.products[0]!;
+const cart: Cart = { session_id: 'session', generation: 1, version: 1, lines: [{
+  line_id: 'line', product_key: 'meal', product_name: '定食', product_available: true, quantity: 2,
+  options: [{ group_key: 'size', option_key: 'large', group_name: 'サイズ', option_name: '大盛', available: true }],
+}] };
+
+afterEach(cleanup);
+
+describe('CartBar', () => {
+  it('shows count, estimated total and opens the shared cart', () => {
+    const onOpen = vi.fn();
+    render(<CartBar active cart={cart} menu={menu} locale="ja" onOpen={onOpen} />);
+    expect(screen.getByText('2 点')).toBeDefined();
+    expect(screen.getByText('¥1,960')).toBeDefined();
+    expect(screen.getByText('共有カート')).toBeDefined();
+    fireEvent.click(screen.getByRole('button', { name: 'カートを開く' }));
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it('shows an em dash when the estimate cannot be priced', () => {
+    const paused: GuestMenu = { ...menu, categories: [{ ...category, products: [{ ...product, availability: 'PAUSED' }] }] };
+    render(<CartBar active cart={cart} menu={paused} locale="zh" onOpen={() => undefined} />);
+    expect(screen.getByText('—')).toBeDefined();
+    expect(screen.getByText('2 件')).toBeDefined();
+  });
+
+  const emptyCart: Cart = { ...cart, lines: [] };
+  it.each<[string, boolean, Cart | null]>([
+    ['orders view', false, cart],
+    ['empty cart', true, emptyCart],
+    ['missing cart', true, null],
+  ])('does not render for %s', (_case, active, value) => {
+    const { container } = render(<CartBar active={active} cart={value} menu={menu} locale="ja" onOpen={() => undefined} />);
+    expect(container.firstChild).toBeNull();
+  });
+});

@@ -1,13 +1,19 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { guestDisplayKind, guestRefundKind, paidUnderReview } from './guest-display';
 import { ApiError, amountJPY, cartClient, newOperationKey } from '../api/client';
-import type { Cart, CartLine, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
+import type { Cart, GuestGrant, GuestMenu, OptionSelection, Order, PublicTable } from '../api/types';
 import { operationsClient } from '../api/operations';
 import type { GuestOperations, GuestOrderStatus } from '../api/operations';
 import { checkoutClient, checkoutNavigation } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
-import { DemoBanner } from './DemoBanner';
+import { CategoryNav } from './guest/CategoryNav';
+import { MenuList } from './guest/MenuList';
+import { OptionSheet } from './guest/OptionSheet';
+import { CartBar } from './guest/CartBar';
+import { CartSheet } from './guest/CartSheet';
+import guestStyles from './guest/GuestApp.module.css';
+import { DemoBanner, DemoNotice, demoStoreName } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
 
 import { MyOrders, RequestOrderLink } from './OrderRead';
@@ -15,8 +21,9 @@ import { rememberOrderGrant } from './my-orders';
 
 type Locale = 'ja' | 'zh';
 const MENU_REFRESH_TTL_MS = 15_000;
-const copy = {
-  ja: {
+let guestSurfaceMounts = 0;
+const ja = {
+    backToMenu: 'メニューに戻る',
     brand: '東島', subtitle: 'TABLE ORDER', table: 'テーブル', pending: '共有カート', committed: '注文履歴',
     join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
@@ -37,8 +44,9 @@ const copy = {
     selectRequired: '必須オプションを選択してください。', itemMissing: 'メニューで確認できない商品です。削除してください。',
     operationsStale: '最新の状況を確認できません。表示は前回確認時の内容です。', amountUnavailable: '最新の注文内容と金額を確認できません。', changed: '店舗により注文内容が変更されました', cancelled: 'この注文は取り消されました', originalTotal: '注文確定時の税込合計', refundPending: '返金処理中', refundFailed: '返金を確認中です。店舗にお問い合わせください', refunded: '返金済み', refundedTotal: '返金合計',
     noOrders: '確定済みの注文はありません。', direct: 'QRテーブルを確認', session: 'セッションから再参加', locale: '繁中', demoCash: '現金（デモ・テスト専用）',
-  },
-  zh: {
+};
+const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
+    backToMenu: '返回菜單',
     brand: '東島', subtitle: '桌邊點餐', table: '桌次', pending: '共用購物車', committed: '已送出訂單',
     join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
@@ -60,7 +68,7 @@ const copy = {
     operationsStale: '無法確認最新狀態，目前顯示上次確認的內容。', amountUnavailable: '目前無法確認最新訂單內容與金額。', changed: '店家已調整您的訂單', cancelled: '此訂單已取消', originalTotal: '送單時含稅總額', refundPending: '退款處理中', refundFailed: '退款確認中，請洽店家', refunded: '已退款', refundedTotal: '退款總額',
     noOrders: '目前沒有已確認訂單。', direct: '確認 QR 桌次', session: '使用桌次重新加入', locale: '日本語', demoCash: '現金（展示測試專用）',
   },
-} satisfies Record<Locale, Record<string, string>>;
+};
 
 interface Entry {
   locator?: string;
@@ -166,6 +174,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const [uncertain, setUncertain] = useState(false);
   const [blocked, setBlocked] = useState(false);
   const [tab, setTab] = useState<'cart' | 'orders'>('cart');
+  const [cartOpen, setCartOpen] = useState(false);
+  const [optionProductKey, setOptionProductKey] = useState<string | null>(null);
+  const menuHeading = useRef<HTMLHeadingElement>(null);
+  const orderHeading = useRef<HTMLHeadingElement>(null);
+  const entryHeading = useRef<HTMLHeadingElement>(null);
+  const acceptedOperations = useRef(new Map<string, { sessionID: string; token: string; onAccepted: () => void }>());
   const [selections, setSelections] = useState<Record<string, OptionSelection[]>>({});
   const [quantities, setQuantities] = useState<Record<string, number>>({});
   const strings = useRef(t);
@@ -494,6 +508,20 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   useEffect(() => { document.documentElement.lang = locale === 'ja' ? 'ja' : 'zh-Hant'; }, [locale]);
   useEffect(() => {
+    guestSurfaceMounts++;
+    document.documentElement.setAttribute('data-surface', 'guest');
+    return () => {
+      guestSurfaceMounts--;
+      if (guestSurfaceMounts === 0) document.documentElement.removeAttribute('data-surface');
+    };
+  }, []);
+  useEffect(() => {
+    if (!entry || tab === 'orders') {
+      setCartOpen(false);
+      setOptionProductKey(null);
+    }
+  }, [entry, tab]);
+  useEffect(() => {
     if (demo && payment === 'STRIPE') setPayment('CASH');
     else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
   }, [demo, guestOperations?.cash_enabled, payment]);
@@ -531,26 +559,34 @@ export function App({ demo = false }: DemoSurfaceProps) {
     } finally { setBusy(false); }
   };
 
-  const applyMutation = async (run: (key: string) => Promise<Cart>) => {
+  const acceptOperation = (key: string) => {
+    const accepted = acceptedOperations.current.get(key);
+    acceptedOperations.current.delete(key);
+    if (accepted && entryRef.current?.grant.session.id === accepted.sessionID
+      && entryRef.current.grant.table_join_token === accepted.token) accepted.onAccepted();
+  };
+
+  const applyMutation = async (run: (key: string) => Promise<Cart>, onAccepted?: () => void) => {
     if (!entry || !cart || inFlight.current || uncertain) return;
     inFlight.current = true; setBusy(true); setError(''); clearPreview(); setNotice('');
     const key = newOperationKey();
+    if (onAccepted) acceptedOperations.current.set(key, { sessionID: entry.grant.session.id, token: entry.grant.table_join_token, onAccepted });
     const operation = run(key);
     replay.current = { key, run: () => run(key) };
     try {
       const updated = await operation;
-      adoptCart(updated); replay.current = null; setUncertain(false);
+      adoptCart(updated); acceptOperation(key); replay.current = null; setUncertain(false);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         if (entry) await recoverConflict(entry, cause.body.cart);
         setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
-        replay.current = null;
+        acceptedOperations.current.delete(key); replay.current = null;
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setUncertain(true); setError(t.network);
       } else if (cause instanceof ApiError) {
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
         else setError(t.error);
-        replay.current = null;
+        acceptedOperations.current.delete(key); replay.current = null;
       } else {
         setUncertain(true); setError(t.network);
       }
@@ -569,14 +605,14 @@ export function App({ demo = false }: DemoSurfaceProps) {
         setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
         clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       } else {
-        adoptCart(result); setNotice(t.latest);
+        adoptCart(result); acceptOperation(pending.key); setNotice(t.latest);
       }
       replay.current = null; setUncertain(false);
       if (entry) await refresh(entry);
     } catch (cause) {
       if (cause instanceof ApiError && cause.status === 409) {
         if (entry) await recoverConflict(entry, cause.body.cart);
-        replay.current = null; setUncertain(false); setError(t.stale);
+        acceptedOperations.current.delete(pending.key); replay.current = null; setUncertain(false); setError(t.stale);
       } else if (cause instanceof ApiError && (cause.status === 403 || cause.status === 410)) {
         if (entry) invalidateGrant(entry.grant.session.id);
       }
@@ -675,11 +711,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
     } finally { setBusy(false); }
   };
 
-  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}><div className="loading-card" role="status">{t.loading}</div></Shell>;
+  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div></Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
-  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
+  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <section className="entry-card" aria-labelledby="entry-title">
-      <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title">{t.join}</h1><p>{t.joinHint}</p>
+      <div className="eyebrow">{t.subtitle}</div><h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
       {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
@@ -689,116 +725,62 @@ export function App({ demo = false }: DemoSurfaceProps) {
     </section>
   </Shell>;
 
-  const lineCount = cart?.lines.reduce((sum, line) => sum + line.quantity, 0) ?? 0;
+  const optionProduct = optionProductKey ? menuProducts.get(optionProductKey) ?? null : null;
   const previewMatchesCart = !!preview && !!cart && preview.generation === cart.generation && preview.version === cart.version;
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
-  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t}>
-    <div className="workspace">
-      <header className="welcome">
-        <div><div className="eyebrow">{t.menu}</div><h1>{entry.locator ? `${t.table} ${displayTableLocator(entry.locator, demo)}` : t.brand}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
-        <div className="join-badge"><span className="live-dot" />{t.latest}</div>
+  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+    <div className={guestStyles.workspace}>
+      <header className={guestStyles.welcome}>
+        <div><h1 ref={menuHeading} tabIndex={-1}>{t.menu}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
+        {tab === 'cart' ? <button className={guestStyles.navigation} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}（{orders.length}）</button>
+          : <button className={guestStyles.navigation} onClick={() => { setTab('cart'); clearPreview(); requestAnimationFrame(() => menuHeading.current?.focus()); }}>{t.backToMenu}</button>}
       </header>
-      <nav className="tabs" aria-label={locale === 'ja' ? '注文メニュー' : '點餐導覽'}>
-        <button className={tab === 'cart' ? 'tab active' : 'tab'} onClick={() => { setTab('cart'); clearPreview(); }}>{t.pending}<span>{lineCount}</span></button>
-        <button className={tab === 'orders' ? 'tab active' : 'tab'} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}<span>{orders.length}</span></button>
-      </nav>
-
       {tab === 'cart' && <>
-        {!preview && <section className="menu-section"><div className="section-heading"><div><div className="eyebrow">TOJIMA KITCHEN</div><h2>{t.menu}</h2></div><span className="menu-count">{entry.menu.categories.reduce((n, c) => n + c.products.length, 0)}</span></div>
-          {entry.menu.categories.map((category) => <section className="category" key={category.key}>
-            <h3>{category.name}</h3><div className="product-grid">
-              {category.products.map((product) => {
-                const selected = selections[product.key] ?? [];
-                const amountSafe = isSafeAmount(product.effective_price_minor) && product.option_groups.every((group) => group.options.every((option) => isSafeAmount(option.price_delta_minor)));
-                const held = product.company_emergency_hold_active === true;
-                const allowed = product.selectable && !held && amountSafe && selectionsValid(product.key, selected);
-                return <article className="product-card" key={product.key}>
-                  <div className="product-top"><div><h4>{product.name}</h4>{product.description && <p>{product.description}</p>}</div><strong className="price">{safeAmount(product.effective_price_minor)}</strong></div>
-                  <span className={`availability ${product.selectable && !held ? 'is-available' : ''}`}>{held ? t.emergencyHold : product.selectable ? t.available : product.availability === 'PENDING_CONFIRMATION' ? t.pendingAvailability : t.unavailable}</span>
-                  {product.option_groups.map((group) => <fieldset className="option-group" key={group.key}>
-                    <legend>{group.name} {group.min_select > 0 && <small>{t.required}</small>}</legend>
-                    <div className="option-list">{group.options.map((option) => {
-                      const checked = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
-                      return <label className={`option ${!option.availability || option.availability !== 'AVAILABLE' ? 'option-muted' : ''}`} key={option.key}>
-                        <input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${product.key}-${group.key}`} checked={checked} disabled={!product.selectable || held || option.availability !== 'AVAILABLE' || (group.max_select !== 1 && !checked && selected.filter((item) => item.group_key === group.key).length >= group.max_select)} onChange={() => chooseOption(product.key, group.key, option.key, group.max_select)} />
-                        <span>{option.name}</span><small>{safeAmount(option.price_delta_minor)}</small>
-                      </label>;
-                    })}</div>
-                    {group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" onClick={() => setSelections((current) => ({ ...current, [product.key]: (current[product.key] ?? []).filter((item) => item.group_key !== group.key) }))}>{t.noOption}</button>}
-                  </fieldset>)}
-                  <div className="product-actions"><label className="quantity-select">{t.quantity}<select aria-label={`${product.name} ${t.quantity}`} value={quantities[product.key] ?? 1} onChange={(event) => setQuantities((values) => ({ ...values, [product.key]: Number(event.target.value) }))}>{Array.from({ length: 10 }, (_, i) => i + 1).map((value) => <option key={value} value={value}>{value}</option>)}</select></label>
-                    <button className="button small primary" disabled={busy || !allowed || uncertain} onClick={() => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, quantities[product.key] ?? 1, selected, key))}>{t.add}</button>
-                  </div>
-                  {product.selectable && !amountSafe && <small className="field-hint" role="alert">{t.amountError}</small>}
-                  {product.selectable && amountSafe && !allowed && <small className="field-hint">{t.selectRequired}</small>}
-                </article>;
-              })}
-            </div>
-          </section>)}
-        </section>}
+        <CategoryNav categories={entry.menu.categories} locale={locale} />
+        <MenuList categories={entry.menu.categories} locale={locale} busy={busy} uncertain={uncertain}
+          onOpenOptions={(product) => setOptionProductKey(product.key)}
+          onAdd={(product) => void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, product.key, 1, [], key))} />
+        <OptionSheet product={optionProduct} isOpen={!!optionProduct} onOpenChange={(open) => { if (!open) setOptionProductKey(null); }}
+          locale={locale} selected={selections[optionProductKey ?? ''] ?? []} quantity={quantities[optionProductKey ?? ''] ?? 1}
+          notice={<DemoNotice demo={demo} locale={locale} />} busy={busy} uncertain={uncertain} fallbackFocus={() => entryHeading.current ?? menuHeading.current}
+          onChoose={(groupKey, optionKey, max) => { if (optionProduct) chooseOption(optionProduct.key, groupKey, optionKey, max); }}
+          onClear={(groupKey) => { if (optionProduct) setSelections((current) => ({ ...current, [optionProduct.key]: (current[optionProduct.key] ?? []).filter((item) => item.group_key !== groupKey) })); }}
+          onQuantity={(quantity) => { if (optionProduct) setQuantities((current) => ({ ...current, [optionProduct.key]: quantity })); }}
+          onAdd={() => { if (optionProduct && selectionsValid(optionProduct.key, selections[optionProduct.key] ?? [])) void applyMutation((key) => cartClient.addLine(entry.grant.session.id, entry.grant.table_join_token, cart!, optionProduct.key, quantities[optionProduct.key] ?? 1, selections[optionProduct.key] ?? [], key), () => setOptionProductKey(null)); }}>
+          {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
+          {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
+          {notice && <p role="status">{notice}</p>}
+        </OptionSheet>
 
-        <aside className={`cart-panel ${preview ? 'preview-mode' : ''}`}>
-          {preview ? <>
-            <div className="eyebrow">{t.preview}</div><h2>{t.preview}</h2><p className="muted">{t.previewHint}</p>
-            <div className="quote-lines">{preview.quote.lines.map((line) => <article className="quote-line" key={line.line_id}>
-              <div><strong>{line.name}</strong><span>{line.options.map((option) => option.name).join(' · ')}</span><small>{safeAmount(line.base_gross_jpy)} × {line.quantity}</small></div>
-              <strong>{safeAmount(line.base_gross_jpy)} × {line.quantity}</strong>
-              {line.options.map((option) => <small className="quote-option" key={`${line.line_id}-${option.group_key}-${option.option_key}`}>＋ {option.name} · {safeAmount(option.price_gross_jpy)} × {line.quantity}</small>)}
-            </article>)}</div>
-            <div className="total-row"><span>{t.total}</span><strong>{safeAmount(preview.quote.tax.total_gross_jpy)}</strong></div>
-            <div className="tax-row"><span>{t.tax}</span><span>{safeAmount(preview.quote.tax.total_tax_jpy)}</span></div>
-            <fieldset className="payment-choice"><legend>{t.method}</legend>{!demo && <label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => setPayment('STRIPE')} />{t.stripe}</label>}{guestOperations?.cash_enabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => setPayment('CASH')} />{demo ? t.demoCash : t.cash}</label>}</fieldset>
-            <p className="payment-note">{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>
-            {!previewAmountsSafe && <p className="error" role="alert">{t.amountError}</p>}
-            {previewMatchesCart && <button className="button primary wide" disabled={busy || unavailable || uncertain || !previewAmountsSafe} onClick={() => void confirmOrder()}>{busy ? t.working : t.confirm}</button>}
-            <button className="button quiet wide" disabled={busy} onClick={clearPreview}>{t.cancelPreview}</button>
-          </> : <>
-            <div className="cart-panel-head"><div><div className="eyebrow">OPEN TABLE</div><h2>{t.pending}</h2></div><button className="icon-button" aria-label={t.refresh} title={t.refresh} disabled={busy} onClick={() => void refreshCurrent(entry)}>↻</button></div>
-            {!cart || cart.lines.length === 0 ? <div className="empty-state"><div className="empty-icon">＋</div><p>{t.cartEmpty}</p></div> : <div className="cart-lines">
-              {cart.lines.map((line: CartLine) => {
-                const product = menuProducts.get(line.product_key);
-                if (!product) return <article className="cart-line unavailable-line" key={line.line_id}><div><strong>{line.product_name || line.product_key}</strong><p>{line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' ? t.emergencyHold : t.itemMissing}</p><p>{line.options.map((option) => option.option_name).join(' · ')}</p></div><button className="text-button" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></article>;
-                const selected = line.options;
-                const held = line.unavailable_code === 'COMPANY_EMERGENCY_HOLD' || product.company_emergency_hold_active === true;
-                const lineAvailable = line.product_available && product.selectable && !held && line.options.every((option) => option.available);
-                return <article className="cart-line" key={line.line_id}>
-                  <div className="cart-line-head"><div><strong>{line.product_name || product.name}</strong><p>{held ? t.emergencyHold : lineAvailable ? t.available : t.unavailable}</p>{selected.length > 0 && <p className="cart-selected-options">{selected.map((option) => `${option.group_name}: ${option.option_name}${option.available ? '' : ` · ${t.unavailable}`}`).join('、')}</p>}</div><button className="text-button danger" disabled={busy || uncertain} onClick={() => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, key))}>{t.remove}</button></div>
-                  {product.option_groups.map((group) => <fieldset className="compact-options" key={group.key}><legend>{group.name}</legend>{group.options.map((option) => <label key={option.key}><input type={group.max_select === 1 ? 'radio' : 'checkbox'} name={`${line.line_id}-${group.key}`} checked={selected.some((item) => item.group_key === group.key && item.option_key === option.key)} disabled={busy || uncertain || !product.selectable || held || option.availability !== 'AVAILABLE'} onChange={() => {
-                    const exists = selected.some((item) => item.group_key === group.key && item.option_key === option.key);
-                    const groupSelections = selected.filter((item) => item.group_key !== group.key);
-                    const sameGroup = selected.filter((item) => item.group_key === group.key);
-                    const next = exists ? selected.filter((item) => !(item.group_key === group.key && item.option_key === option.key)) : [...groupSelections, ...sameGroup.slice(0, Math.max(0, group.max_select - 1)), { group_key: group.key, option_key: option.key }];
-                    const count = next.filter((item) => item.group_key === group.key).length;
-                    if (count >= group.min_select && count <= group.max_select) void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
-                  }} />{option.name}</label>)}{group.min_select === 0 && group.max_select === 1 && <button type="button" className="text-button option-clear" disabled={busy || uncertain} onClick={() => {
-                    const next = selected.filter((item) => item.group_key !== group.key);
-                    void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity, next, key));
-                  }}>{t.noOption}</button>}</fieldset>)}
-                  <div className="cart-line-foot"><span>{amountJPY(product.effective_price_minor)}</span><div className="stepper"><button aria-label={`${product.name} −`} disabled={busy || uncertain || line.quantity <= 1} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity - 1, line.options, key))}>−</button><span>{line.quantity}</span><button aria-label={`${product.name} +`} disabled={busy || uncertain || line.quantity >= 99} onClick={() => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart, line.line_id, line.quantity + 1, line.options, key))}>＋</button></div></div>
-                </article>;
-              })}
-            </div>}
-            {unavailable && <p className="notice">{t.unavailableLines}</p>}
-            <button className="button primary wide checkout-button" disabled={!cart?.lines.length || busy || uncertain || unavailable} onClick={() => void openPreview()}>{busy ? t.loading : t.preview}</button>
-            <p className="sync-caption"><span className="live-dot" />{locale === 'ja' ? '同じテーブルと共有中' : '與同桌即時共用'}</p>
-          </>}
-          {uncertain && <button className="button retry wide" disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
-          {visibleError && <p className="error" role="alert">{visibleError}</p>}{notice && <p className="notice" role="status">{notice}</p>}
-        </aside>
+        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)} />
+        <CartSheet isOpen={cartOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
+          locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
+          onPayment={setPayment} busy={busy} uncertain={uncertain} unavailable={unavailable} previewMatchesCart={previewMatchesCart} previewAmountsSafe={previewAmountsSafe}
+          error={visibleError} notice={notice} onPreview={() => void openPreview()} onClearPreview={clearPreview} onInvalidated={() => setError((current) => current || t.stale)} onConfirm={() => void confirmOrder()}
+          onRefresh={() => void refreshCurrent(entry)} onRetry={() => void retryUncertain()}
+          onRemove={(line) => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, key))}
+          onSetLine={(line, quantity, options) => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, quantity, options, key))}
+          fallbackFocus={() => entryHeading.current ?? orderHeading.current ?? menuHeading.current} />
+        {!cartOpen && !optionProduct && <div className={guestStyles.feedback}>
+          {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
+          {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
+          {notice && <p role="status">{notice}</p>}
+        </div>}
       </>}
 
-      {tab === 'orders' && <section className="orders-panel"><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+      {tab === 'orders' && <section className={guestStyles.orders}><div className="section-heading"><div><div className="eyebrow">CONFIRMED</div><h2 ref={orderHeading} tabIndex={-1}>{t.committed}</h2></div><button className="icon-button" aria-label={t.refresh} onClick={() => void refreshCurrent(entry)}>↻</button></div>
+        {notice && <p role="status">{notice}</p>}
         {operationsStale && <p className="notice" role="status">{guestOperations ? t.operationsStale : t.amountUnavailable}</p>}
-        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" key={order.order_id}>
+        {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" data-order-card={order.order_id} key={order.order_id}>
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
-          <p className="guest-order-status" role="status">{guestOrderLabel(operations, locale)}</p>
-          {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel">
+          <p className="guest-order-status" data-order-status role="status">{guestOrderLabel(operations, locale)}</p>
+          {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel" data-checkout-panel>
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>
-              {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status">{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
+              {checkoutStatus?.order_id === order.order_id && <p className="guest-order-status" data-checkout-status>{checkoutStateLabel(checkoutStatus.state, locale)}</p>}
               {!checkoutStatus && !checkoutError && <p className="muted" role="status">{t.checkoutLoading}</p>}
               {checkoutError && <p className="error" role="alert">{checkoutError}</p>}
               {checkoutStatus?.order_id === order.order_id && checkoutStatus.resume_available && <button className="button small primary" disabled={resumingOrderID === order.order_id} onClick={() => void resumeCheckout(order.order_id)}>{resumingOrderID === order.order_id ? t.checkoutLoading : t.continueCheckout}</button>}
@@ -820,6 +802,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
   </Shell>;
 }
 
-function Shell({ children, demo = false, locale, setLocale, t }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string> }) {
-  return <main className="app-shell"><meta name="referrer" content="no-referrer" /><header className="topbar"><a className="brand" href="/" aria-label="Tojima"><span className="brand-mark">東</span><span><strong>{t.brand}</strong><small>{t.subtitle}</small></span></a><button className="locale-switch" onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale} <span>⌄</span></button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /></main>;
+function Shell({ children, demo = false, locale, setLocale, t, tableLabel }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string }) {
+  return <main className={guestStyles.shell} data-surface="guest"><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div>{demo && <strong>{demoStoreName}</strong>}<span>{tableLabel}</span></div><button className={guestStyles.navigation} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /></main>;
 }

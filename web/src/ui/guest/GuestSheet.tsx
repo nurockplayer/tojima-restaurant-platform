@@ -1,4 +1,4 @@
-import { useCallback, useRef, type ReactNode } from 'react';
+import { useCallback, useRef, type ReactNode, type Ref } from 'react';
 import { Dialog, Heading, Modal, ModalOverlay } from 'react-aria-components';
 import styles from './GuestSheet.module.css';
 
@@ -9,6 +9,7 @@ export interface GuestSheetProps {
   isOpen: boolean;
   onOpenChange: (isOpen: boolean) => void;
   title: ReactNode;
+  titleRef?: Ref<HTMLHeadingElement>;
   locale: 'ja' | 'zh';
   children: ReactNode;
   notice?: ReactNode;
@@ -17,7 +18,7 @@ export interface GuestSheetProps {
   fallbackFocus?: () => HTMLElement | null;
 }
 
-export function GuestSheet({ isOpen, onOpenChange, title, locale, children, notice, footer, fallbackFocus }: GuestSheetProps) {
+export function GuestSheet({ isOpen, onOpenChange, title, titleRef, locale, children, notice, footer, fallbackFocus }: GuestSheetProps) {
   const overlay = useRef<HTMLDivElement | null>(null);
   const trigger = useRef<Element | null>(null);
   const fallback = useRef(fallbackFocus);
@@ -36,7 +37,7 @@ export function GuestSheet({ isOpen, onOpenChange, title, locale, children, noti
     <Modal className={styles.modal}>
       <Dialog className={styles.dialog}>
         <header className={styles.header}>
-          <Heading slot="title" className={styles.title}>{title}</Heading>
+          <Heading slot="title" ref={titleRef} tabIndex={-1} className={styles.title}>{title}</Heading>
           <button type="button" className={styles.close} onClick={() => onOpenChange(false)}>{copy[locale].close}</button>
         </header>
         {notice}

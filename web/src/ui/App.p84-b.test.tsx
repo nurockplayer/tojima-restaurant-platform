@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react';
 import { createRoot } from 'react-dom/client';
+import { within } from '@testing-library/react';
 import { expect, it, vi } from 'vitest';
 import { App } from './App';
 import { OrderStatusView } from './OrderRead';
@@ -59,15 +60,21 @@ it('P84 B keeps two mounted carts at 2.5s independently of 30s ORDER_READ and st
     expect(initialCartReads).toBeGreaterThanOrEqual(2); expect(statusReads).toBe(1);
     // A real mounted guest mutation updates only its own UI immediately. The
     // second mounted guest observes the shared mocked HTTP state on its poll.
-    const plus = hosts[0]!.querySelector<HTMLButtonElement>('button[aria-label="ほうじ茶 +"]')!;
+    await openCartSheet(hosts[0]!);
+    const plus = within(document.body).getByRole('button', { name: 'ほうじ茶 +' });
     expect(plus).toBeTruthy();
     await act(async () => { plus.click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
-    expect(hosts[0]!.querySelector('.stepper span')?.textContent).toBe('2');
-    expect(hosts[1]!.querySelector('.stepper span')?.textContent).toBe('1');
+    expect(document.body.querySelector('[data-quantity]')?.textContent).toBe('2');
+    await closeCart();
+    await openCartSheet(hosts[1]!);
+    expect(document.body.querySelector('[data-quantity]')?.textContent).toBe('1');
+    await closeCart();
     const afterMutation = cartReads;
     await advance(2498); expect(cartReads).toBe(afterMutation); expect(statusReads).toBe(1);
     await advance(1); expect(cartReads).toBe(afterMutation + 2);
-    expect(hosts[1]!.querySelector('.stepper span')?.textContent).toBe('2');
+    await openCartSheet(hosts[1]!);
+    expect(document.body.querySelector('[data-quantity]')?.textContent).toBe('2');
+    await closeCart();
     await advance(27_499); expect(statusReads).toBe(1);
     await advance(2); expect(statusReads).toBe(2);
     expect(cartReads).toBeGreaterThan(afterMutation + 20);
@@ -92,3 +99,13 @@ it('P84 B keeps two mounted carts at 2.5s independently of 30s ORDER_READ and st
     visible('visible'); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers();
   }
 });
+
+async function openCartSheet(host: HTMLElement) {
+  const trigger = within(host).getByRole('button', { name: /カートを開く|開啟購物車/ });
+  await act(async () => { trigger.click(); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+}
+
+async function closeCart() {
+  const close = within(document.body).getByRole('button', { name: '閉じる' });
+  await act(async () => { close.click(); for (let i = 0; i < 5; i++) await Promise.resolve(); });
+}

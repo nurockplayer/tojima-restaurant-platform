@@ -31,3 +31,13 @@
     text-align: start;
   }
 }
+
+.sheetNotice {
+  margin: 0;
+  padding: var(--ref-space-2) var(--space-gutter);
+  background: var(--color-demo-bg);
+  color: var(--color-demo-ink);
+  font-size: var(--text-meta);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}

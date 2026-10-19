@@ -1,0 +1,59 @@
+.content {
+  display: grid;
+  gap: var(--ref-space-3);
+  color: var(--color-text);
+}
+
+.content p { margin: 0; }
+.cartLines, .quoteLines {
+  max-height: 44dvh;
+  overflow: auto;
+  padding: var(--ref-space-1);
+  scroll-padding-block: var(--ref-space-2);
+}
+.line, .quoteLine {
+  padding-block: var(--ref-space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+.lineHead, .lineFoot, .total { display: flex; justify-content: space-between; gap: var(--ref-space-3); }
+.lineHead p { font-size: var(--text-label); color: var(--color-text-muted); }
+.lineFoot { align-items: center; margin-top: var(--ref-space-3); }
+.options, .payment { display: grid; gap: var(--ref-space-2); min-width: 0; margin: var(--ref-space-3) 0; padding: 0; border: 0; }
+.options label, .payment label { display: flex; align-items: center; gap: var(--ref-space-2); min-height: var(--size-target-min); }
+.content input { accent-color: var(--color-action); }
+.quoteLine { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--ref-space-2); }
+.quoteLine span, .quoteLine small { display: block; font-size: var(--text-label); }
+.quoteOption { grid-column: 1 / -1; }
+.control, .primary {
+  min-height: var(--size-target-min);
+  min-width: var(--size-target-min);
+  padding: var(--ref-space-2) var(--ref-space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+.primary { background: var(--color-action); color: var(--color-on-action); border-color: var(--color-action); }
+.error { padding: var(--ref-space-3); background: var(--color-danger-bg); color: var(--color-danger-ink); }
+.stepper { display: flex; align-items: center; border: 1px solid var(--color-border-control); border-radius: var(--radius-control); overflow: visible; }
+.stepper span { min-width: var(--ref-space-8); text-align: center; }
+.stepper button {
+  width: var(--size-target-min);
+  height: var(--size-target-min);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: var(--color-surface-sunken);
+  color: var(--color-action);
+  font: inherit;
+}
+.content :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
+}
+.content button.primary:focus-visible, .content input:checked:focus-visible { outline-color: var(--color-on-action); }
+@media (forced-colors: active) {
+  .control, .primary, .stepper { border-color: CanvasText; }
+  .content :is(button, a, input, select, textarea, [tabindex]):focus-visible,
+  .content button.primary:focus-visible, .content input:checked:focus-visible { outline-color: Highlight; }
+}
