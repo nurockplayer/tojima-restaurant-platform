@@ -35,9 +35,10 @@ export function CartBar({ active, cart, menu, locale, onOpen, sync }: CartBarPro
   const count = cart.lines.reduce((sum, line) => sum + line.quantity, 0);
   const estimate = formatYen(cartEstimate(cart, menu));
   return <div className={styles.bar} data-testid="cart-bar">
-    <button type="button" className={styles.button} onClick={onOpen} aria-label={labels.open}>
-      <span className={styles.count}>{count} {labels.count}</span>
-      <span className={styles.total}><span>{labels.estimate}</span><strong>{estimate}</strong></span>
+    <button type="button" className={styles.button} onClick={onOpen}>
+      <span className={styles.visuallyHidden}>{labels.open}</span>{' '}
+      <span className={styles.count}>{count} {labels.count}</span>{' '}
+      <span className={styles.total}><span>{labels.estimate}</span>{' '}<strong>{estimate}</strong></span>{' '}
       <span className={styles.sync}>{sync ?? labels.shared}</span>
     </button>
   </div>;

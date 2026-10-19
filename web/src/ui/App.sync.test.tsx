@@ -77,12 +77,12 @@ function startPage() {
 }
 
 async function flushStartup() {
-  await screen.findByRole('button', { name: 'カートを開く' });
+  await screen.findByRole('button', { name: /^カートを開く / });
   await waitFor(() => expect(screen.getByText(/^テーブルで共有中/)).toBeTruthy());
 }
 
 async function openCart(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(screen.getByRole('button', { name: 'カートを開く' }));
+  await user.click(screen.getByRole('button', { name: /^カートを開く / }));
   return screen.getByRole('dialog');
 }
 
@@ -217,7 +217,7 @@ describe('guest App sync acceptance', () => {
     vi.setSystemTime(new Date('2026-01-01T00:01:00.000Z'));
     await advanceClock(5_000);
     expect(cartReads).toBeGreaterThanOrEqual(baselineReads + 2);
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'カートを開く' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^カートを開く / })); });
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('新しい共有内容')).toBeTruthy();
 
@@ -254,11 +254,11 @@ describe('guest App sync acceptance', () => {
     expect(cartReads).toBe(baselineReads + 1);
     vi.setSystemTime(new Date('2026-01-01T00:01:00.000Z'));
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'カートに追加' })); for (let index = 0; index < 40; index++) await Promise.resolve(); });
-    expect(screen.getByRole('button', { name: 'カートを開く' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^カートを開く / })).toBeTruthy();
     vi.setSystemTime(new Date('2026-01-01T00:02:00.000Z'));
     await act(async () => { oldPoll.resolve(json(lowVersion)); });
     await act(async () => { for (let index = 0; index < 30; index++) await Promise.resolve(); });
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'カートを開く' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^カートを開く / })); });
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('定食')).toBeTruthy();
     expect(within(dialog).queryByText('古い共有品')).toBeNull();
@@ -286,7 +286,7 @@ describe('guest App sync acceptance', () => {
     await advanceClock(2_500);
     await advanceClock(500);
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'カートに追加' })); for (let index = 0; index < 40; index++) await Promise.resolve(); });
-    expect(screen.getByRole('button', { name: 'カートを開く' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /^カートを開く / })).toBeTruthy();
     await advanceClock(500);
     await act(async () => { oldPoll.resolve(json({ error: 'old failure' }, 503)); });
     await act(async () => { for (let index = 0; index < 30; index++) await Promise.resolve(); });
@@ -349,7 +349,7 @@ describe('guest App sync acceptance', () => {
     await act(async () => { for (let index = 0; index < 40; index++) await Promise.resolve(); });
     hangs = true;
     await act(async () => { fireEvent.click(screen.getByRole('button', { name: /注文履歴/ })); });
-    expect(screen.queryByRole('button', { name: 'カートを開く' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^カートを開く / })).toBeNull();
     await advanceClock(8_000);
     expect(document.body.textContent).not.toContain('通信が不安定です');
 
@@ -423,7 +423,7 @@ describe('guest App sync acceptance', () => {
     expect(screen.getByText('同桌共用中・09:00')).toBeTruthy();
     await act(async () => { window.dispatchEvent(new Event('offline')); });
     expect(screen.getByText('等待同步・09:00 的內容')).toBeTruthy();
-    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '開啟購物車' })); });
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: /^開啟購物車 / })); });
     const dialog = screen.getByRole('dialog');
     expect(within(dialog).getByText('網路連線不穩')).toBeTruthy();
     const reason = '目前顯示 09:00 的內容。恢復連線前無法送出訂單，購物車內容會保留。';

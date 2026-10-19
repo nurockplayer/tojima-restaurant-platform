@@ -28,7 +28,7 @@ describe('CartBar', () => {
     expect(screen.getByText('2 点')).toBeDefined();
     expect(screen.getByText('¥1,960')).toBeDefined();
     expect(screen.getByText('共有カート')).toBeDefined();
-    fireEvent.click(screen.getByRole('button', { name: 'カートを開く' }));
+    fireEvent.click(screen.getByRole('button', { name: 'カートを開く 2 点 税込・目安 ¥1,960 共有カート' }));
     expect(onOpen).toHaveBeenCalledOnce();
   });
 
@@ -37,6 +37,20 @@ describe('CartBar', () => {
     render(<CartBar active cart={cart} menu={paused} locale="zh" onOpen={() => undefined} />);
     expect(screen.getByText('—')).toBeDefined();
     expect(screen.getByText('2 件')).toBeDefined();
+  });
+
+  it.each([
+    ['ja', 'normal', 'テーブルで共有中・09:30', 'カートを開く 2 点 税込・目安 ¥1,960 テーブルで共有中・09:30'],
+    ['ja', 'unpriced', 'テーブルで共有中・09:30', 'カートを開く 2 点 税込・目安 — テーブルで共有中・09:30'],
+    ['ja', 'degraded', '同期待ち・09:30 時点', 'カートを開く 2 点 税込・目安 ¥1,960 同期待ち・09:30 時点'],
+    ['zh', 'normal', '同桌共用中・09:30', '開啟購物車 2 件 含稅・預估 ¥1,960 同桌共用中・09:30'],
+    ['zh', 'unpriced', '同桌共用中・09:30', '開啟購物車 2 件 含稅・預估 — 同桌共用中・09:30'],
+    ['zh', 'degraded', '等待同步・09:30 的內容', '開啟購物車 2 件 含稅・預估 ¥1,960 等待同步・09:30 的內容'],
+  ] as const)('exposes action, count, estimate and sync in its %s accessible name when %s', (locale, state, sync, name) => {
+    const paused: GuestMenu = { ...menu, categories: [{ ...category, products: [{ ...product, availability: 'PAUSED' }] }] };
+    const { container } = render(<CartBar active cart={cart} menu={state === 'unpriced' ? paused : menu} locale={locale} sync={sync} onOpen={() => undefined} />);
+    expect(screen.getByRole('button', { name })).toBeDefined();
+    expect(container.querySelector('[role="status"], [aria-live]')).toBeNull();
   });
 
   const emptyCart: Cart = { ...cart, lines: [] };

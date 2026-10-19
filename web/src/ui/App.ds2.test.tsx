@@ -99,7 +99,7 @@ async function openOptions(user: ReturnType<typeof userEvent.setup>) {
 }
 
 async function openCartSheet(user: ReturnType<typeof userEvent.setup>) {
-  await user.click(await screen.findByRole('button', { name: 'カートを開く' }));
+  await user.click(await screen.findByRole('button', { name: /^カートを開く / }));
   return screen.getByRole('dialog');
 }
 
@@ -194,7 +194,7 @@ describe('guest App option sheet acceptance', () => {
     fireEvent.click(screen.getByRole('button', { name: '繁中', hidden: true }));
     await waitFor(() => expect(dialog.contains(document.activeElement)).toBe(true));
     await user.keyboard('{Escape}');
-    const opener = screen.getByRole('button', { name: sheet === 'option' ? '加入購物車' : '開啟購物車' });
+    const opener = screen.getByRole('button', { name: sheet === 'option' ? '加入購物車' : /^開啟購物車 / });
     await waitFor(() => expect(document.activeElement).toBe(opener));
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
@@ -506,7 +506,7 @@ describe('guest App option sheet acceptance', () => {
 
     await act(async () => { addResponse.resolve(json(staleAddCart)); await Promise.resolve(); await Promise.resolve(); });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(await screen.findByRole('button', { name: 'カートを開く' }));
+    await user.click(await screen.findByRole('button', { name: /^カートを開く / }));
     expect(await within(screen.getByRole('dialog')).findByText('Other guest item')).toBeTruthy();
     const addCalls = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
     expect(addCalls).toHaveLength(1);
@@ -552,7 +552,7 @@ describe('guest App option sheet acceptance', () => {
 
     await act(async () => { replayResponse.resolve(json(staleAddCart)); await Promise.resolve(); await Promise.resolve(); });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await user.click(await screen.findByRole('button', { name: 'カートを開く' }));
+    await user.click(await screen.findByRole('button', { name: /^カートを開く / }));
     expect(await within(screen.getByRole('dialog')).findByText('Other guest item')).toBeTruthy();
     const addCalls = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/lines'));
     expect(addCalls).toHaveLength(2);
@@ -728,7 +728,7 @@ describe('guest App cart sheet focus and destinations', () => {
     expect(screen.getByRole('dialog')).toBeTruthy();
     await user.keyboard('{Escape}');
     await act(async () => { await vi.advanceTimersByTimeAsync(64); });
-    const cartBar = screen.getByRole('button', { name: 'カートを開く' });
+    const cartBar = screen.getByRole('button', { name: /^カートを開く / });
     await waitFor(() => expect(document.activeElement).toBe(cartBar));
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
   });
@@ -804,7 +804,7 @@ describe('guest App cart sheet focus and destinations', () => {
     const user = userEvent.setup();
     render(<App />);
 
-    const cartBar = await screen.findByRole('button', { name: 'カートを開く' });
+    const cartBar = await screen.findByRole('button', { name: /^カートを開く / });
     const dialog = await openCartSheet(user);
     await user.click(within(dialog).getByRole('button', { name: '削除' }));
     const retry = await within(screen.getByRole('dialog')).findByRole('button', { name: '前回の操作を照合して再試行' });
@@ -922,7 +922,7 @@ describe('guest App cart sheet focus and destinations', () => {
 
     const ordersHeading = await screen.findByRole('heading', { name: '注文履歴' });
     await waitFor(() => expect(document.activeElement).toBe(ordersHeading));
-    expect(screen.queryByRole('button', { name: 'カートを開く' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^カートを開く / })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
     expect(focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
@@ -952,7 +952,7 @@ describe('guest App cart sheet focus and destinations', () => {
     const commits = calls.filter(({ url, init }) => init.method === 'POST' && url.endsWith('/cart/commit'));
     expect(commits).toHaveLength(2);
     expectSameOperation(commits[0]!.init, commits[1]!.init);
-    expect(screen.queryByRole('button', { name: 'カートを開く' })).toBeNull();
+    expect(screen.queryByRole('button', { name: /^カートを開く / })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
     expect(focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
@@ -980,7 +980,7 @@ describe('guest App cart sheet focus and destinations', () => {
     within(dialog).getByRole('button', { name: '閉じる' }).focus();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /^カートを開く / })));
 
     const ordersFocusEvents: Element[] = [];
     const trackOrdersFocus = (event: FocusEvent) => {
@@ -1049,7 +1049,7 @@ describe('guest App cart sheet focus and destinations', () => {
     within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }).focus();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /^カートを開く / })));
 
     const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
     pageRetry.focus();
@@ -1082,7 +1082,7 @@ describe('guest App cart sheet focus and destinations', () => {
     within(screen.getByRole('dialog')).getByRole('button', { name: '閉じる' }).focus();
     await user.keyboard('{Escape}');
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
-    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: 'カートを開く' })));
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: /^カートを開く / })));
 
     const pageRetry = screen.getByRole('button', { name: '前回の操作を照合して再試行' });
     pageRetry.focus();
