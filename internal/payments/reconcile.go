@@ -125,9 +125,9 @@ func (s *Service) persistReconciliation(ctx context.Context, scope operations.Ta
 		return s.readSafeStatus(ctx, scope, a.session, a.order)
 	}
 	next := reconcileState(checkout, pi)
-	if current == string(StateExpired) && next != StatePaid {
-		var voided bool
-		if err = tx.QueryRow(ctx, `SELECT payment_status='VOIDED' AND fulfillment_status='CANCELLED' FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, a.order).Scan(&voided); err != nil {
+	if next != StatePaid {
+		voided, err := isVoidedUnpaidAttempt(ctx, tx, a.order, current)
+		if err != nil {
 			return Status{}, err
 		}
 		// A cancelled intent is still unpaid. Preserve the void's EXPIRED

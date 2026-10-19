@@ -732,3 +732,149 @@ func TestPostgresD9CompanyHoldVoidRefusesAndPersistsPaid(t *testing.T) {
 		})
 	}
 }
+
+func TestPostgresD9VoidedRetainedExpiryUnpaidObservationThenPaid(t *testing.T) {
+	for _, status := range []stripeprovider.CheckoutStatus{stripeprovider.CheckoutComplete, stripeprovider.CheckoutOpen, stripeprovider.CheckoutExpired} {
+		t.Run(string(status), func(t *testing.T) {
+			h := newHoldFixture(t)
+			order, _ := h.commit(h.Locator, "teishoku", ordering.Stripe)
+			h.work()
+			h.hold(true, 0)
+			r := voidRequest(h, order)
+			if _, err := h.service.VoidUnpaidCheckout(h.ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			before := voidOrder(t, h, r)
+			x := h.checkout(r.OrderID)
+			// Model a delayed unpaid observation arriving after the void has
+			// committed. Even complete/unpaid cannot revoke its close proof.
+			if _, err := h.provider.SetOutcome(x.SessionID, status, stripeprovider.PaymentUnpaid); err != nil {
+				t.Fatal(err)
+			}
+			if status == stripeprovider.CheckoutOpen {
+				h.provider.SetNextExpireOutcome(status, stripeprovider.PaymentUnpaid, false)
+			}
+			h.readyOnly(r.OrderID, "EXPIRE")
+			h.work()
+			h.assertState(r.OrderID, StateExpired, false, false)
+			var completed bool
+			if err := h.Pool.QueryRow(h.ctx, `SELECT count(*)=1 AND bool_and(status='DONE' AND lease_token IS NULL AND lease_until IS NULL)
+				FROM stripe_payment_work WHERE order_id=$1 AND work_type='EXPIRE'`, r.OrderID).Scan(&completed); err != nil || !completed {
+				t.Fatalf("voided unpaid expiry must complete: done=%v err=%v", completed, err)
+			}
+			if after := voidOrder(t, h, r); !reflect.DeepEqual(before, after) {
+				t.Fatalf("unpaid observation changed void: before=%+v after=%+v", before, after)
+			}
+			checkVoidClose(t, h, r, nil)
+			if worked, err := h.service.ProcessNext(h.ctx); err != nil || worked {
+				t.Fatalf("voided expiry kept polling: worked=%v err=%v", worked, err)
+			}
+
+			paid, err := h.provider.SetOutcome(x.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+			if err != nil {
+				t.Fatal(err)
+			}
+			h.event(paid, "paid-after-voided-expiry", "checkout.session.completed")
+			h.work()
+			h.assertState(r.OrderID, StatePaid, false, false)
+			got := voidOrder(t, h, r)
+			if got.PaymentStatus != operations.RefundPending || got.FulfillmentStatus != operations.Cancelled || len(got.Refunds) != 1 || got.Refunds[0].AmountJPY != got.TotalGrossJPY {
+				t.Fatalf("late paid refund=%+v", got)
+			}
+			checkVoidClose(t, h, r, tablesession.ErrCloseBlocked)
+			h.event(paid, "duplicate-paid-after-voided-expiry", "checkout.session.async_payment_succeeded")
+			h.readyOnly(r.OrderID, "WEBHOOK")
+			h.work()
+			var refunds, refundWork, paidEvents, lateEvents int
+			if err = h.Pool.QueryRow(h.ctx, `SELECT
+				(SELECT count(*) FROM operation_refunds WHERE order_id=$1),
+				(SELECT count(*) FROM stripe_payment_work WHERE order_id=$1 AND work_type='REFUND'),
+				count(*) FILTER(WHERE event_type='STRIPE_PAID_VERIFIED'),
+				count(*) FILTER(WHERE event_type='STRIPE_LATE_PAYMENT_REFUND')
+				FROM operation_order_events WHERE order_id=$1`, r.OrderID).Scan(&refunds, &refundWork, &paidEvents, &lateEvents); err != nil || refunds != 1 || refundWork != 1 || paidEvents != 1 || lateEvents != 1 {
+				t.Fatalf("refund reservation=%d work=%d paid=%d late=%d err=%v", refunds, refundWork, paidEvents, lateEvents, err)
+			}
+			h.provider.SetNextRefundOutcome("succeeded", false)
+			h.readyOnly(r.OrderID, "REFUND")
+			h.work()
+			got = voidOrder(t, h, r)
+			if got.PaymentStatus != operations.Refunded || got.FulfillmentStatus != operations.Cancelled || len(got.Refunds) != 1 || got.Refunds[0].Status != "SUCCEEDED" {
+				t.Fatalf("completed refund=%+v", got)
+			}
+			if creates, _ := h.provider.RefundOperationCounts(); creates != 1 {
+				t.Fatalf("refund provider creates=%d", creates)
+			}
+			checkVoidClose(t, h, r, nil)
+			if err = paymentSessions(t, h).Close(h.ctx, tablesession.Scope{TenantID: h.TenantID, StoreID: h.StoreID, TableID: h.TableID}, r.SessionID, r.Actor); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestPostgresD9VoidPreservedByNonPaidWriters(t *testing.T) {
+	for _, writer := range []string{"checkout-open", "checkout-complete", "webhook-complete", "webhook-failed", "attempt-failure", "attempt-unknown", "expired-retry-window"} {
+		t.Run(writer, func(t *testing.T) {
+			h := newHoldFixture(t)
+			order, _ := h.commit(h.Locator, "tea", ordering.Stripe)
+			h.work()
+			r := voidRequest(h, order)
+			if _, err := h.service.VoidUnpaidCheckout(h.ctx, r); err != nil {
+				t.Fatal(err)
+			}
+			before := voidOrder(t, h, r)
+			x := h.checkout(r.OrderID)
+			if writer == "webhook-complete" || writer == "webhook-failed" {
+				x.Status = stripeprovider.CheckoutComplete
+				kind := "checkout.session.completed"
+				if writer == "webhook-failed" {
+					kind = "checkout.session.async_payment_failed"
+				}
+				h.event(x, "unpaid-after-void", kind)
+				h.work()
+			} else {
+				// Re-lease the original CREATE to model its delayed result or
+				// failure arriving after the void, under a valid durable lease.
+				w := workItem{OrderID: r.OrderID, Lease: "delayed-create-after-void"}
+				if err := h.Pool.QueryRow(h.ctx, `UPDATE stripe_payment_work SET status='LEASED',lease_token=$2,lease_until=clock_timestamp()+interval '1 minute'
+					WHERE order_id=$1 AND work_type='CREATE' RETURNING work_id`, r.OrderID, w.Lease).Scan(&w.ID); err != nil {
+					t.Fatal(err)
+				}
+				var err error
+				switch writer {
+				case "checkout-open", "checkout-complete":
+					status := stripeprovider.CheckoutOpen
+					if writer == "checkout-complete" {
+						status = stripeprovider.CheckoutComplete
+					}
+					if _, err = h.provider.SetOutcome(x.SessionID, status, stripeprovider.PaymentUnpaid); err == nil {
+						err = h.service.processCreate(h.ctx, w)
+					}
+				case "attempt-failure":
+					err = h.service.updateAttemptFailure(h.ctx, w, r.OrderID, "DELAYED_FAILURE", false)
+				case "attempt-unknown":
+					err = h.service.setAttemptUnknown(h.ctx, w, r.OrderID, "DELAYED_UNKNOWN")
+				case "expired-retry-window":
+					h.elapseCreateDeadline(r.OrderID)
+					var a createRow
+					a.order = r.OrderID
+					if err = h.Pool.QueryRow(h.ctx, `SELECT retry_not_after FROM stripe_payment_attempts WHERE order_id=$1`, r.OrderID).Scan(&a.retry); err == nil {
+						var stopped bool
+						stopped, err = h.service.stopExpiredRetryWindow(h.ctx, w, a)
+						if err == nil && !stopped {
+							t.Fatal("elapsed retry window did not stop work")
+						}
+					}
+				}
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			h.assertState(r.OrderID, StateExpired, false, false)
+			if after := voidOrder(t, h, r); !reflect.DeepEqual(before, after) {
+				t.Fatalf("non-paid writer changed void: before=%+v after=%+v", before, after)
+			}
+			checkVoidClose(t, h, r, nil)
+		})
+	}
+}

@@ -693,6 +693,20 @@ func lockPaymentSessionAny(ctx context.Context, tx pgx.Tx, order string) error {
 	return err
 }
 
+// Call with the payment session and attempt locked, for a non-paid observation.
+// The void's EXPIRED state is the close and late-payment refund reservation proof;
+// only a verified payment may replace it. Other worker state writers already
+// preserve all EXPIRED attempts through their terminal-state guards.
+func isVoidedUnpaidAttempt(ctx context.Context, tx pgx.Tx, order, current string) (bool, error) {
+	if current != string(StateExpired) {
+		return false, nil
+	}
+	var voided bool
+	err := tx.QueryRow(ctx, `SELECT payment_method='STRIPE' AND payment_status='VOIDED' AND fulfillment_status='CANCELLED'
+		FROM operation_order_state WHERE order_id=$1 FOR UPDATE`, order).Scan(&voided)
+	return voided, err
+}
+
 func (s *Service) processExpire(ctx context.Context, w workItem) error {
 	var a createRow
 	var currentState string
@@ -828,9 +842,6 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 		}
 		return s.finishWork(ctx, w, false, 0, "PAID_RECONCILIATION_QUEUED")
 	}
-	if x.Status == stripeprovider.CheckoutOpen {
-		return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "EXPIRE_NOT_CONFIRMED")
-	}
 	next := StateExpired
 	if x.Status == stripeprovider.CheckoutComplete {
 		// Completed-but-unpaid remains unresolved and must not be cancelled.
@@ -847,6 +858,18 @@ func (s *Service) persistExpireObservation(ctx context.Context, w workItem, a cr
 	var state string
 	if e = tx.QueryRow(ctx, `SELECT state FROM stripe_payment_attempts WHERE order_id=$1 FOR UPDATE`, a.order).Scan(&state); e != nil {
 		return e
+	}
+	voided, e := isVoidedUnpaidAttempt(ctx, tx, a.order, state)
+	if e != nil {
+		return e
+	}
+	if voided {
+		next = StateExpired
+	} else if x.Status == stripeprovider.CheckoutOpen {
+		if e = tx.Rollback(ctx); e != nil {
+			return e
+		}
+		return s.retryExpireWithinWindow(ctx, w, a, 5*time.Second, "EXPIRE_NOT_CONFIRMED")
 	}
 	if state != string(StatePaid) && state != string(StateReviewRequired) {
 		if state != string(next) {
