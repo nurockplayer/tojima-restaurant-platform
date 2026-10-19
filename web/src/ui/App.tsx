@@ -12,6 +12,7 @@ import { MenuList } from './guest/MenuList';
 import { OptionSheet } from './guest/OptionSheet';
 import { CartBar } from './guest/CartBar';
 import { CartSheet } from './guest/CartSheet';
+import { OrderTracks } from './guest/OrderTracks';
 import guestStyles from './guest/GuestApp.module.css';
 import { DemoBanner, DemoNotice, demoStoreName } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
@@ -776,7 +777,9 @@ export function App({ demo = false }: DemoSurfaceProps) {
         {orders.length === 0 ? <div className="empty-state"><div className="empty-icon">✓</div><p>{t.noOrders}</p></div> : orders.map((order) => { const operations = guestOperations?.orders.find((item) => item.id === order.order_id); return <article className="order-card" data-order-card={order.order_id} key={order.order_id}>
           <RequestOrderLink sessionID={entry.grant.session.id} token={entry.grant.table_join_token} orderID={order.order_id} locale={locale} />
           <div className="order-card-title"><div><span className="order-kicker">{order.requires_staff_acceptance ? t.staffWaiting : t.acceptedOrder} · #{order.generation}</span><h3>{order.order_id}</h3></div><span className="order-method">{order.payment_method === 'STRIPE' ? t.stripe : demo ? t.demoCash : t.cash}</span></div>
-          <p className="guest-order-status" data-order-status role="status">{guestOrderLabel(operations, locale)}</p>
+          <OrderTracks order={operations} paymentMethod={order.payment_method}
+            checkout={checkoutStatus?.order_id === order.order_id ? checkoutStatus : null}
+            operationsStale={operationsStale} locale={locale} statusLabel={guestOrderLabel(operations, locale)} />
           {order.payment_method === 'STRIPE' && !operationsStale && operations && guestDisplayKind(operations) === 'standard' && <div className="checkout-status-panel" data-checkout-panel>
             <strong>{t.checkoutStatus}</strong>
             {checkoutOrderID === order.order_id && <>

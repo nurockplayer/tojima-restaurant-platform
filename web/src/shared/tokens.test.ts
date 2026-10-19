@@ -11,6 +11,7 @@ const expectedFiles = [
   '../ui/guest/GuestSheet.module.css', '../ui/guest/GuestApp.module.css',
   '../ui/guest/CategoryNav.module.css', '../ui/guest/MenuList.module.css', '../ui/guest/OptionSheet.module.css',
   '../ui/guest/CartBar.module.css', '../ui/guest/CartSheet.module.css',
+  '../ui/guest/OrderTracks.module.css',
 ];
 const normal = (value: string) => value.trim().replace(/\s+/g, ' ');
 type Declaration = { property: string; value: string };

@@ -1,0 +1,69 @@
+.tracks {
+  display: grid;
+  gap: var(--ref-space-3);
+  margin-block: var(--ref-space-3);
+}
+
+.tracks section {
+  min-width: 0;
+}
+
+.tracks h4 {
+  margin: 0 0 var(--ref-space-2);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+  font-weight: 600;
+}
+
+.tracks ol {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--ref-space-2);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tracks li {
+  padding: var(--ref-space-1) var(--ref-space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text-muted);
+  font-size: var(--text-meta);
+}
+
+.tracks li[data-step-state="complete"] {
+  border-color: var(--color-border-control);
+  color: var(--color-text);
+}
+
+.tracks li[aria-current="step"] {
+  border-color: var(--color-focus);
+  background: var(--color-surface-sunken);
+  color: var(--color-text);
+  font-weight: 700;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (forced-colors: active) {
+  .tracks li,
+  .tracks li[data-step-state="complete"],
+  .tracks li[aria-current="step"] {
+    border-color: CanvasText;
+  }
+
+  .tracks li[aria-current="step"] {
+    outline: 2px solid Highlight;
+  }
+}
