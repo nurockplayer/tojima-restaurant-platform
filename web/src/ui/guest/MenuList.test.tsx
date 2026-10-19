@@ -35,4 +35,31 @@ describe('MenuList', () => {
     expect(view.container.querySelector('[data-product-key="plain"] [data-menu-media]')).not.toBeNull();
     expect(view.container.querySelector('[data-product-key="plain"] img')?.getAttribute('alt')).toBe('白飯');
   });
+
+  it.each([
+    ['ja', 'base', 'カートに追加', '注文できます', '金額を安全に表示できません。注文を続けられません。'],
+    ['ja', 'option', 'カートに追加', '注文できます', '金額を安全に表示できません。注文を続けられません。'],
+    ['zh', 'base', '加入購物車', '可點選', '無法安全顯示金額，暫時不能繼續送單。'],
+    ['zh', 'option', '加入購物車', '可點選', '無法安全顯示金額，暫時不能繼續送單。'],
+  ] as const)('explains an unsafe %s %s amount without claiming the product is available', async (locale, source, add, available, message) => {
+    const product = categories[0]!.products[1]!;
+    const unsafe = Number.MAX_SAFE_INTEGER + 1;
+    const products = [{ ...product,
+      effective_price_minor: source === 'base' ? unsafe : product.effective_price_minor,
+      option_groups: product.option_groups.map((group) => ({ ...group,
+        options: group.options.map((option) => ({ ...option, price_delta_minor: source === 'option' ? unsafe : option.price_delta_minor })),
+      })),
+    }];
+    const onAdd = vi.fn();
+    const onOpenOptions = vi.fn();
+    render(<MenuList categories={[{ ...categories[0]!, products }]} locale={locale} onAdd={onAdd} onOpenOptions={onOpenOptions} />);
+    const row = within(screen.getByRole('article', { name: '味噌汁' }));
+    expect(row.getByRole('alert').textContent).toBe(message);
+    expect(row.queryByText(available)).toBeNull();
+    const button = row.getByRole('button', { name: add }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    await userEvent.setup().click(button);
+    expect(onAdd).not.toHaveBeenCalled();
+    expect(onOpenOptions).not.toHaveBeenCalled();
+  });
 });
