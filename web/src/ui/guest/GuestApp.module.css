@@ -14,6 +14,11 @@
   padding-block: var(--ref-space-3);
 }
 
+.navigation {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
 .identity {
   min-width: 0;
 }

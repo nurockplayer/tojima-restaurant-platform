@@ -482,6 +482,19 @@ describe('DS-2 guest token contexts and safeguards', () => {
     expect(allRules.filter((r) => isGuestModule(r.file)).every((r) => !r.selector.includes(':global('))).toBe(true);
   });
 
+  it('keeps cart sync text on a visible full-width row and language controls on one line', () => {
+    const cartSync = allRules.find((r) => r.file === '../ui/guest/CartBar.module.css' && r.selector === '.sync');
+    expect(declarations(cartSync!, 'grid-column').map((d) => d.value)).toContain('1 / -1');
+    expect(declarations(cartSync!, 'text-overflow')).toEqual([]);
+    expect(declarations(cartSync!, 'overflow').filter((d) => d.value === 'hidden')).toEqual([]);
+    const guestLanguage = allRules.find((r) => r.file === '../ui/guest/GuestApp.module.css' && r.selector === '.navigation');
+    expect(declarations(guestLanguage!, 'white-space').map((d) => d.value)).toContain('nowrap');
+    expect(declarations(guestLanguage!, 'flex').map((d) => d.value)).toContain('0 0 auto');
+    const orderLanguage = allRules.find((r) => r.file === '../ui/OrderRead.module.css' && r.selector === '.language');
+    expect(declarations(orderLanguage!, 'white-space').map((d) => d.value)).toContain('nowrap');
+    expect(declarations(orderLanguage!, 'flex').map((d) => d.value)).toContain('0 0 auto');
+  });
+
   it.each(['--color-text', '--brand-primary', '--ref-green-800', '--font-sans'])('rejects scoped guest override %s', (name) => {
     const bad = rules('./tokens.css', `[data-surface="guest"] { ${name}: var(--color-text); }`);
     expect(tokenFailures(bad)).toEqual([expect.stringContaining(`unsupported scoped token ${name}`)]);

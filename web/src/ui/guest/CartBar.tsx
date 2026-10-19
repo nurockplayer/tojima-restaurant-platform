@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { Cart, GuestMenu } from '../../api/types';
 import { cartEstimate } from './cart-estimate';
 import styles from './CartBar.module.css';
@@ -20,6 +20,7 @@ export interface CartBarProps {
   menu: GuestMenu;
   locale: 'ja' | 'zh';
   onOpen: () => void;
+  onHeightChange?: (height: number) => void;
   sync?: ReactNode;
 }
 
@@ -28,13 +29,24 @@ function formatYen(value: string | null): string {
   return `¥${BigInt(value).toLocaleString('ja-JP')}`;
 }
 
-export function CartBar({ active, cart, menu, locale, onOpen, sync }: CartBarProps) {
-  if (!active || !cart || cart.lines.length === 0) return null;
+export function CartBar({ active, cart, menu, locale, onOpen, onHeightChange, sync }: CartBarProps) {
+  const bar = useRef<HTMLDivElement>(null);
+  const shown = active && !!cart?.lines.length;
+  useLayoutEffect(() => {
+    if (!shown || !bar.current || !onHeightChange) return;
+    const measure = () => onHeightChange(Math.ceil(bar.current?.getBoundingClientRect().height ?? 0));
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    observer?.observe(bar.current);
+    window.addEventListener('resize', measure);
+    measure();
+    return () => { observer?.disconnect(); window.removeEventListener('resize', measure); onHeightChange(0); };
+  }, [shown, onHeightChange]);
+  if (!shown || !cart) return null;
 
   const labels = copy[locale];
   const count = cart.lines.reduce((sum, line) => sum + line.quantity, 0);
   const estimate = formatYen(cartEstimate(cart, menu));
-  return <div className={styles.bar} data-testid="cart-bar">
+  return <div ref={bar} className={styles.bar} data-testid="cart-bar">
     <button type="button" className={styles.button} onClick={onOpen}>
       <span className={styles.visuallyHidden}>{labels.open}</span>{' '}
       <span className={styles.count}>{count} {labels.count}</span>{' '}

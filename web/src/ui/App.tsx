@@ -7,6 +7,7 @@ import type { GuestOperations, GuestOrderStatus } from '../api/operations';
 import { checkoutClient, checkoutNavigation } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation, guestCartReducer, initialGuestCartState } from './cart-state';
+import { restoreGuestFocus } from './guest/restore-focus';
 import { CategoryNav } from './guest/CategoryNav';
 import { MenuList } from './guest/MenuList';
 import { OptionSheet } from './guest/OptionSheet';
@@ -193,10 +194,24 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const [blocked, setBlocked] = useState(false);
   const [tab, setTab] = useState<'cart' | 'orders'>('cart');
   const [cartOpen, setCartOpen] = useState(false);
+  const [cartBarHeight, setCartBarHeight] = useState(0);
   const [optionProductKey, setOptionProductKey] = useState<string | null>(null);
   const menuHeading = useRef<HTMLHeadingElement>(null);
   const orderHeading = useRef<HTMLHeadingElement>(null);
   const entryHeading = useRef<HTMLHeadingElement>(null);
+  const pageRestoration = useRef<(() => void) | null>(null);
+  const focusPage = useCallback((target: () => HTMLElement | null) => {
+    pageRestoration.current?.();
+    pageRestoration.current = restoreGuestFocus(target, { from: document.activeElement });
+  }, []);
+  useEffect(() => () => pageRestoration.current?.(), []);
+  useLayoutEffect(() => {
+    if (cartBarHeight <= 0) return;
+    const root = document.documentElement;
+    const previous = root.style.scrollPaddingBottom;
+    root.style.scrollPaddingBottom = `calc(${cartBarHeight}px + var(--ref-space-4))`;
+    return () => { root.style.scrollPaddingBottom = previous; };
+  }, [cartBarHeight]);
   const previousView = useRef<{ active: boolean; tab: 'cart' | 'orders'; sheetOpen: boolean; lineCount: number; menu: GuestMenu | null } | null>(null);
   const menuProducts = useMemo(() => {
     const products = new Map<string, GuestMenu['categories'][number]['products'][number]>();
@@ -619,13 +634,14 @@ export function App({ demo = false }: DemoSurfaceProps) {
     const lineCount = cart?.lines.length ?? 0;
     const sheetOpen = cartSheetOpen || optionSheetOpen;
     previousView.current = { active, tab, sheetOpen, lineCount, menu: entry?.menu ?? null };
+    if (sheetOpen) { pageRestoration.current?.(); return; }
     // An open sheet restores focus after its exit; page feedback has no overlay lifecycle.
     if (!previous?.active || previous.sheetOpen || document.querySelector('[data-guest-sheet]')) return;
-    if (!active) entryHeading.current?.focus();
-    else if (tab === 'orders' && previous.tab !== 'orders') orderHeading.current?.focus();
+    if (!active) focusPage(() => entryHeading.current);
+    else if (tab === 'orders' && previous.tab !== 'orders') focusPage(() => orderHeading.current);
     else if (tab === 'cart' && !sheetOpen && document.activeElement === document.body
-      && ((previous.lineCount > 0 && lineCount === 0) || previous.menu !== entry?.menu)) menuHeading.current?.focus();
-  }, [entry, blocked, loading, tab, cartSheetOpen, optionSheetOpen, cart]);
+      && ((previous.lineCount > 0 && lineCount === 0) || previous.menu !== entry?.menu)) focusPage(() => menuHeading.current);
+  }, [entry, blocked, loading, tab, cartSheetOpen, optionSheetOpen, cart, focusPage]);
   useEffect(() => {
     if (demo && payment === 'STRIPE') setPayment('CASH');
     else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
@@ -834,12 +850,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
-  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} cartBarHeight={cartBarHeight} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <div className={guestStyles.workspace}>
       <header className={guestStyles.welcome}>
         <div><h1 ref={menuHeading} tabIndex={-1}>{t.menu}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
         {tab === 'cart' ? <button className={guestStyles.navigation} onClick={() => { setTab('orders'); clearPreview(); }}>{t.committed}（{orders.length}）</button>
-          : <button className={guestStyles.navigation} onClick={() => { setTab('cart'); clearPreview(); requestAnimationFrame(() => menuHeading.current?.focus()); }}>{t.backToMenu}</button>}
+          : <button className={guestStyles.navigation} onClick={() => { setTab('cart'); clearPreview(); focusPage(() => menuHeading.current); }}>{t.backToMenu}</button>}
       </header>
       {syncNotice(`${syncID}-page`)}
       {tab === 'cart' && <>
@@ -860,7 +876,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
           {notice && <p role="status">{notice}</p>}
         </OptionSheet>
 
-        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)}
+        <CartBar active={tab === 'cart'} cart={cart} menu={entry.menu} locale={locale} onOpen={() => setCartOpen(true)} onHeightChange={setCartBarHeight}
           sync={sync.degraded ? `${t.syncWaiting}・${syncTime} ${t.syncAt}` : `${t.synced}・${syncTime}`} />
         <CartSheet isOpen={cartSheetOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
           locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />}
@@ -871,7 +887,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
           onRemove={(line) => void applyMutation((key) => cartClient.removeLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, key))}
           onSetLine={(line, quantity, options) => void applyMutation((key) => cartClient.setLine(entry.grant.session.id, entry.grant.table_join_token, cart!, line.line_id, quantity, options, key))}
           fallbackFocus={() => entryHeading.current ?? orderHeading.current ?? menuHeading.current} />
-        {!cartOpen && !optionProduct && <div className={guestStyles.feedback}>
+        {!cartOpen && !optionProduct && <div className={guestStyles.feedback} style={cartBarHeight > 0 ? { bottom: `calc(${cartBarHeight}px + var(--ref-space-2))` } : undefined}>
           {uncertain && <button className={guestStyles.navigation} disabled={busy} onClick={() => void retryUncertain()}>{t.retry}</button>}
           {visibleError && <p role="alert" className={guestStyles.error}>{visibleError}</p>}
           {notice && <p role="status">{notice}</p>}
@@ -911,6 +927,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
   </Shell>;
 }
 
-function Shell({ children, demo = false, locale, setLocale, t, tableLabel }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string }) {
-  return <main className={guestStyles.shell} data-surface="guest"><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{demo && <strong data-store-slot="demo">{demoStoreName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
+function Shell({ children, demo = false, locale, setLocale, t, tableLabel, cartBarHeight = 0 }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string; cartBarHeight?: number }) {
+  return <main className={guestStyles.shell} data-surface="guest" style={cartBarHeight > 0 ? { paddingBottom: `calc(${cartBarHeight}px + var(--ref-space-4))` } : undefined}><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{demo && <strong data-store-slot="demo">{demoStoreName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
 }

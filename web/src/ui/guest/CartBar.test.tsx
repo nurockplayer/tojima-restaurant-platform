@@ -19,7 +19,7 @@ const cart: Cart = { session_id: 'session', generation: 1, version: 1, lines: [{
   options: [{ group_key: 'size', option_key: 'large', group_name: 'サイズ', option_name: '大盛', available: true }],
 }] };
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe('CartBar', () => {
   it('shows count, estimated total and opens the shared cart', () => {
@@ -54,6 +54,27 @@ describe('CartBar', () => {
   });
 
   const emptyCart: Cart = { ...cart, lines: [] };
+  it('reports the measured bar height again when its content resizes and clears it on close', () => {
+    let height = 88;
+    let resize!: () => void;
+    const disconnect = vi.fn();
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect = disconnect;
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => ({ height }) as DOMRect);
+    const onHeightChange = vi.fn();
+    const view = render(<CartBar active cart={cart} menu={menu} locale="ja" onOpen={() => undefined} onHeightChange={onHeightChange} />);
+    expect(onHeightChange).toHaveBeenLastCalledWith(88);
+    height = 132.25;
+    resize();
+    expect(onHeightChange).toHaveBeenLastCalledWith(133);
+    view.rerender(<CartBar active={false} cart={cart} menu={menu} locale="ja" onOpen={() => undefined} onHeightChange={onHeightChange} />);
+    expect(onHeightChange).toHaveBeenLastCalledWith(0);
+    expect(disconnect).toHaveBeenCalledOnce();
+  });
+
   it.each<[string, boolean, Cart | null]>([
     ['orders view', false, cart],
     ['empty cart', true, emptyCart],

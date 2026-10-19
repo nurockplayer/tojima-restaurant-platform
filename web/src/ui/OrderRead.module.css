@@ -13,6 +13,7 @@
 }
 
 .language {
+  flex: 0 0 auto;
   min-width: var(--size-target-min);
   min-height: var(--size-target-min);
   padding: var(--ref-space-2) var(--ref-space-3);
@@ -21,6 +22,7 @@
   background: var(--color-surface);
   color: var(--color-text);
   font: inherit;
+  white-space: nowrap;
 }
 
 .language:focus-visible {

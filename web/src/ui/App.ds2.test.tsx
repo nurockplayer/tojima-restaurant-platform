@@ -86,6 +86,37 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+function blockFocusBehindModal() {
+  const original = HTMLElement.prototype.focus;
+  const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+  const blocked: HTMLElement[] = [];
+  focus.mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+    if (this.closest('[inert], [aria-hidden="true"]')) {
+      blocked.push(this);
+      return;
+    }
+    original.call(this, options);
+  });
+  return { focus, blocked };
+}
+
+function holdGuestHeadingInert(text: string) {
+  let root: HTMLElement | null = null;
+  let resolveReady!: (element: HTMLElement) => void;
+  const ready = new Promise<HTMLElement>((resolve) => { resolveReady = resolve; });
+  const observer = new MutationObserver(() => {
+    const heading = [...document.querySelectorAll<HTMLElement>('main h1, main h2')]
+      .find((element) => element.textContent?.trim() === text);
+    if (!heading || root) return;
+    root = heading.closest('main')!;
+    root.setAttribute('inert', '');
+    resolveReady(root);
+    observer.disconnect();
+  });
+  observer.observe(document.body, { subtree: true, childList: true });
+  return { ready, release: () => root?.removeAttribute('inert') };
+}
+
 function expectSameOperation(first: RequestInit, retry: RequestInit) {
   const key = new Headers(first.headers).get('Idempotency-Key');
   expect(key).toBeTruthy();
@@ -163,6 +194,7 @@ describe('guest App option sheet acceptance', () => {
     expect(document.activeElement).toBe(trigger);
     removeProductOnNextMenuRead = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(64); });
 
     const menuHeading = screen.getByRole('heading', { name: 'お品書き' });
     await waitFor(() => expect(document.activeElement).toBe(menuHeading));
@@ -277,6 +309,7 @@ describe('guest App option sheet acceptance', () => {
     await waitFor(() => expect(document.activeElement).toBe(menuHeading));
     expireCartReads = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(64); });
     const entryHeading = await screen.findByRole('heading', { name: 'ご注文を始める' });
     await waitFor(() => expect(document.activeElement).toBe(entryHeading));
     expect(entryFocusEvents).toEqual([entryHeading]);
@@ -592,6 +625,37 @@ describe('guest App option sheet acceptance', () => {
 });
 
 describe('guest App cart sheet focus and destinations', () => {
+  it('reserves the measured cart bar height for scrolling, page content and feedback', async () => {
+    window.history.replaceState({}, '', '/?table=ds2-app');
+    installCartFetch({ onRemove: () => json({ error: 'rejected' }, 422) });
+    let height = 92;
+    let resize!: () => void;
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: () => void) { resize = callback; }
+      observe() {}
+      disconnect() {}
+    });
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return { height: this.getAttribute('data-testid') === 'cart-bar' ? height : 0 } as DOMRect;
+    });
+    const user = userEvent.setup();
+    const view = render(<App />);
+    await screen.findByRole('button', { name: /^カートを開く / });
+    expect(document.documentElement.style.scrollPaddingBottom).toBe('calc(92px + var(--ref-space-4))');
+    expect(screen.getByRole('main').style.paddingBottom).toBe('calc(92px + var(--ref-space-4))');
+    await act(async () => { height = 136; resize(); });
+    expect(document.documentElement.style.scrollPaddingBottom).toBe('calc(136px + var(--ref-space-4))');
+    const dialog = await openCartSheet(user);
+    await user.click(within(dialog).getByRole('button', { name: '削除' }));
+    await within(dialog).findByRole('alert');
+    within(dialog).getByRole('button', { name: '閉じる' }).focus();
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(screen.getByRole('alert').parentElement?.style.bottom).toBe('calc(136px + var(--ref-space-2))');
+    view.unmount();
+    expect(document.documentElement.style.scrollPaddingBottom).toBe('');
+  });
+
   it.each(['option', 'cart', 'preview'] as const)('focuses the entry heading once when a cart poll expires the session with the %s sheet open', async (sheet) => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval', 'requestAnimationFrame', 'cancelAnimationFrame', 'Date'] });
     window.history.replaceState({}, '', '/?table=ds2-app');
@@ -607,6 +671,8 @@ describe('guest App cart sheet focus and destinations', () => {
       if (sheet === 'preview') await user.click(within(dialog).getByRole('button', { name: '金額を確認する' }));
     }
     const entryFocusEvents: Element[] = [];
+    const inertFocus = blockFocusBehindModal();
+    const inertHold = sheet === 'cart' ? holdGuestHeadingInert('ご注文を始める') : null;
     const recordEntryFocus = (event: FocusEvent) => {
       if (event.target instanceof HTMLElement && event.target.id === 'entry-title') entryFocusEvents.push(event.target);
     };
@@ -614,10 +680,21 @@ describe('guest App cart sheet focus and destinations', () => {
     expire = true;
     await act(async () => { await vi.advanceTimersByTimeAsync(2_500); });
     const entryHeading = await screen.findByRole('heading', { name: 'ご注文を始める' });
+    if (inertHold) {
+      await inertHold.ready;
+      await act(async () => { await vi.advanceTimersByTimeAsync(40); });
+      expect(document.activeElement).not.toBe(entryHeading);
+      expect(inertFocus.focus.mock.contexts.filter((element) => element === entryHeading)).toHaveLength(0);
+      inertHold.release();
+    }
     await act(async () => { await vi.advanceTimersByTimeAsync(64); });
 
     await waitFor(() => expect(document.activeElement).toBe(entryHeading));
     expect(entryFocusEvents).toEqual([entryHeading]);
+    expect(inertFocus.blocked).toEqual([]);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === entryHeading)).toHaveLength(1);
+    expect(inertFocus.blocked).toEqual([]);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === entryHeading)).toHaveLength(1);
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
     document.removeEventListener('focusin', recordEntryFocus);
@@ -655,17 +732,26 @@ describe('guest App cart sheet focus and destinations', () => {
     window.history.replaceState({}, '', '/?table=ds2-app');
     installCartFetch({ onRemove: () => json({ ...emptyCart, version: 1 }) });
     const user = userEvent.setup();
+    const inertFocus = blockFocusBehindModal();
     render(<App />);
 
     const dialog = await openCartSheet(user);
     expect(within(dialog).queryByRole('note')).toBeNull();
     await user.click(within(dialog).getByRole('button', { name: '削除' }));
     expect(await within(screen.getByRole('dialog')).findByText('カートはまだ空です。')).toBeTruthy();
+    const inertHold = holdGuestHeadingInert('お品書き');
     await user.keyboard('{Escape}');
 
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     const menuHeading = screen.getByRole('heading', { name: 'お品書き' });
+    await inertHold.ready;
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+    expect(document.activeElement).not.toBe(menuHeading);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === menuHeading)).toHaveLength(0);
+    inertHold.release();
     await waitFor(() => expect(document.activeElement).toBe(menuHeading));
+    expect(inertFocus.blocked).toEqual([]);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === menuHeading)).toHaveLength(1);
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
   });
 
@@ -912,7 +998,8 @@ describe('guest App cart sheet focus and destinations', () => {
     };
     installCartFetch({ onCommit: () => json(result) });
     const user = userEvent.setup();
-    const focus = vi.spyOn(HTMLElement.prototype, 'focus');
+    const inertFocus = blockFocusBehindModal();
+    const inertHold = holdGuestHeadingInert('注文履歴');
     render(<App demo />);
 
     await openCartSheet(user);
@@ -921,11 +1008,17 @@ describe('guest App cart sheet focus and destinations', () => {
     await user.click(screen.getByRole('button', { name: 'この内容で注文を確定' }));
 
     const ordersHeading = await screen.findByRole('heading', { name: '注文履歴' });
+    await inertHold.ready;
+    await act(async () => { await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))); });
+    expect(document.activeElement).not.toBe(ordersHeading);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(0);
+    inertHold.release();
     await waitFor(() => expect(document.activeElement).toBe(ordersHeading));
     expect(screen.queryByRole('button', { name: /^カートを開く / })).toBeNull();
     expect(screen.queryByRole('dialog')).toBeNull();
     await waitFor(() => expect(document.querySelector('[inert], [aria-hidden="true"]')).toBeNull());
-    expect(focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
+    expect(inertFocus.blocked).toEqual([]);
+    expect(inertFocus.focus.mock.contexts.filter((element) => element === ordersHeading)).toHaveLength(1);
   });
 
   it('closes after replay confirms the order, focuses orders, and preserves the commit key and body', async () => {
