@@ -1,0 +1,118 @@
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  background: color-mix(in srgb, var(--color-text) 48%, transparent);
+  color: var(--color-text);
+}
+
+.modal {
+  width: 100%;
+  max-height: 88dvh;
+  min-height: 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
+  background: var(--color-surface);
+  color: var(--color-text);
+  box-shadow: var(--shadow-sheet);
+  transform: translateY(0);
+  transition: transform var(--motion-sheet) ease-out;
+}
+
+.modal[data-entering],
+.modal[data-exiting] {
+  transform: translateY(100%);
+}
+
+.dialog {
+  display: flex;
+  flex-direction: column;
+  max-height: inherit;
+  min-height: 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  font-family: var(--font-sans);
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  overflow-wrap: anywhere;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  gap: var(--ref-space-3);
+  padding: var(--ref-space-3) var(--space-gutter);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.title {
+  margin: 0;
+  font-size: var(--text-title);
+}
+
+.close {
+  flex-shrink: 0;
+  min-width: var(--size-target-min);
+  min-height: var(--size-target-min);
+  padding: var(--ref-space-2) var(--ref-space-3);
+  border: 1px solid var(--color-border-control);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+}
+
+.body {
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  min-height: 0;
+  padding: var(--ref-space-4) var(--space-gutter);
+  scroll-padding-block: var(--ref-space-4);
+}
+
+.footer {
+  flex-shrink: 0;
+  padding: var(--ref-space-3) var(--space-gutter);
+  border-top: 1px solid var(--color-border);
+}
+
+.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 3px solid var(--color-focus);
+  outline-offset: -3px;
+}
+
+.dialog input:checked:focus-visible {
+  outline-color: var(--color-on-action);
+}
+
+@media (min-width: 768px) {
+  .overlay {
+    align-items: center;
+    padding: var(--ref-space-6);
+  }
+
+  .modal {
+    max-width: 560px;
+    border-radius: var(--radius-card);
+  }
+
+  .modal[data-entering],
+  .modal[data-exiting] {
+    transform: translateY(var(--ref-space-6));
+  }
+}
+
+@media (forced-colors: active) {
+  .modal,
+  .close {
+    border-color: CanvasText;
+  }
+
+  .dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline-color: Highlight;
+  }
+}
