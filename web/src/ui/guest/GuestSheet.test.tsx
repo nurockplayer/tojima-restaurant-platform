@@ -69,6 +69,14 @@ describe('GuestSheet', () => {
     await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'メニュー' })));
   });
 
+  it('restores fallback focus when a trigger disappears after the sheet opens', async () => {
+    const { user, trigger, rerender } = await openSheet();
+    rerender(<Harness removeTrigger />);
+    expect(trigger.isConnected).toBe(false);
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole('heading', { name: 'メニュー' })));
+  });
+
   it('hides the background while open and clears aria-hidden and inert after close', async () => {
     const { user, container } = await openSheet();
     expect(container.closest('[aria-hidden="true"], [inert]')).not.toBeNull();
@@ -76,6 +84,16 @@ describe('GuestSheet', () => {
     await user.keyboard('{Escape}');
     await waitFor(() => expect(container.closest('[aria-hidden="true"], [inert]')).toBeNull());
     expect(screen.getByRole('button', { name: '背景操作' })).toBeDefined();
+  });
+
+  it('renders the caller notice and action footer inside the dialog', () => {
+    render(<GuestSheet isOpen onOpenChange={() => undefined} title="共有カート" locale="ja"
+      notice={<p role="note">お知らせ</p>} footer={<button>金額を確認する</button>}>
+      <p>カート内容</p>
+    </GuestSheet>);
+    const dialog = screen.getByRole('dialog', { name: '共有カート' });
+    expect(within(dialog).getByRole('note').textContent).toBe('お知らせ');
+    expect(within(dialog).getByRole('button', { name: '金額を確認する' })).toBeDefined();
   });
 
   it('cleans up the background and restores fallback focus after an exit animation', async () => {

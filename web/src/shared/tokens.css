@@ -1,6 +1,6 @@
 /* DS-1 / D-DS-20261019: three-tier, light platform defaults.
  * Protected: status, danger, focus, price and demo/legal notices.
- * No store input, data-surface overrides or KDS dark scheme in DS-1.
+ * No store input or KDS dark scheme. Guest density is introduced in DS-2.
  */
 
 :root {
@@ -34,6 +34,11 @@
   --ref-blue-700: #2b5f8f;
   --ref-success-700: #226345;
   --ref-success-50: #e3f1e8;
+
+  /* ---- Tier 1: protected DEMO notice (existing banner colours). */
+  --ref-demo-ink: #503b14;
+  --ref-demo-bg: #fff6df;
+  --ref-demo-border: #c59b4a;
 
   /* ---- Tier 1: type. System CJK faces only: no web-font download on guest phones. */
   --ref-font-sans: system-ui, -apple-system, "Hiragino Sans", "Hiragino Kaku Gothic ProN",
@@ -86,6 +91,11 @@
   --color-info-ink: var(--ref-blue-700);
   --color-info-bg: var(--ref-blue-50);
 
+  /* Protected DEMO/legal notice; border is decorative, not a control edge. */
+  --color-demo-ink: var(--ref-demo-ink);
+  --color-demo-bg: var(--ref-demo-bg);
+  --color-demo-border: var(--ref-demo-border);
+
   /* Type scale. Floor is 12px everywhere; old UI used 9px in 22 places. */
   --text-meta: 12px;
   --text-label: 13px;
@@ -96,7 +106,7 @@
   --leading-tight: 1.3;
   --leading-body: 1.6;
 
-  /* Default dimensions only; surface-specific density is deferred. */
+  /* Default dimensions; guest density below applies only to the guest surface. */
   --size-target: 48px; /* guest primary actions */
   --size-target-min: 44px; /* absolute floor on every touch surface */
   --size-row: 56px;
@@ -112,6 +122,17 @@
   --brand-on-primary: var(--ref-neutral-0);
   --brand-ink: var(--ref-green-800); /* brand used as text on light surfaces, >= 4.5:1 */
   --brand-focus: var(--ref-neutral-0); /* focus ring drawn on brand fill */
+}
+
+/* Guest density also reaches body portals when set on the document element. */
+[data-surface="guest"] {
+  --text-body: 16px;
+  --size-target: 48px;
+  --size-target-min: 44px;
+  --size-row: 56px;
+  --size-media: 72px;
+  --size-catnav: 48px;
+  --size-cartbar: 64px;
 }
 
 /* Traditional Chinese glyphs; consumers opt into --font-sans. */

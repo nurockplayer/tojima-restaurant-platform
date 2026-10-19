@@ -27,9 +27,6 @@ export const hexInventory: string[] = [
   "../ui/CatalogApp.module.css |  | .holdPanel | background | #fffaf1",
   "../ui/CatalogApp.module.css |  | .holdPanel | border | #d7b88b",
   "../ui/CatalogApp.module.css |  | .storeHoldIndicator | color | #98483c",
-  "../ui/DemoBanner.module.css |  | .banner | background | #fff6df",
-  "../ui/DemoBanner.module.css |  | .banner | border | #c59b4a",
-  "../ui/DemoBanner.module.css |  | .banner | color | #503b14",
   "../ui/styles.css |  | .adjustment-preview,.refund-list | background | #f2f5f0",
   "../ui/styles.css |  | .brand-mark | color | #fff",
   "../ui/styles.css |  | .button.primary | color | #fff",
@@ -84,6 +81,10 @@ export const fontExceptions: { key: string; reason: string }[] = [
 ];
 
 export const unsupportedInventory: { key: string; reason: string }[] = [
+  {
+    "key": "../ui/guest/GuestSheet.module.css |  | .overlay | background:color-mix(in srgb, var(--color-text) 48%, transparent);color:var(--color-text) | Error: unsupported colour color-mix(in srgb, var(--color-text) 48%, transparent) -> color-mix(in srgb, var(--color-text) 48%, transparent)",
+    "reason": "Translucent modal scrim has no text of its own. Dialog sets an opaque surface and foreground; scrim compositing still needs rendered acceptance."
+  },
   {
     "key": "../ui/CatalogApp.module.css |  | .holdLookup | background:#fff | background with inherited foreground",
     "reason": "White lookup panel inherits body ink; descendants explicitly use ink or muted. Cascade needs rendered verification."

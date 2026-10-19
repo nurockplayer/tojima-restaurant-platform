@@ -32,7 +32,7 @@ export function GuestSheet({ isOpen, onOpenChange, title, locale, children, noti
     }
   }, []);
 
-  return <ModalOverlay ref={overlayRef} isOpen={isOpen} onOpenChange={onOpenChange} isDismissable className={styles.overlay}>
+  return <ModalOverlay data-surface="guest" ref={overlayRef} isOpen={isOpen} onOpenChange={onOpenChange} isDismissable className={styles.overlay}>
     <Modal className={styles.modal}>
       <Dialog className={styles.dialog}>
         <header className={styles.header}>

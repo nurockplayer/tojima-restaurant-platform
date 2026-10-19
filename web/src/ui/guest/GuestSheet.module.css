@@ -76,6 +76,7 @@
 
 .footer {
   flex-shrink: 0;
+  min-height: var(--size-cartbar);
   padding: var(--ref-space-3) var(--space-gutter);
   border-top: 1px solid var(--color-border);
 }
@@ -112,7 +113,8 @@
     border-color: CanvasText;
   }
 
-  .dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible {
+  .dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible,
+  .dialog input:checked:focus-visible {
     outline-color: Highlight;
   }
 }

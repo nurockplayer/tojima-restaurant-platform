@@ -8,6 +8,7 @@ const sources = import.meta.glob<string>('../**/*.css', {
 const expectedFiles = [
   './tokens.css', '../ui/styles.css', '../ui/CatalogApp.module.css',
   '../ui/OrderRead.module.css', '../ui/DemoBanner.module.css',
+  '../ui/guest/GuestSheet.module.css',
 ];
 const normal = (value: string) => value.trim().replace(/\s+/g, ' ');
 type Declaration = { property: string; value: string };
@@ -120,23 +121,36 @@ const declarations = (rule: Rule, property: string) => rule.declarations.filter(
 const definitions = new Map(allRules.filter((r) => r.selector === ':root' && !r.context)
   .flatMap((r) => r.declarations.filter((d) => d.property.startsWith('--')).map((d) => [d.property, d.value] as const)));
 
-function resolve(value: string, seen: string[] = []): string {
+const guestSelector = '[data-surface="guest"]';
+const guestDimensions = new Map([
+  ['--text-body', '16px'], ['--size-target', '48px'], ['--size-target-min', '44px'],
+  ['--size-row', '56px'], ['--size-media', '72px'], ['--size-catnav', '48px'], ['--size-cartbar', '64px'],
+]);
+type TokenContext = 'root' | 'guest';
+const guestDefinitions = new Map([...definitions, ...allRules
+  .filter((r) => r.file === './tokens.css' && r.selector === guestSelector && !r.context)
+  .flatMap((r) => r.declarations.map((d) => [d.property, d.value] as const))]);
+const definitionsFor = (context: TokenContext) => context === 'guest' ? guestDefinitions : definitions;
+const isGuestModule = (file: string) => /^\.\.\/ui\/guest\/[^/]+\.module\.css$/.test(file);
+const contextFor = (file: string): TokenContext => isGuestModule(file) ? 'guest' : 'root';
+
+function resolve(value: string, seen: string[] = [], context: TokenContext = 'root'): string {
   const ref = value.match(/^var\((--[\w-]+)\)$/);
   if (!ref) return value;
   const name = ref[1]!;
-  const target = definitions.get(name);
+  const target = definitionsFor(context).get(name);
   if (target === undefined) throw new Error(`unknown var() token ${name}`);
   if (seen.includes(name)) throw new Error(`cyclic var() token ${[...seen, name].join(' -> ')}`);
-  return resolve(target, [...seen, name]);
+  return resolve(target, [...seen, name], context);
 }
 
-function hex(value: string): string {
-  const resolved = resolve(value);
+function hex(value: string, context: TokenContext = 'root'): string {
+  const resolved = resolve(value, [], context);
   if (!/^#(?:[\da-f]{3}|[\da-f]{6})$/i.test(resolved)) throw new Error(`unsupported colour ${value} -> ${resolved}`);
   return resolved;
 }
-function luminance(value: string): number {
-  let h = hex(value).slice(1);
+function luminance(value: string, context: TokenContext = 'root'): number {
+  let h = hex(value, context).slice(1);
   if (h.length === 3) h = [...h].map((c) => c + c).join('');
   const [r, g, b] = [0, 2, 4].map((i) => {
     const channel = Number.parseInt(h.slice(i, i + 2), 16) / 255;
@@ -144,8 +158,8 @@ function luminance(value: string): number {
   });
   return .2126 * r! + .7152 * g! + .0722 * b!;
 }
-function contrast(a: string, b: string): number {
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+function contrast(a: string, b: string, context: TokenContext = 'root'): number {
+  const [hi, lo] = [luminance(a, context), luminance(b, context)].sort((x, y) => y - x);
   return (hi! + .05) / (lo! + .05);
 }
 function fontPixels(value: string): number {
@@ -175,6 +189,7 @@ const usagePairs: [string, string, number][] = [
   ['--color-warning-ink', '--color-warning-bg', 4.5],
   ['--color-danger-ink', '--color-danger-bg', 4.5],
   ['--color-info-ink', '--color-info-bg', 4.5],
+  ['--color-demo-ink', '--color-demo-bg', 4.5],
   ['--color-danger-ink', '--color-surface', 4.5],
   ['--brand-on-primary', '--brand-primary', 4.5],
   ['--brand-ink', '--color-bg', 4.5],
@@ -194,6 +209,7 @@ function textAudit(input: Rule[]) {
   const failures: string[] = [];
   let checked = 0;
   for (const rule of input) {
+    const context = contextFor(rule.file);
     const colors = declarations(rule, 'color');
     const backgrounds = rule.declarations.filter((d) => ['background', 'background-color', 'background-image'].includes(d.property));
     for (const d of declarations(rule, 'opacity')) unsupported.push(unsupportedKey(rule, `opacity requires compositing (${d.value})`));
@@ -201,7 +217,7 @@ function textAudit(input: Rule[]) {
       // Background-only rules can change contrast of inherited foregrounds.
       // Still validate the value, even though the combination needs a browser.
       for (const bg of backgrounds) {
-        try { hex(bg.value); }
+        try { hex(bg.value, context); }
         catch (error) { unsupported.push(unsupportedKey(rule, String(error))); }
       }
       unsupported.push(unsupportedKey(rule, 'background with inherited foreground'));
@@ -213,10 +229,10 @@ function textAudit(input: Rule[]) {
     }
     for (const color of colors) {
       try {
-        hex(color.value);
+        hex(color.value, context);
         const bgs = backgrounds.length ? backgrounds.map((d) => d.value) : ['var(--color-bg)', 'var(--color-surface)'];
         for (const bg of bgs) {
-          const ratio = contrast(color.value, bg);
+          const ratio = contrast(color.value, bg, context);
           checked++;
           if (ratio < 4.5) failures.push(`${location(rule)} | ${color.value} on ${bg}: ${ratio.toFixed(2)} < 4.5`);
         }
@@ -241,13 +257,70 @@ function reviewed(actual: string[], inventory: { key: string; reason: string }[]
   expect([...actual].sort(), `${label}: stale/duplicate exceptions must be updated`).toEqual(expected);
 }
 
+function checkSources(input: Record<string, unknown>, expected: string[]) {
+  for (const file of expected) if (!(file in input)) throw new Error(`${file}: missing CSS raw import`);
+  for (const [file, css] of Object.entries(input)) {
+    if (typeof css !== 'string' || !css.trim()) throw new Error(`${file}: CSS raw import must be a non-empty string; retain test.css.include for ?raw in vite.config.ts`);
+  }
+}
+
+function tokenFailures(input: Rule[]): string[] {
+  const failures: string[] = [];
+  for (const rule of input) for (const d of rule.declarations) {
+    const context = contextFor(rule.file);
+    for (const [, name] of d.value.matchAll(/var\(\s*(--[\w-]+)/g)) {
+      if (!name || !definitionsFor(context).has(name)) failures.push(`${location(rule)}: undefined variable ${name} in ${context}`);
+      else {
+        try { resolve(`var(${name})`, [], context); }
+        catch (error) { failures.push(`${location(rule)}: ${String(error)}`); }
+      }
+    }
+    if (!d.property.startsWith('--') || (rule.selector === ':root' && !rule.context)) continue;
+    const guestDimension = rule.file === './tokens.css' && rule.selector === guestSelector && !rule.context && guestDimensions.has(d.property);
+    const language = rule.file === './tokens.css' && rule.selector === ':lang(zh-Hant)' && !rule.context && d.property === '--font-sans';
+    const reducedMotion = rule.file === './tokens.css' && rule.selector === ':root' && rule.context === '@media (prefers-reduced-motion: reduce)' && ['--motion-fast', '--motion-sheet'].includes(d.property);
+    if (!guestDimension && !language && !reducedMotion) failures.push(`${location(rule)}: unsupported scoped token ${d.property}`);
+  }
+  return failures;
+}
+
+function checkGuestDensity(input: Rule[]) {
+  const blocks = input.filter((r) => r.file === './tokens.css' && r.selector === guestSelector && !r.context);
+  if (blocks.length !== 1) throw new Error('Expected one unconditional guest density block');
+  const dimensions = blocks[0]!.declarations;
+  if (dimensions.length !== guestDimensions.size) throw new Error('Guest dimensions must match the exact allowlist');
+  for (const [name, value] of guestDimensions) {
+    const actual = dimensions.filter((d) => d.property === name);
+    if (actual.length !== 1 || actual[0]!.value !== value) throw new Error(`Guest dimension ${name} must be ${value}`);
+  }
+  for (const [name, minimum] of [['--size-target-min', 44], ['--size-target', 44], ['--text-body', 16]] as const) {
+    if (fontPixels(dimensions.find((d) => d.property === name)!.value) < minimum) throw new Error(`${name} below ${minimum}px`);
+  }
+}
+
+function checkGuestFocus(input: Rule[]) {
+  const base = input.filter((r) => isGuestModule(r.file) && !r.context);
+  const inset = base.filter((r) => declarations(r, 'outline-offset').some((d) => d.value === '-3px'));
+  if (!inset.length) throw new Error('Guest scroll areas require inset focus');
+  for (const rule of inset) {
+    if (rule.selector !== '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible') throw new Error('Guest inset focus selector regressed');
+    if (!declarations(rule, 'outline').some((d) => d.value === '3px solid var(--color-focus)')) throw new Error('Guest inset focus requires a 3px token outline');
+    for (const element of ['button', 'a', 'input', 'select', 'textarea', '[tabindex]']) {
+      if (compareSpecificity(specificity(rule.selector), specificity(`${element}:focus-visible`)) <= 0) throw new Error('Guest inset focus must outrank global focus');
+    }
+    const white = base.find((r) => r.file === rule.file && r.selector === '.dialog input:checked:focus-visible');
+    if (!white || !declarations(white, 'outline-color').some((d) => d.value === 'var(--color-on-action)')
+      || compareSpecificity(specificity(white.selector), specificity(rule.selector)) <= 0) throw new Error('Guest filled input focus override regressed');
+    const scroll = base.find((r) => r.file === rule.file && r.selector === '.body');
+    if (!scroll || !declarations(scroll, 'overflow-y').some((d) => d.value === 'auto')) throw new Error('Guest sheet scroll area is missing');
+    const padding = scroll && declarations(scroll, 'padding')[0]?.value.split(' ')[0];
+    if (!padding || fontPixels(resolve(padding, [], 'guest')) < 3) throw new Error('Guest scroll padding must protect focus outlines');
+  }
+}
+
 describe('DS-1 static design-token regression gate', () => {
   it('loads every expected CSS file as a non-empty raw string', () => {
-    expect(Object.keys(sources)).toEqual(expect.arrayContaining(expectedFiles));
-    for (const [file, css] of Object.entries(sources)) {
-      expect(typeof css, `${file}: CSS raw import must be a non-empty string; retain test.css.include for ?raw in vite.config.ts`).toBe('string');
-      expect(css.trim().length, `${file}: empty CSS; retain test.css.include for ?raw in vite.config.ts`).toBeGreaterThan(0);
-    }
+    checkSources(sources, expectedFiles);
     expect(allRules.length).toBeGreaterThan(0);
   });
 
@@ -310,7 +383,7 @@ describe('DS-1 static design-token regression gate', () => {
       const key = `${location(rule)} | font-size | ${d.value}`;
       if (d.value === '0' || d.value === 'initial') { exceptions.push(key); continue; }
       try {
-        const pixels = fontPixels(resolve(d.value));
+        const pixels = fontPixels(resolve(d.value, [], contextFor(rule.file)));
         if (pixels < 12) failures.push(`${key}: ${pixels}px < 12px (rem base 15px)`);
       } catch (error) { failures.push(`${key}: ${String(error)}`); }
     }
@@ -333,18 +406,91 @@ describe('DS-1 static design-token regression gate', () => {
   });
 
   it('has no undefined variables or scoped colour-token overrides', () => {
-    const failures: string[] = [];
-    for (const rule of allRules) for (const d of rule.declarations) {
-      for (const [, name] of d.value.matchAll(/var\(\s*(--[\w-]+)/g)) {
-        if (!name || !definitions.has(name)) failures.push(`${location(rule)}: undefined variable ${name}`);
-        else resolve(`var(${name})`);
-      }
-      if (d.property.startsWith('--') && !(rule.selector === ':root' && !rule.context)
-        && !['--font-sans', '--motion-fast', '--motion-sheet'].includes(d.property)) {
-        failures.push(`${location(rule)}: unsupported scoped token ${d.property}`);
-      }
-    }
+    const failures = tokenFailures(allRules);
     expect(failures, failures.join('\n')).toEqual([]);
+  });
+});
+
+describe('DS-2 guest token contexts and safeguards', () => {
+  it('keeps the exact guest dimension block and its accessibility floors', () => {
+    checkGuestDensity(allRules);
+    expect(resolve('var(--size-media)', [], 'guest')).toBe('72px');
+    expect(() => resolve('var(--size-media)')).toThrow('unknown var() token');
+  });
+
+  it('uses guest density tokens in the real sheet module', () => {
+    const consumers = allRules.filter((r) => isGuestModule(r.file))
+      .flatMap((r) => r.declarations.flatMap((d) => [...d.value.matchAll(/var\((--[\w-]+)\)/g)]
+        .filter(([, name]) => guestDimensions.has(name!)).map(([, name]) => `${r.file}: ${name}`)));
+    expect(consumers).toContain('../ui/guest/GuestSheet.module.css: --size-target-min');
+    expect(consumers).toContain('../ui/guest/GuestSheet.module.css: --text-body');
+    const guestOnly = [...guestDimensions.keys()].filter((name) => !definitions.has(name));
+    expect(consumers.some((consumer) => guestOnly.some((name) => consumer.endsWith(`: ${name}`)))).toBe(true);
+    expect(consumers).toContain('../ui/guest/GuestSheet.module.css: --size-cartbar');
+  });
+
+  it('keeps DEMO primitives and decorative border unchanged', () => {
+    expect(resolve('var(--color-demo-ink)')).toBe('#503b14');
+    expect(resolve('var(--color-demo-bg)')).toBe('#fff6df');
+    // Decorative only: this border does not define an interactive control.
+    expect(resolve('var(--color-demo-border)')).toBe('#c59b4a');
+    expect(contrast('var(--color-demo-ink)', 'var(--color-demo-bg)')).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('protects sheet scroll-area inset focus and filled-input overrides', () => {
+    checkGuestFocus(allRules);
+    expect(contrast('var(--color-focus)', 'var(--color-surface)', 'guest')).toBeGreaterThanOrEqual(3);
+    expect(contrast('var(--color-on-action)', 'var(--color-action)', 'guest')).toBeGreaterThanOrEqual(3);
+    expect(allRules.filter((r) => isGuestModule(r.file)).every((r) => !r.selector.includes(':global('))).toBe(true);
+  });
+
+  it.each(['--color-text', '--brand-primary', '--ref-green-800', '--font-sans'])('rejects scoped guest override %s', (name) => {
+    const bad = rules('./tokens.css', `[data-surface="guest"] { ${name}: var(--color-text); }`);
+    expect(tokenFailures(bad)).toEqual([expect.stringContaining(`unsupported scoped token ${name}`)]);
+  });
+
+  it('rejects dimension overrides outside the tokens.css guest block', () => {
+    const bad = rules('../ui/guest/Bad.module.css', '[data-surface="guest"] { --size-target: 48px; }');
+    expect(tokenFailures(bad)).toEqual([expect.stringContaining('unsupported scoped token --size-target')]);
+  });
+
+  it('rejects a 40px guest target', () => {
+    const css = `[data-surface="guest"] { ${[...guestDimensions].map(([name, value]) => `${name}: ${name === '--size-target' ? '40px' : value};`).join(' ')} }`;
+    const bad = rules('./tokens.css', css);
+    expect(() => checkGuestDensity(bad)).toThrow('Guest dimension --size-target must be 48px');
+  });
+
+  it.each(['', '   ', {}])('rejects an empty or stubbed new CSS raw import (%j)', (bad) => {
+    expect(() => checkSources({ ...sources, '../ui/guest/GuestSheet.module.css': bad }, expectedFiles)).toThrow('non-empty string');
+  });
+
+  it('rejects a missing new CSS raw import', () => {
+    const { '../ui/guest/GuestSheet.module.css': omitted, ...bad } = sources;
+    expect(omitted).toBeDefined();
+    expect(() => checkSources(bad, expectedFiles)).toThrow('missing CSS raw import');
+  });
+
+  it('rejects weaker guest inset focus specificity', () => {
+    const css = sources['../ui/guest/GuestSheet.module.css']!.replace(
+      '.dialog :is(button, a, input, select, textarea, [tabindex]):focus-visible',
+      ':where(.dialog) :where(button, a, input, select, textarea, [tabindex]):focus-visible');
+    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css))).toThrow('Guest inset focus selector regressed');
+  });
+
+  it('rejects a missing guest filled-input focus override', () => {
+    const css = sources['../ui/guest/GuestSheet.module.css']!.replace('outline-color: var(--color-on-action);', 'outline-color: var(--color-focus);');
+    expect(() => checkGuestFocus(rules('../ui/guest/GuestSheet.module.css', css))).toThrow('Guest filled input focus override regressed');
+  });
+
+  it('rejects an undefined variable even in the guest context', () => {
+    const bad = rules('../ui/guest/Bad.module.css', '.bad { width: var(--size-undefined); }');
+    expect(tokenFailures(bad)).toEqual([expect.stringContaining('undefined variable --size-undefined in guest')]);
+  });
+
+  it('rejects a guest-only variable in root-context CSS', () => {
+    const css = '.bad { width: var(--size-media); }';
+    expect(tokenFailures(rules('../ui/Root.module.css', css))).toEqual([expect.stringContaining('undefined variable --size-media in root')]);
+    expect(tokenFailures(rules('../ui/guest/Media.module.css', css))).toEqual([]);
   });
 });
 
