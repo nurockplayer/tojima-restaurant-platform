@@ -24,13 +24,22 @@ Both scripts need:
 - Node 24 or later, which provides the built-in `WebSocket`;
 - an isolated demo backed by a disposable PostgreSQL 17. Never point them at a shared or production database.
 
+Terminal 1 starts the database and the demo, and keeps the demo running:
+
 ```sh
 docker run -d --rm --name ds-pg -p 127.0.0.1:55471:5432 -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=tojima_test postgres:17
 pnpm --dir web install --frozen-lockfile && pnpm --dir web build
 TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55471/tojima_test?sslmode=disable' \
   go run ./cmd/operationstest -demo-shironagasukujira -catalog-fixture -port 8095 -credentials /tmp/ds-after-creds.json
+```
+
+Terminal 2, once terminal 1 prints `listening on http://127.0.0.1:8095`:
+
+```sh
 node docs/design/ds-1-acceptance/capture.mjs after http://127.0.0.1:8095 /tmp/ds-after-creds.json /tmp/ds-capture
 ```
+
+When capture finishes, press Ctrl-C in terminal 1. That stops the demo, drops its schema and deletes the credentials file. Then run `docker stop ds-pg`. `ds-2-baseline/measure-baseline.mjs` takes the same four arguments.
 
 - **Credentials file:** the demo writes a new owner-only credentials file and deletes it on Ctrl-C. The scripts read it only to log in to the staff, KDS and catalog surfaces. Never commit it or paste it.
 - **Before vs after:** for a before/after pair, run a second demo from the base commit on a different port, and give each side a fresh schema by restarting its demo.
@@ -62,7 +71,7 @@ node docs/design/ds-1-acceptance/capture.mjs after http://127.0.0.1:8095 /tmp/ds
 - **`ds-1-acceptance/`**：描画受入ハーネス（CDP、依存なし）と DS-1 の before/after 証跡。DS-2 ではこれを拡張して使う。
 - **`ds-2-baseline/`**：P-89 §2 の基準値の計測スクリプト・結果・スクリーンショットと、計画レビュー 5 回の記録。PASS 済みのため再レビューは不要。
 
-ハーネスは使い捨ての PostgreSQL と隔離 demo でのみ実行する。資格情報ファイルはコミットしない。
+ハーネスは使い捨ての PostgreSQL と隔離 demo でのみ実行する。demo は別の端末で起動したまま、待受表示の後にハーネスを実行し、終了後に Ctrl-C で止める（資格情報ファイルも削除される）。資格情報ファイルはコミットしない。
 
 ## 繁體中文
 
@@ -73,4 +82,4 @@ node docs/design/ds-1-acceptance/capture.mjs after http://127.0.0.1:8095 /tmp/ds
 - **`ds-1-acceptance/`**：渲染驗收工具（CDP、無依賴）與 DS-1 的 before/after 證據。DS-2 請擴充沿用。
 - **`ds-2-baseline/`**：P-89 §2 基準值的量測腳本、結果、截圖，以及 5 次規劃審查紀錄。已 PASS，不需重審。
 
-工具只能在拋棄式 PostgreSQL 與隔離 demo 上執行；憑證檔不得提交。
+工具只能在拋棄式 PostgreSQL 與隔離 demo 上執行；demo 在另一個終端機持續執行，出現 listening 後再執行工具，結束後按 Ctrl-C 停止（同時刪除憑證檔）。憑證檔不得提交。

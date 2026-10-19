@@ -118,9 +118,10 @@ async function guest(locale, width, height) {
   if (locale === 'zh') { await p.evaluate(`document.querySelector('.locale-switch').click()`); await sleep(500); }
   await p.evaluate('window.scrollTo(0,0)'); await sleep(200);
   const m = await p.evaluate(M);
+  // Screenshot the true first viewport before Tab navigation scrolls the page.
+  if (width !== 1280) await p.shot(`${tag}-first-viewport`, false);
   m.tabsToFirstEnabledAdd = await tabsTo(p, `(e) => e.matches('.product-card button.primary')`);
   m.tabsToPreviewButton = await tabsTo(p, `(e) => e.matches('.checkout-button')`);
-  if (width !== 1280) await p.shot(`${tag}-first-viewport`, false);
   report.states[tag] = m;
   console.log(tag, JSON.stringify(m));
   await p.close();
