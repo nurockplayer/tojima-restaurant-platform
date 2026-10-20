@@ -164,6 +164,8 @@ export function App({ demo = false }: DemoSurfaceProps) {
   entryRef.current = entry;
   const mode = entry?.grant.session.mode;
   const [status, setStatus] = useState<PublicTable | null>(null);
+  const [preJoinStoreName, setPreJoinStoreName] = useState('');
+  useEffect(() => { setPreJoinStoreName(''); }, [query.locator]);
   const [cartState, dispatchCart] = useReducer(guestCartReducer, initialGuestCartState);
   const { cart, preview } = cartState;
   const cartStateRef = useRef(cartState);
@@ -245,6 +247,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   }, []);
 
   const invalidateGrant = useCallback((sessionID: string) => {
+    setPreJoinStoreName('');
     dispatchSync({ type: 'reset', origin: null });
     acceptedSyncSequence.current++;
     cartStateRef.current = initialGuestCartState;
@@ -397,6 +400,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   };
 
   const activate = useCallback(async (grant: GuestGrant, locator?: string) => {
+    setPreJoinStoreName('');
     dispatchSync({ type: 'reset', origin: { sessionID: grant.session.id, token: grant.table_join_token } });
     acceptedSyncSequence.current++;
     setWatchdogBase(Date.now());
@@ -527,9 +531,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
     const init = async () => {
       try {
         if (query.locator) {
+          setPreJoinStoreName('');
           const current = await cartClient.status(query.locator);
           if (!active) return;
           setStatus(current);
+          setPreJoinStoreName(current.store_display_name ?? '');
           if (!current.open && current.expired) return;
           if (current.mode === 'DIRECT_SCAN') {
             const grant = await cartClient.joinDirect(query.locator, current.current_session_id ?? '');
@@ -666,7 +672,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
     setBusy(true); setError('');
     try {
       if (query.locator) {
-        const current = status ?? await cartClient.status(query.locator);
+        let current = status;
+        if (!current) {
+          setPreJoinStoreName('');
+          current = await cartClient.status(query.locator);
+          setPreJoinStoreName(current.store_display_name ?? '');
+        }
         setStatus(current);
         if (!current.open && current.mode === 'DIRECT_SCAN') {
           const grant = await cartClient.joinDirect(query.locator, '');
@@ -831,10 +842,11 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const syncTime = sync.lastSyncedAt === null ? '—' : new Intl.DateTimeFormat('ja-JP', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(sync.lastSyncedAt);
   const syncReason = t.syncReason.replace('{time}', syncTime);
   const syncNotice = (id: string) => sync.degraded ? <div id={id} className={guestStyles.syncNotice} role="status"><strong>{t.syncUnstable}</strong>{syncReason}</div> : null;
+  const storeName = demo ? demoStoreName : entry ? (entry.menu.store_display_name ?? '') : preJoinStoreName;
 
-  if (loading) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div>{syncNotice(`${syncID}-page`)}</Shell>;
+  if (loading) return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div>{syncNotice(`${syncID}-page`)}</Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
-  if (!entry || blocked) return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+  if (!entry || blocked) return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <section className="entry-card" aria-labelledby="entry-title">
       <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
@@ -850,7 +862,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const unavailable = cart?.lines.some((line) => !line.product_available || line.options.some((option) => !option.available) || !menuProducts.get(line.product_key)?.selectable || menuProducts.get(line.product_key)?.company_emergency_hold_active) ?? false;
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
-  return <Shell demo={demo} locale={locale} setLocale={setLocale} t={t} cartBarHeight={cartBarHeight} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+  return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} cartBarHeight={cartBarHeight} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
     <div className={guestStyles.workspace}>
       <header className={guestStyles.welcome}>
         <div><h1 ref={menuHeading} tabIndex={-1}>{t.menu}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
@@ -927,6 +939,6 @@ export function App({ demo = false }: DemoSurfaceProps) {
   </Shell>;
 }
 
-function Shell({ children, demo = false, locale, setLocale, t, tableLabel, cartBarHeight = 0 }: { children: React.ReactNode; demo?: boolean; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string; cartBarHeight?: number }) {
-  return <main className={guestStyles.shell} data-surface="guest" style={cartBarHeight > 0 ? { paddingBottom: `calc(${cartBarHeight}px + var(--ref-space-4))` } : undefined}><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{demo && <strong data-store-slot="demo">{demoStoreName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
+function Shell({ children, demo = false, storeName, locale, setLocale, t, tableLabel, cartBarHeight = 0 }: { children: React.ReactNode; demo?: boolean; storeName: string; locale: Locale; setLocale: (locale: Locale) => void; t: Record<string, string>; tableLabel: string; cartBarHeight?: number }) {
+  return <main className={guestStyles.shell} data-surface="guest" style={cartBarHeight > 0 ? { paddingBottom: `calc(${cartBarHeight}px + var(--ref-space-4))` } : undefined}><meta name="referrer" content="no-referrer" /><header className={guestStyles.topbar}><div className={guestStyles.identity}>{storeName && <strong data-store-slot={demo ? 'demo' : 'api'}>{storeName}</strong>}<span className={guestStyles.tableLabel}>{tableLabel}</span></div><button className={guestStyles.navigation} lang={locale === 'ja' ? 'zh-Hant' : 'ja'} onClick={() => setLocale(locale === 'ja' ? 'zh' : 'ja')}>{t.locale}</button></header><DemoBanner demo={demo} locale={locale} />{children}<MyOrders locale={locale} /><footer className={guestStyles.footer}>Powered by Tojima</footer></main>;
 }

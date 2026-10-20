@@ -4,6 +4,7 @@ export type Availability = 'AVAILABLE' | 'PENDING_CONFIRMATION' | 'PAUSED';
 export interface PublicTable {
   mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN';
   current_session_id?: string;
+  store_display_name?: string;
   open: boolean;
   expired?: boolean;
 }
@@ -15,6 +16,7 @@ export interface GuestGrant {
 }
 
 export interface GuestMenu {
+  store_display_name?: string;
   currency: 'JPY';
   price_mode: 'TAX_INCLUSIVE';
   categories: Array<{

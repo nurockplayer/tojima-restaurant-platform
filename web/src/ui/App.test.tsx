@@ -1034,6 +1034,170 @@ describe('guest app mount', () => {
   });
 });
 
+describe('guest store display name', () => {
+  it('uses the table name before join, the menu name after join, and removes it when a poll unsets it', async () => {
+    vi.useFakeTimers();
+    window.history.replaceState({}, '', '/?table=display-name-table');
+    let menuReads = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/display-name-table')) return json({ ...table, mode: 'SESSION_PIN', store_display_name: 'PUBLIC-TABLE-NAME' });
+      if (url.endsWith('/v1/guest/tables/display-name-table/join')) return json(grant);
+      if (url.endsWith('/v1/guest/sessions/session-1/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/display-name-table/menu?amounts=string')) {
+        menuReads++;
+        const store_display_name = menuReads === 1 ? 'PUBLIC-MENU-NAME' : menuReads === 2 ? 'UPDATED-PUBLIC-MENU-NAME' : undefined;
+        return json({ ...guestMenu, ...(store_display_name ? { store_display_name } : {}) });
+      }
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+
+    await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot="api"]')?.textContent).toBe('PUBLIC-TABLE-NAME');
+    await act(async () => { getButton(host!, '参加する').click(); for (let i = 0; i < 30; i++) await Promise.resolve(); });
+    const slot = host.querySelector('[data-store-slot="api"]');
+    expect(slot?.textContent).toBe('PUBLIC-MENU-NAME');
+    expect(host.querySelector('header')?.textContent?.indexOf('PUBLIC-MENU-NAME')).toBeLessThan(host.querySelector('header')?.textContent?.indexOf('テーブル') ?? -1);
+    expect(host.querySelector('header')?.textContent).not.toMatch(/東島|TABLE ORDER|TOJIMA KITCHEN|OPEN TABLE|桌邊點餐/);
+    expect(host.textContent?.match(/Powered by Tojima/g)).toHaveLength(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(menuReads).toBeGreaterThanOrEqual(2);
+    expect(host.querySelector('[data-store-slot="api"]')?.textContent).toBe('UPDATED-PUBLIC-MENU-NAME');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(menuReads).toBeGreaterThanOrEqual(3);
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+  });
+
+  it('omits a missing API name, keeps the demo constant, and reads a session name from its menu', async () => {
+    window.history.replaceState({}, '', '/?table=no-display-name');
+    const noNameFetch = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/no-display-name')) return json(table);
+      if (url.endsWith('/v1/guest/tables/no-display-name/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/no-display-name/menu?amounts=string')) return json(guestMenu);
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', noNameFetch);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+    expect(host.textContent).not.toContain('博多餃子酒場 シロナガスクジラ');
+
+    await act(async () => { root?.unmount(); });
+    root = undefined; host.remove(); host = undefined;
+    window.history.replaceState({}, '', '/?table=demo-name');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/demo-name')) return json(table);
+      if (url.endsWith('/v1/guest/tables/demo-name/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/demo-name/menu?amounts=string')) return json({ ...guestMenu, store_display_name: 'API-NAME-MUST-NOT-WIN' });
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App demo />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot="demo"]')?.textContent).toBe('博多餃子酒場 シロナガスクジラ');
+    expect(host.textContent).not.toContain('API-NAME-MUST-NOT-WIN');
+
+    await act(async () => { root?.unmount(); });
+    root = undefined; host.remove(); host = undefined;
+    window.history.replaceState({}, '', '/?session=session-1');
+    sessionStorage.setItem('tojima.table-join.session-1', grant.table_join_token);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/sessions/session-1/menu?amounts=string')) return json({ ...guestMenu, store_display_name: 'SESSION-MENU-NAME' });
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot="api"]')?.textContent).toBe('SESSION-MENU-NAME');
+  });
+
+  it('clears the pre-join name when saved-token activation cannot load its menu', async () => {
+    window.history.replaceState({}, '', '/?table=pin-display-name');
+    sessionStorage.setItem('tojima.table-join.session-1', grant.table_join_token);
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/pin-display-name')) return json({ ...table, mode: 'SESSION_PIN', current_session_id: 'session-1', open: true, expired: true, store_display_name: 'STALE-PREJOIN-NAME' });
+      if (url.endsWith('/v1/guest/sessions/session-1/menu?amounts=string')) return json({ error: 'unavailable' }, 503);
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+    expect(host.textContent).not.toContain('STALE-PREJOIN-NAME');
+    expect(within(host).getByRole('textbox', { name: /テーブル PIN/ })).toBeTruthy();
+    expect(host.textContent).toContain('このテーブルは現在ご利用いただけません');
+  });
+
+  it('does not restore a table name after grant invalidation', async () => {
+    window.history.replaceState({}, '', '/?table=invalidated-display-name');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/invalidated-display-name')) return json({ ...table, store_display_name: 'OLD-PUBLIC-NAME' });
+      if (url.endsWith('/v1/guest/tables/invalidated-display-name/join')) return json(grant);
+      if (url.endsWith('/v1/guest/tables/invalidated-display-name/menu?amounts=string')) return json({ ...guestMenu, store_display_name: 'OLD-PUBLIC-NAME' });
+      if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ error: 'session_expired' }, 410);
+      if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); for (let i = 0; i < 40; i++) await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+    expect(host.textContent).not.toContain('OLD-PUBLIC-NAME');
+    expect(host.textContent).toContain('このテーブルは現在ご利用いただけません');
+  });
+
+  it('does not restore a prior locator name when its delayed status returns after navigation', async () => {
+    const oldStatus = deferred<Response>();
+    window.history.replaceState({}, '', '/?table=old-locator');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/old-locator')) return oldStatus.promise;
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot]')).toBeNull();
+
+    await act(async () => { root?.unmount(); });
+    root = undefined; host.remove(); host = undefined;
+    window.history.replaceState({}, '', '/?table=new-locator');
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/v1/guest/tables/new-locator')) return json({ ...table, mode: 'SESSION_PIN', open: false, store_display_name: 'NEW-LOCATOR-NAME' });
+      throw new Error(`Unexpected API request: ${url}`);
+    }));
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); for (let i = 0; i < 15; i++) await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot="api"]')?.textContent).toBe('NEW-LOCATOR-NAME');
+
+    await act(async () => { oldStatus.resolve(json({ ...table, mode: 'SESSION_PIN', open: false, store_display_name: 'OLD-LOCATOR-NAME' })); for (let i = 0; i < 15; i++) await Promise.resolve(); });
+    expect(host.querySelector('[data-store-slot="api"]')?.textContent).toBe('NEW-LOCATOR-NAME');
+    expect(host.textContent).not.toContain('OLD-LOCATOR-NAME');
+  });
+});
+
 async function mountGuestStatus(
   mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN',
   order: unknown,
