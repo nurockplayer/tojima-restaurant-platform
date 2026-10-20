@@ -199,7 +199,7 @@ The production build module inspection found 98 rendered React Aria/Stately modu
 
 ### Store-name source
 
-The guest API does not yet supply a store display name. DS-2 therefore uses the shared DEMO-only constant for demo presentation and omits the store-name slot outside demo mode. Adding a store display name to the customer API is a separate follow-up issue (P-89 default D1); this ADR does not invent an API source or persist a local name.
+D1 is implemented under [MOD-05 P-90](https://linear.app/higashijima-manage-system/issue/P-90), decision `D-MOD05-STORE-NAME-20261021`. The three gated guest reads expose optional `store_display_name` from the resolved store’s separate `guest_display_name` column. NULL omits the field and slot; internal store/tenant names are never fallbacks. Before join, table status supplies the name; after a menu arrives, that menu is authoritative even when the field is absent. Names wrap as text with no local persistence. The DEMO-only constant always wins. Controlled SQL, deploy order and all three rollback levels are in the [runbook](../ops/store-guest-display-name.md). P-90 builds measure guest JavaScript at **124.50 KB gzip (normal)** and **124.52 KB gzip (remote-demo)** using the DS-2 sum of Vite-reported two-decimal chunk sizes, below the unchanged 125 KB budget. Existing CSS Module topbar rules already provide `overflow-wrap: anywhere` and `min-width: 0`, so no CSS change is needed. Rendered D1 acceptance remains with the director; earlier DS-2 evidence does not validate P-90.
 
 ## 日本語（DS-2 追記）
 
@@ -222,7 +222,7 @@ ADR-0006 の方針に従い、React Aria Components `1.21.1` を初めて実需�
 | `StaffApp` | `64.14 KB` raw | 64.14 KB / 17.42 KB |
 | `CatalogApp` | `84.64 KB` raw | 84.65 KB / 26.32 KB |
 
-顧客 API に店舗表示名はまだ無い。DS-2 は demo 時だけ共有 DEMO 定数を表示し、非 demo では店舗名枠を表示しない。店舗名の API 追加は後続 issue とする（P-89 既定 D1）。API にない値を推測したりローカル保存したりしない。
+D1 は [MOD-05 P-90](https://linear.app/higashijima-manage-system/issue/P-90) で実装する。3つの gate 済み顧客 read は対象店舗の `guest_display_name` を任意の `store_display_name` として返す。NULL なら field と表示枠を省略し、内部名へフォールバックしない。join 前は table status、menu 取得後は値が省略されても menu が正。テキストで折り返し、ローカル保存しない。DEMO 定数は常に優先。[運用手順](../ops/store-guest-display-name.md)に受控 SQL と3段階 rollback を記録する。P-90 の guest JS は DS-2 と同じ Vite 報告値合計で normal 124.50 KB gzip、remote-demo 124.52 KB gzip（予算125 KB）。既存 CSS Module の折り返しを利用する。D1 の描画受入は director が実施し、過去の DS-2 証跡で P-90 を PASS にしない。
 
 ## 繁體中文（DS-2 補充）
 
@@ -245,4 +245,4 @@ ADR-0006 の方針に従い、React Aria Components `1.21.1` を初めて実需�
 | `StaffApp` | `64.14 KB` raw | 64.14 KB / 17.42 KB |
 | `CatalogApp` | `84.64 KB` raw | 84.65 KB / 26.32 KB |
 
-顧客 API 尚未提供店家顯示名稱。DS-2 僅在 demo 模式顯示共用的 DEMO 常數，非 demo 不顯示店名欄位。新增顧客 API 店名屬後續 issue（P-89 預設 D1）；本 ADR 不虛構 API 值或另行儲存店名。
+D1 由 [MOD-05 P-90](https://linear.app/higashijima-manage-system/issue/P-90) 實作。三個通過 gate 的顧客 read 從已解析店家的獨立 `guest_display_name` 欄位回傳可選的 `store_display_name`。NULL 時省略欄位及顯示區，絕不退回內部名稱。join 前由 table status 提供；取得 menu 後即以 menu 為準，即使名稱缺省也不沿用舊值。以文字換行顯示，不另存本機；DEMO 常數始終優先。[操作手冊](../ops/store-guest-display-name.md)記錄受控 SQL、部署及三層回滾。P-90 顧客 JS 依 DS-2 的 Vite 回報值加總為 normal 124.50 KB gzip、remote-demo 124.52 KB gzip（預算125 KB），沿用既有 CSS Module 換行規則。D1 畫面驗收由 director 執行，既有 DS-2 證據不代表 P-90 通過。
