@@ -54,6 +54,11 @@ type paymentHTTPFixture struct {
 
 func newPaymentHTTPFixture(t *testing.T) *paymentHTTPFixture {
 	t.Helper()
+	return newPaymentHTTPFixtureWithProvider(t, nil)
+}
+
+func newPaymentHTTPFixtureWithProvider(t *testing.T, checkoutProvider payments.Provider) *paymentHTTPFixture {
+	t.Helper()
 	dsn := os.Getenv("TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("TEST_DATABASE_URL required")
@@ -67,9 +72,12 @@ func newPaymentHTTPFixture(t *testing.T) *paymentHTTPFixture {
 	t.Cleanup(func() { f.Close(context.Background()) })
 
 	provider := testpayments.NewProvider()
+	if checkoutProvider == nil {
+		checkoutProvider = provider
+	}
 	account := stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: "acct_httpFixture"}
 	resolver := paymentHTTPResolver{paymentHTTPCredentialRef: {
-		Provider: provider, Account: account,
+		Provider: checkoutProvider, Account: account,
 		ProfileFingerprint: sha256.Sum256([]byte(stripeprovider.APIVersion + "|http-test-profile")),
 	}}
 	service, err := payments.New(f.Pool, f.Operations, resolver, payments.Config{

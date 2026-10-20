@@ -6,10 +6,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/authz"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/catalog"
@@ -98,7 +102,69 @@ func d1AssertPrivacy(t *testing.T, raw string, name string, designatedRead bool)
 }
 
 func TestGuestDisplayNameEveryGuestRouteAllowlistPostgres(t *testing.T) {
-	h := newPaymentHTTPFixture(t)
+	// Drive the real adapter and inspect its wire form, rather than metadata
+	// invented by an in-process provider's response fixture.
+	forms := make(chan url.Values, 2)
+	var mu sync.Mutex
+	sessions := make(map[string]map[string]any)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		if r.Method == http.MethodPost && r.URL.Path == "/v1/checkout/sessions" {
+			if err := r.ParseForm(); err != nil {
+				t.Error(err)
+				http.Error(w, "invalid form", http.StatusBadRequest)
+				return
+			}
+			forms <- r.PostForm
+			amount, err := strconv.ParseInt(r.PostForm.Get("line_items[0][price_data][unit_amount]"), 10, 64)
+			if err != nil {
+				t.Error(err)
+				http.Error(w, "invalid amount", http.StatusBadRequest)
+				return
+			}
+			metadata := make(map[string]string)
+			for _, key := range []string{"tenant_id", "store_id", "order_id", "attempt_id"} {
+				metadata[key] = r.PostForm.Get("metadata[" + key + "]")
+			}
+			id := fmt.Sprintf("cs_d1fixture%d", len(sessions)+1)
+			session := map[string]any{
+				"id": id, "object": "checkout.session", "livemode": false, "mode": "payment",
+				"currency": "jpy", "amount_total": amount, "status": "open", "payment_status": "unpaid",
+				"expires_at": time.Now().Add(time.Hour).Unix(), "url": "https://checkout.example.invalid/" + id,
+				"metadata": metadata,
+			}
+			sessions["/v1/checkout/sessions/"+id] = session
+			if err := json.NewEncoder(w).Encode(session); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		if session, ok := sessions[r.URL.Path]; r.Method == http.MethodGet && ok {
+			if err := json.NewEncoder(w).Encode(session); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		t.Errorf("unexpected Stripe request: %s %s", r.Method, r.URL.Path)
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	target, err := url.Parse(server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider, err := stripeprovider.New(stripeprovider.Config{
+		APIKey: "sk_test_d1fixtureonly", Mode: stripeprovider.ModeConnectedDirectFixture,
+		RequestTimeout: 2 * time.Second, MaxAmountJPY: 100000,
+		SuccessURL: "https://example.test/success", CancelURL: "https://example.test/cancel",
+		HTTPClient: &http.Client{Transport: d1StripeTransport{target: target}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := newPaymentHTTPFixtureWithProvider(t, provider)
 	f := h.fixture
 	ctx := context.Background()
 	if _, err := f.Pool.Exec(ctx, `UPDATE tenants SET name='INTERNAL-TENANT-SENTINEL' WHERE tenant_id=$1`, f.TenantID); err != nil {
@@ -204,23 +270,28 @@ func TestGuestDisplayNameEveryGuestRouteAllowlistPostgres(t *testing.T) {
 				t.Fatal("wrong read grant order")
 			}
 			check(h.request(t, "GET", "/v1/guest/orders/"+oid+"/status", "", readGrant["order_read_token"].(string), nil, "", ""), "order-status", false)
-			metadataChecked := false
-			h.provider.SetNextCreateHook(func(result stripeprovider.CheckoutResult) {
-				metadataChecked = true
-				if result.Metadata["order_id"] != oid || result.Metadata["tenant_id"] != f.TenantID || result.Metadata["store_id"] != f.StoreID {
-					t.Fatal("provider received wrong scope")
-				}
-				raw, err := json.Marshal(result.Metadata)
-				if err != nil {
-					t.Fatal(err)
-				}
-				d1AssertPrivacy(t, string(raw), name, false)
-			})
 			if worked, err := h.service.ProcessNext(ctx); err != nil || !worked {
 				t.Fatalf("checkout worker: %v %v", worked, err)
 			}
-			if !metadataChecked {
-				t.Fatal("Checkout metadata was not exercised")
+			select {
+			case form := <-forms:
+				for _, prefix := range []string{"metadata[", "payment_intent_data[metadata]["} {
+					for key, want := range map[string]string{"tenant_id": f.TenantID, "store_id": f.StoreID, "order_id": oid, "attempt_id": ""} {
+						got := form.Get(prefix + key + "]")
+						if got == "" || (want != "" && got != want) || got != form.Get("metadata["+key+"]") {
+							t.Fatalf("wrong outbound Stripe scope %s%s: %q", prefix, key, got)
+						}
+					}
+				}
+				// Check the complete decoded form so extra metadata keys and
+				// URL-encoded name values cannot escape either map's assertion.
+				raw, err := json.Marshal(form)
+				if err != nil {
+					t.Fatal(err)
+				}
+				d1AssertPrivacy(t, string(raw), "PUBLIC-STORE-NAME", false)
+			default:
+				t.Fatal("Checkout creation did not reach the Stripe HTTP server")
 			}
 			checkout := check(h.request(t, "GET", base+"/orders/"+oid+"/checkout", "", token, cookie, "", ""), "checkout", false)
 			if checkout["resume_available"] != true {
@@ -229,6 +300,17 @@ func TestGuestDisplayNameEveryGuestRouteAllowlistPostgres(t *testing.T) {
 			check(h.request(t, "POST", base+"/orders/"+oid+"/checkout/resume", "", "", cookie, paymentHTTPOrigin, ""), "resume", false)
 		})
 	}
+}
+
+// Same transport redirection pattern as internal/stripeprovider/provider_test.go.
+type d1StripeTransport struct{ target *url.URL }
+
+func (transport d1StripeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	clone := req.Clone(req.Context())
+	u := *req.URL
+	u.Scheme, u.Host = transport.target.Scheme, transport.target.Host
+	clone.URL, clone.Host = &u, transport.target.Host
+	return http.DefaultTransport.RoundTrip(clone)
 }
 
 func d1Fixture(t *testing.T, name *string) *testguest.Fixture {

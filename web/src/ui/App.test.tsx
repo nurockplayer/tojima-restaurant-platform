@@ -1133,15 +1133,24 @@ describe('guest store display name', () => {
   it('clears the pre-join name when saved-token activation cannot load its menu', async () => {
     window.history.replaceState({}, '', '/?table=pin-display-name');
     sessionStorage.setItem('tojima.table-join.session-1', grant.table_join_token);
-    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const failedMenu = json({ error: 'unavailable' }, 503);
+    const failedMenuJSON = vi.spyOn(failedMenu, 'json');
+    const unexpectedRequest = vi.fn();
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith('/v1/guest/tables/pin-display-name')) return json({ ...table, mode: 'SESSION_PIN', current_session_id: 'session-1', open: true, expired: true, store_display_name: 'STALE-PREJOIN-NAME' });
-      if (url.endsWith('/v1/guest/sessions/session-1/menu?amounts=string')) return json({ error: 'unavailable' }, 503);
+      if (url.endsWith('/v1/guest/tables/pin-display-name/menu?amounts=string')) return failedMenu;
+      unexpectedRequest(url);
       throw new Error(`Unexpected API request: ${url}`);
-    }));
+    });
+    vi.stubGlobal('fetch', fetchMock);
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     await act(async () => { root?.render(<App />); await Promise.resolve(); });
+    expect(fetchMock).toHaveBeenCalledWith(expect.stringContaining('/v1/guest/tables/pin-display-name/menu?amounts=string'), expect.any(Object));
+    expect(failedMenuJSON).toHaveBeenCalledOnce();
+    expect(failedMenu.bodyUsed).toBe(true);
+    expect(unexpectedRequest).not.toHaveBeenCalled();
     expect(host.querySelector('[data-store-slot]')).toBeNull();
     expect(host.textContent).not.toContain('STALE-PREJOIN-NAME');
     expect(within(host).getByRole('textbox', { name: /テーブル PIN/ })).toBeTruthy();
