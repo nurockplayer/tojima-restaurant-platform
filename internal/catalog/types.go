@@ -93,8 +93,9 @@ type Draft struct {
 }
 
 type PublishedMenu struct {
-	TenantID string `json:"-"`
-	StoreID  string `json:"-"`
+	TenantID         string  `json:"-"`
+	StoreID          string  `json:"-"`
+	GuestDisplayName *string `json:"-"`
 	// CatalogID identifies the exact private source catalog for persisted order
 	// provenance. It is deliberately excluded from public menu responses.
 	CatalogID int64  `json:"-"`

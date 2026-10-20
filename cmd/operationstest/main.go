@@ -61,6 +61,7 @@ func run() error {
 	withPayments := flag.Bool("payments-fixture", false, "enable isolated keyless provider fixture; no Stripe network or real payment")
 	catalogFixture := flag.Bool("catalog-fixture", false, "enable isolated catalog admin routes and local test credentials")
 	demoShironagasukujira := flag.Bool("demo-shironagasukujira", false, "seed the isolated Shironagasukujira reference-data demo")
+	guestDisplayName := flag.String("guest-display-name", "", "public store display name for the non-demo fixture only")
 	port := flag.Int("port", 8082, "test-only HTTP port on loopback (1024..65535)")
 	flag.Parse()
 	if err := validateStripeSandboxFlags(*stripeSandbox, *stripeTenant, *withPayments, *demoShironagasukujira, *catalogFixture); err != nil {
@@ -96,9 +97,13 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	var publicName *string
+	if *guestDisplayName != "" && !*demoShironagasukujira {
+		publicName = guestDisplayName
+	}
 	fixture, err := testguest.NewWithOptions(ctx, os.Getenv("TEST_DATABASE_URL"), testguest.Options{
 		CashEnabled: true, CashMode: "PAY_LATER", DemoShironagasukujira: *demoShironagasukujira,
-		StripeSandboxTenant: *stripeTenant,
+		StripeSandboxTenant: *stripeTenant, GuestDisplayName: publicName,
 	})
 	if err != nil {
 		return fmt.Errorf("create isolated database fixture: %w", err)

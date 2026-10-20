@@ -85,15 +85,17 @@ type Session struct {
 	Version                 int64      `json:"version"`
 }
 type TableInfo struct {
-	Scope         Scope
-	Locator       string
-	Enabled       bool
-	StoreEnabled  bool
-	TenantEnabled bool
-	Operating     bool
-	Mode          Mode
+	GuestDisplayName *string
+	Scope            Scope
+	Locator          string
+	Enabled          bool
+	StoreEnabled     bool
+	TenantEnabled    bool
+	Operating        bool
+	Mode             Mode
 }
 type PublicTable struct {
+	StoreDisplayName string `json:"store_display_name,omitempty"`
 	Mode             Mode   `json:"mode"`
 	CurrentSessionID string `json:"current_session_id,omitempty"`
 	Open             bool   `json:"open"`

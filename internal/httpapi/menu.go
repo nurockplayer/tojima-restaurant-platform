@@ -39,11 +39,12 @@ type publishCompanyCheckedRequest struct {
 }
 
 type guestMenu struct {
-	Currency   string          `json:"currency"`
-	PriceMode  string          `json:"price_mode"`
-	Mode       string          `json:"mode,omitempty"`
-	Revision   int64           `json:"revision,omitempty"`
-	Categories []guestCategory `json:"categories"`
+	StoreDisplayName string          `json:"store_display_name,omitempty"`
+	Currency         string          `json:"currency"`
+	PriceMode        string          `json:"price_mode"`
+	Mode             string          `json:"mode,omitempty"`
+	Revision         int64           `json:"revision,omitempty"`
+	Categories       []guestCategory `json:"categories"`
 }
 type guestCategory struct {
 	Key      string         `json:"key"`
@@ -183,6 +184,8 @@ func safeMenu(menu catalog.PublishedMenu, includeInactive bool) guestMenu {
 	if includeInactive {
 		result.Mode = menu.Mode
 		result.Revision = menu.Revision
+	} else if menu.GuestDisplayName != nil {
+		result.StoreDisplayName = *menu.GuestDisplayName
 	}
 	for _, category := range menu.Categories {
 		outCategory := guestCategory{Key: category.Key, Name: category.Name, Position: category.Position, Products: make([]guestProduct, 0, len(category.Products))}

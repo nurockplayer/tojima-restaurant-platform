@@ -44,9 +44,9 @@ func validMode(mode Mode) bool { return mode == StaffOpen || mode == SessionPIN 
 
 func (s *Service) TableByLocator(ctx context.Context, locator string) (TableInfo, error) {
 	var t TableInfo
-	err := s.db.QueryRow(ctx, `SELECT t.tenant_id,t.store_id,t.table_id,t.public_locator,t.enabled,s.enabled,s.operating,n.enabled,s.qr_entry_mode
+	err := s.db.QueryRow(ctx, `SELECT t.tenant_id,t.store_id,t.table_id,t.public_locator,t.enabled,s.enabled,s.operating,n.enabled,s.qr_entry_mode,s.guest_display_name
 		FROM dining_tables t JOIN stores s USING (tenant_id,store_id) JOIN tenants n USING(tenant_id) WHERE t.public_locator=$1`, locator).
-		Scan(&t.Scope.TenantID, &t.Scope.StoreID, &t.Scope.TableID, &t.Locator, &t.Enabled, &t.StoreEnabled, &t.Operating, &t.TenantEnabled, &t.Mode)
+		Scan(&t.Scope.TenantID, &t.Scope.StoreID, &t.Scope.TableID, &t.Locator, &t.Enabled, &t.StoreEnabled, &t.Operating, &t.TenantEnabled, &t.Mode, &t.GuestDisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TableInfo{}, ErrNotFound
 	}
@@ -55,9 +55,9 @@ func (s *Service) TableByLocator(ctx context.Context, locator string) (TableInfo
 
 func (s *Service) Table(ctx context.Context, scope Scope) (TableInfo, error) {
 	var t TableInfo
-	err := s.db.QueryRow(ctx, `SELECT t.tenant_id,t.store_id,t.table_id,t.public_locator,t.enabled,s.enabled,s.operating,n.enabled,s.qr_entry_mode
+	err := s.db.QueryRow(ctx, `SELECT t.tenant_id,t.store_id,t.table_id,t.public_locator,t.enabled,s.enabled,s.operating,n.enabled,s.qr_entry_mode,s.guest_display_name
 		FROM dining_tables t JOIN stores s USING (tenant_id,store_id) JOIN tenants n USING(tenant_id) WHERE t.tenant_id=$1 AND t.store_id=$2 AND t.table_id=$3`, scope.TenantID, scope.StoreID, scope.TableID).
-		Scan(&t.Scope.TenantID, &t.Scope.StoreID, &t.Scope.TableID, &t.Locator, &t.Enabled, &t.StoreEnabled, &t.Operating, &t.TenantEnabled, &t.Mode)
+		Scan(&t.Scope.TenantID, &t.Scope.StoreID, &t.Scope.TableID, &t.Locator, &t.Enabled, &t.StoreEnabled, &t.Operating, &t.TenantEnabled, &t.Mode, &t.GuestDisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return TableInfo{}, ErrNotFound
 	}
@@ -88,6 +88,9 @@ func (s *Service) PublicStatus(ctx context.Context, locator string) (PublicTable
 	result := PublicTable{Mode: t.Mode}
 	if !t.Enabled || !t.StoreEnabled || !t.TenantEnabled || !t.Operating {
 		return result, nil
+	}
+	if t.GuestDisplayName != nil {
+		result.StoreDisplayName = *t.GuestDisplayName
 	}
 	var sessionActive bool
 	err = s.db.QueryRow(ctx, `SELECT session_id,qr_mode,expires_at>clock_timestamp() FROM table_sessions WHERE tenant_id=$1 AND store_id=$2 AND table_id=$3 AND status='OPEN'`, t.Scope.TenantID, t.Scope.StoreID, t.Scope.TableID).Scan(&result.CurrentSessionID, &result.Mode, &sessionActive)

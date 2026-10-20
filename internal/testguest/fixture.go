@@ -39,6 +39,7 @@ type Fixture struct {
 // Options are explicit test-fixture settings and never select production
 // restaurant defaults.
 type Options struct {
+	GuestDisplayName      *string
 	CashEnabled           bool
 	CashMode              operations.CashMode
 	DemoShironagasukujira bool
@@ -122,7 +123,7 @@ func NewWithOptions(ctx context.Context, dsn string, options Options) (f *Fixtur
 	}
 	_, err = f.Pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES ($1,$2)`, f.TenantID, tenantName)
 	if err == nil {
-		_, err = f.Pool.Exec(ctx, `INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode) VALUES ($1,$2,$3,'DIRECT_SCAN')`, f.TenantID, f.StoreID, storeName)
+		_, err = f.Pool.Exec(ctx, `INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode,guest_display_name) VALUES ($1,$2,$3,'DIRECT_SCAN',$4)`, f.TenantID, f.StoreID, storeName, fixtureGuestDisplayName(options))
 	}
 	if err == nil {
 		_, err = f.Pool.Exec(ctx, `INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES ($1,$2,$3,$4,$5)`, f.TenantID, f.StoreID, f.TableID, tableName, f.Locator)
@@ -292,4 +293,12 @@ func loopbackTestDatabaseHosts(cfg *pgxpool.Config) bool {
 
 func loopbackTestDatabaseHost(host string) bool {
 	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+}
+
+// The demo constant remains the only display-name source for demo fixtures.
+func fixtureGuestDisplayName(options Options) *string {
+	if options.DemoShironagasukujira {
+		return nil
+	}
+	return options.GuestDisplayName
 }

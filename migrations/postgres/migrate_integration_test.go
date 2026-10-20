@@ -62,7 +62,7 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("012 pending-session-close guard trigger missing after up: exists=%v err=%v", exists, err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 14 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 15 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
 	var voidConstraint string
@@ -161,10 +161,10 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = target.QueryRow(ctx, `SELECT pg_get_functiondef('protect_cancellation_request()'::regprocedure)`).Scan(&upgradedGuard); err != nil || upgradedGuard != lockedGuard {
 		t.Fatalf("012 upgrade differs from fresh 013 guard: %v", err)
 	}
-	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<=12`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
+	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<=12 OR version=15`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
 		t.Fatalf("013 upgrade changed the 012 ledger: %v", err)
 	}
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 14 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 15 {
 		t.Fatalf("upgraded migration version %d err %v", version, err)
 	}
 	rollback014()
@@ -304,4 +304,42 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = postgres.Up(ctx, target); err != nil {
 		t.Fatalf("final up: %v", err)
 	}
+}
+
+func Test015EmptySchemaUpDownUp(t *testing.T) {
+	ctx, conn := connectMigrationTestSchema(t)
+	if err := postgres.Up(ctx, conn); err != nil {
+		t.Fatal(err)
+	}
+	assertColumn := func(want bool) {
+		t.Helper()
+		var present bool
+		if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='stores' AND column_name='guest_display_name')`).Scan(&present); err != nil || present != want {
+			t.Fatalf("015 column present=%v want=%v err=%v", present, want, err)
+		}
+	}
+	assertColumn(true)
+	down, err := os.ReadFile("015_store_guest_display_name.down.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, string(down)); err != nil {
+		t.Fatalf("015 down: %v", err)
+	}
+	if _, err = tx.Exec(ctx, `DELETE FROM schema_migrations WHERE version=15`); err != nil {
+		t.Fatal(err)
+	}
+	if err = tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	assertColumn(false)
+	if err = postgres.Up(ctx, conn); err != nil {
+		t.Fatalf("015 up again: %v", err)
+	}
+	assertColumn(true)
 }
