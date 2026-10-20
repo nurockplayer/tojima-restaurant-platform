@@ -847,6 +847,7 @@ async function topbarFlow() {
       await p.click({ css: 'button', name: c.locale === 'ja' ? '^参加する$' : '^加入桌次$' });
       await p.waitFor(`document.querySelector('[data-surface="guest"] h1')?.textContent.trim() === ${JSON.stringify(c.locale === 'ja' ? 'お品書き' : '菜單')}`, 10000, 'guest menu');
       await sleep(700);
+      await p.evaluate('window.scrollTo(0,0)'); await sleep(250);   // same first-viewport baseline as the DS-2 flow
       await captureTopbarState(p, c, 'menu-first-viewport', expected, false);
       c.passed = entry.passed && c.states['menu-first-viewport'].passed;
       c.pageErrors = p.errors.slice(0, 20);

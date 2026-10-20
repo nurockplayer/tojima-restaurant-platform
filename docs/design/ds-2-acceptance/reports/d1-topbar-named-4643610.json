@@ -1,0 +1,411 @@
+{
+  "meta": {
+    "label": "topbar",
+    "base": "http://127.0.0.1:8094",
+    "ui": "after",
+    "at": "2026-10-20T17:26:36.284Z",
+    "node": "v26.10.0",
+    "flags": {
+      "demo": "false",
+      "expect-store-name": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+      "combos": "ja:375,zh:375,ja:320,zh:320"
+    },
+    "chrome": "Chrome/155.0.8059.85"
+  },
+  "combos": {
+    "ja-375": {
+      "locale": "ja",
+      "width": 375,
+      "height": 812,
+      "tag": "ja-375",
+      "states": {
+        "entry-card": {
+          "name": "entry-card",
+          "shot": "shots/ja-375-entry-card.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku テーブル test-table 繁中",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 0,
+            "platformList": [],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "ご注文を始める"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "ja",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 375,
+            "deviceWidth": 375,
+            "over": false
+          },
+          "audit": {
+            "total": 11,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        },
+        "menu-first-viewport": {
+          "name": "menu-first-viewport",
+          "shot": "shots/ja-375-menu-first-viewport.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku テーブル test-table 繁中",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 1,
+            "platformList": [
+              "東島"
+            ],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "お品書き"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "ja",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 375,
+            "deviceWidth": 375,
+            "over": false
+          },
+          "audit": {
+            "total": 13,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        }
+      },
+      "errors": [],
+      "passed": true,
+      "pageErrors": []
+    },
+    "zh-375": {
+      "locale": "zh",
+      "width": 375,
+      "height": 812,
+      "tag": "zh-375",
+      "states": {
+        "entry-card": {
+          "name": "entry-card",
+          "shot": "shots/zh-375-entry-card.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku 桌次 test-table 日本語",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 0,
+            "platformList": [],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "開始點餐"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "zh-Hant",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 375,
+            "deviceWidth": 375,
+            "over": false
+          },
+          "audit": {
+            "total": 11,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        },
+        "menu-first-viewport": {
+          "name": "menu-first-viewport",
+          "shot": "shots/zh-375-menu-first-viewport.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku 桌次 test-table 日本語",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 1,
+            "platformList": [
+              "東島"
+            ],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "菜單"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "zh-Hant",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 375,
+            "deviceWidth": 375,
+            "over": false
+          },
+          "audit": {
+            "total": 13,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        }
+      },
+      "errors": [],
+      "passed": true,
+      "pageErrors": []
+    },
+    "ja-320": {
+      "locale": "ja",
+      "width": 320,
+      "height": 700,
+      "tag": "ja-320",
+      "states": {
+        "entry-card": {
+          "name": "entry-card",
+          "shot": "shots/ja-320-entry-card.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku テーブル test-table 繁中",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 0,
+            "platformList": [],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "ご注文を始める"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "ja",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 320,
+            "deviceWidth": 320,
+            "over": false
+          },
+          "audit": {
+            "total": 11,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        },
+        "menu-first-viewport": {
+          "name": "menu-first-viewport",
+          "shot": "shots/ja-320-menu-first-viewport.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku テーブル test-table 繁中",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 1,
+            "platformList": [
+              "東島"
+            ],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "お品書き"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "ja",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 320,
+            "deviceWidth": 320,
+            "over": false
+          },
+          "audit": {
+            "total": 13,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        }
+      },
+      "errors": [],
+      "passed": true,
+      "pageErrors": []
+    },
+    "zh-320": {
+      "locale": "zh",
+      "width": 320,
+      "height": 700,
+      "tag": "zh-320",
+      "states": {
+        "entry-card": {
+          "name": "entry-card",
+          "shot": "shots/zh-320-entry-card.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku 桌次 test-table 日本語",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 0,
+            "platformList": [],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "開始點餐"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "zh-Hant",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 320,
+            "deviceWidth": 320,
+            "over": false
+          },
+          "audit": {
+            "total": 11,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        },
+        "menu-first-viewport": {
+          "name": "menu-first-viewport",
+          "shot": "shots/zh-320-menu-first-viewport.png",
+          "topbar": {
+            "found": true,
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku 桌次 test-table 日本語",
+            "firstText": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+            "storeNameFirst": false,
+            "storeNameInTopbar": false,
+            "platformNamesInTopbar": 0,
+            "platformNamesInPage": 1,
+            "platformList": [
+              "東島"
+            ],
+            "poweredByTojima": 1,
+            "footerText": "Powered by Tojima",
+            "h1": [
+              "菜單"
+            ],
+            "eyebrowLike": [],
+            "htmlLang": "zh-Hant",
+            "dataSurface": "guest"
+          },
+          "slot": {
+            "kind": "api",
+            "text": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku"
+          },
+          "overflow": {
+            "scrollWidth": 320,
+            "deviceWidth": 320,
+            "over": false
+          },
+          "audit": {
+            "total": 13,
+            "controls": 0,
+            "fails": [],
+            "minFont": 12,
+            "small": [],
+            "disabledRows": 0
+          },
+          "clipping": [],
+          "passed": true
+        }
+      },
+      "errors": [],
+      "passed": true,
+      "pageErrors": []
+    }
+  },
+  "ds1": {
+    "states": {},
+    "summary": null
+  },
+  "js": null,
+  "notes": [],
+  "evaluation": {
+    "mode": "topbar",
+    "expectedStoreName": "海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku",
+    "combos": 4,
+    "passed": true,
+    "failed": []
+  },
+  "topbarSummary": "# D1 guest store display name topbar capture\n\nExpected store name: 海と山の恵み 季節料理と地酒の店 さくら食堂 駅前本店 Sakura Shoku\n\n| Combo | Entry card | Menu | Result |\n| --- | --- | --- | --- |\n| ja-375 | PASS | PASS | PASS |\n| zh-375 | PASS | PASS | PASS |\n| ja-320 | PASS | PASS | PASS |\n| zh-320 | PASS | PASS | PASS |\n\nOverall: PASS\n"
+}
