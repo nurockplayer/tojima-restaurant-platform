@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // DS-2 rendered-acceptance harness (P-89 section 5.4 / 5.5). Headless Chrome over CDP, zero npm dependencies.
 //
-//   node capture.mjs <before|after> <baseUrl> <credsFile> <outDir> [--combos=ja:375,zh:320] [--skip-ds1] [--only-ds1] [--skip-keyboard] [--skip-degraded]
+//   node capture.mjs <before|after|topbar> <baseUrl> <credsFile> <outDir> [--combos=ja:375,zh:320] [--skip-ds1] [--only-ds1] [--skip-keyboard] [--skip-degraded]
+// D1 topbar mode: node capture.mjs topbar <baseUrl> <credsFile> <outDir> --demo=false --expect-store-name=<text|none> --combos=ja:375,zh:375,ja:320,zh:320
+// Use a non-demo operationstest fixture with a seeded guest_display_name (or NULL for "none"); credentials remain in the owner-only file.
 //
 // Writes <outDir>/report-<label>.json, <outDir>/shots/*.png and <outDir>/summary-<label>.md.
 // Needs Node 24 (built-in WebSocket) and Google Chrome at /Applications/Google Chrome.app.
@@ -160,9 +162,13 @@ const SHEET_TAB_PRESSES = 20;                       // P-89 5.5: 20x Tab and 20x
 // =====================================================================================================================
 
 const argv = process.argv.slice(2);
-const flags = Object.fromEntries(argv.filter((a) => a.startsWith('--')).map((a) => { const [k, v] = a.slice(2).split('='); return [k, v ?? true]; }));
+const flags = Object.fromEntries(argv.filter((a) => a.startsWith('--')).map((a) => {
+  const flag = a.slice(2);
+  const separator = flag.indexOf('=');
+  return separator < 0 ? [flag, true] : [flag.slice(0, separator), flag.slice(separator + 1)];
+}));
 const [label, base, credsPath, outRoot] = argv.filter((a) => !a.startsWith('--'));
-if (!label || !base || !credsPath || !outRoot) { console.error('usage: node capture.mjs <before|after> <baseUrl> <credsFile> <outDir> [--combos=ja:375,...] [--skip-ds1|--only-ds1] [--skip-keyboard] [--skip-degraded]'); process.exit(2); }
+if (!label || !base || !credsPath || !outRoot) { console.error('usage: node capture.mjs <before|after|topbar> <baseUrl> <credsFile> <outDir> [--combos=ja:375,...] [--skip-ds1|--only-ds1] [--skip-keyboard] [--skip-degraded]'); process.exit(2); }
 const UI = (flags.ui || label) === 'before' ? UI_BEFORE : UI_AFTER;
 const IS_AFTER = UI === UI_AFTER;
 const creds = JSON.parse(readFileSync(credsPath, 'utf8'));
@@ -800,27 +806,113 @@ async function jsWeight() {
   } finally { await p.close(); }
 }
 
+async function prepareTopbarFixture() {
+  if (flags.demo !== 'false') throw new Error('topbar mode requires --demo=false');
+  if (typeof flags['expect-store-name'] !== 'string') throw new Error('topbar mode requires --expect-store-name=<text|none>');
+  if (typeof flags.combos !== 'string') throw new Error('topbar mode requires --combos=ja:375,zh:375,ja:320,zh:320');
+  const manager = creds.credentials?.manager;
+  if (!manager?.token) throw new Error('topbar mode requires manager credentials in the credentials file');
+  const apiBase = (creds.base_url || base).replace(/\/$/, '');
+  const scope = `/v1/staff/tenants/${encodeURIComponent(creds.tenant_id)}/stores/${encodeURIComponent(creds.store_id)}`;
+  const request = async (path, init) => {
+    const response = await fetch(apiBase + path, init);
+    const body = await response.text();
+    if (!response.ok) throw new Error(`${init.method} ${path} returned ${response.status}: ${body.slice(0, 240)}`);
+    return body ? JSON.parse(body) : null;
+  };
+  const headers = { authorization: `Bearer ${manager.token}`, 'content-type': 'application/json' };
+  await request(`${scope}/qr-mode`, { method: 'PUT', headers, body: JSON.stringify({ mode: 'STAFF_OPEN' }) });
+  await request(`${scope}/tables/${encodeURIComponent(creds.table_id)}/sessions`, { method: 'POST', headers, body: '{}' });
+}
+
+async function topbarFlow() {
+  await prepareTopbarFixture();
+  const expected = flags['expect-store-name'] === 'none' ? null : flags['expect-store-name'];
+  const combos = flags.combos.split(',').map((item) => {
+    const [locale, widthText] = item.split(':');
+    const width = Number(widthText);
+    if (!['ja', 'zh'].includes(locale) || ![320, 375].includes(width)) throw new Error(`invalid topbar combo: ${item}`);
+    return { locale, width, height: width === 375 ? 812 : 700, tag: `${locale}-${width}` };
+  });
+  for (const combo of combos) {
+    const c = { ...combo, states: {}, errors: [] };
+    report.combos[c.tag] = c;
+    const p = await chrome.newPage({ width: c.width, height: c.height, outDir: out, config: pageConfig(c.locale, c.width, c.height) });
+    try {
+      const url = `${base.replace(/\/$/, '')}/?table=${encodeURIComponent(creds.table_locator)}`;
+      await p.goto(url, 900);
+      await setLocale(p, c.locale);
+      await p.waitFor(`document.querySelector('[data-surface="guest"] .entry-card')`, 8000, 'guest entry card');
+      const entry = await captureTopbarState(p, c, 'entry-card', expected, true);
+      await p.click({ css: 'button', name: c.locale === 'ja' ? '^参加する$' : '^加入桌次$' });
+      await p.waitFor(`document.querySelector('[data-surface="guest"] h1')?.textContent.trim() === ${JSON.stringify(c.locale === 'ja' ? 'お品書き' : '菜單')}`, 10000, 'guest menu');
+      await sleep(700);
+      await p.evaluate('window.scrollTo(0,0)'); await sleep(250);   // same first-viewport baseline as the DS-2 flow
+      await captureTopbarState(p, c, 'menu-first-viewport', expected, false);
+      c.passed = entry.passed && c.states['menu-first-viewport'].passed;
+      c.pageErrors = p.errors.slice(0, 20);
+    } catch (error) {
+      c.errors.push(error.message.split('\n')[0]);
+      c.passed = false;
+      console.log(`  !! ${c.tag} topbar capture failed: ${error.message.split('\n')[0]}`);
+    } finally { await p.close(); }
+  }
+  const failed = Object.values(report.combos).filter((combo) => !combo.passed);
+  report.evaluation = { mode: 'topbar', expectedStoreName: expected ?? 'none', combos: combos.length, passed: failed.length === 0, failed: failed.map((combo) => combo.tag) };
+  report.topbarSummary = renderTopbarSummary(report);
+  if (failed.length) exitCode = 1;
+}
+
+async function captureTopbarState(p, c, name, expected, entryCard) {
+  const topbar = await p.call('topbarInfo');
+  const measure = await p.call('measure');
+  const audit = compactAudit(await p.call('audit'));
+  const overflow = await p.call('overflow');
+  const clipping = await p.evaluate(`(() => { const root = document.querySelector('[data-surface="guest"] header'); if (!root) return ['missing topbar']; const bad = []; for (const el of [root, ...root.querySelectorAll('*')]) { const cs = getComputedStyle(el), tag = el.tagName.toLowerCase(), clippedX = el.scrollWidth > el.clientWidth + 1, clippedY = el.scrollHeight > el.clientHeight + 1, lineClamped = (cs.lineClamp && cs.lineClamp !== 'none') || (cs.webkitLineClamp && cs.webkitLineClamp !== 'none'); if (cs.textOverflow === 'ellipsis' && clippedX) bad.push(tag + ':ellipsis-x'); if ((lineClamped || /(hidden|clip)/.test(cs.overflowY)) && clippedY) bad.push(tag + ':clipped-y'); if (/(hidden|clip)/.test(cs.overflowX) && clippedX) bad.push(tag + ':clipped-x'); } return [...new Set(bad)]; })()`);
+  const slot = await p.evaluate(`(() => { const el = document.querySelector('[data-store-slot]'); return el ? { kind: el.getAttribute('data-store-slot'), text: el.innerText.trim() } : null; })()`);
+  const slotOK = expected === null ? slot === null : slot?.kind === 'api' && slot.text === expected;
+  const firstTextOK = expected === null ? topbar.firstText !== expected : topbar.firstText === expected;
+  const passed = !!topbar.found && slotOK && (expected === null ? !slot : firstTextOK)
+    && !measure.overflow.over && !overflow.over && audit.fails.length === 0 && clipping.length === 0
+    && topbar.platformNamesInTopbar === 0 && topbar.poweredByTojima === 1;
+  const shot = await p.shot(`${c.tag}-${name}`, { full: entryCard });
+  const state = { name, shot, topbar, slot, overflow: { scrollWidth: overflow.scrollWidth, deviceWidth: overflow.deviceWidth, over: overflow.over }, audit, clipping, passed };
+  c.states[name] = state;
+  console.log(`  [${c.tag}] ${name}: name=${slot?.text ?? 'none'} aaFail=${audit.fails.length} overflow=${overflow.scrollWidth}/${overflow.deviceWidth}${overflow.over ? ' OVER' : ''} clipped=${clipping.length} passed=${passed}`);
+  return state;
+}
+
+function renderTopbarSummary(r) {
+  const lines = ['# D1 guest store display name topbar capture', '', `Expected store name: ${r.evaluation.expectedStoreName}`, '', '| Combo | Entry card | Menu | Result |', '| --- | --- | --- | --- |'];
+  for (const [tag, combo] of Object.entries(r.combos)) lines.push(`| ${tag} | ${combo.states?.['entry-card']?.passed ? 'PASS' : 'FAIL'} | ${combo.states?.['menu-first-viewport']?.passed ? 'PASS' : 'FAIL'} | ${combo.passed ? 'PASS' : 'FAIL'} |`);
+  lines.push('', `Overall: ${r.evaluation.passed ? 'PASS' : 'FAIL'}`, '');
+  return lines.join('\n');
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 const chrome = new Chrome();
 let exitCode = 0;
 try {
   await chrome.start();
   report.meta.chrome = chrome.version;
-  const only = typeof flags.combos === 'string' ? flags.combos.split(',').map((s) => s.split(':')) : null;
-  if (!flags['only-ds1']) {
-    for (const l of LOCALES) for (const [w, h] of VIEWPORTS) {
-      if (only && !only.some(([ol, ow]) => ol === l && Number(ow) === w)) continue;
-      try { await guestFlow(l, w, h); } catch (e) { report.combos[`${l}-${w}`] ??= {}; report.combos[`${l}-${w}`].fatal = e.stack || String(e); console.error(e); exitCode = 1; }
+  if (label === 'topbar') await topbarFlow();
+  else {
+    const only = typeof flags.combos === 'string' ? flags.combos.split(',').map((s) => s.split(':')) : null;
+    if (!flags['only-ds1']) {
+      for (const l of LOCALES) for (const [w, h] of VIEWPORTS) {
+        if (only && !only.some(([ol, ow]) => ol === l && Number(ow) === w)) continue;
+        try { await guestFlow(l, w, h); } catch (e) { report.combos[`${l}-${w}`] ??= {}; report.combos[`${l}-${w}`].fatal = e.stack || String(e); console.error(e); exitCode = 1; }
+      }
+      await jsWeight().catch((e) => report.notes.push('jsWeight: ' + e.message));
     }
-    await jsWeight().catch((e) => report.notes.push('jsWeight: ' + e.message));
+    if (!flags['skip-ds1']) await ds1Regression();
   }
-  if (!flags['skip-ds1']) await ds1Regression();
 } catch (e) {
   report.error = String(e.stack || e); console.error(e); exitCode = 1;
 } finally {
-  report.evaluation = evaluateReport(report, UI);
+  if (label !== 'topbar') report.evaluation = evaluateReport(report, UI);
   writeFileSync(join(out, `report-${label}.json`), JSON.stringify(report, null, 2));
-  writeFileSync(join(out, `summary-${label}.md`), renderSummary(report, UI));
+  writeFileSync(join(out, `summary-${label}.md`), label === 'topbar' ? report.topbarSummary ?? '# D1 guest store display name topbar capture\n\nFailed before capture.\n' : renderSummary(report, UI));
   await chrome.stop();
   console.log(`\nwrote ${join(out, `report-${label}.json`)} and summary-${label}.md`);
   process.exit(exitCode);

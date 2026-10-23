@@ -33,6 +33,7 @@ var migrations = []migration{
 	{version: 12, up: "012_stop_requests.up.sql", down: "012_stop_requests.down.sql"},
 	{version: 13, up: "013_stop_request_state_lock.up.sql", down: "013_stop_request_state_lock.down.sql"},
 	{version: 14, up: "014_stripe_unpaid_void.up.sql", down: "014_stripe_unpaid_void.down.sql"},
+	{version: 15, up: "015_store_guest_display_name.up.sql", down: "015_store_guest_display_name.down.sql"},
 }
 
 // Up applies all migrations atomically and serializes concurrent processes.

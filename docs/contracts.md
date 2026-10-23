@@ -6,6 +6,7 @@ This records the staged relational contracts, not production deployment approval
 | --- | --- | --- |
 | tenant → store → table | Scoped foreign keys; tenant/store indexes; resource scope comes from server-owned data | S1 / P-76 |
 | table_session | At most one OPEN session per physical table; CLOSED grants invalid; new seating gets a new ID | S1 |
+| guest store display name | Public, store-scoped `(tenant_id, store_id)` optional `stores.guest_display_name`; NULL omits `store_display_name` on the three guest reads; never falls back to `stores.name` or `tenants.name` | MOD-05 / [P-90](https://linear.app/higashijima-manage-system/issue/P-90) |
 | shared cart | One active generation per session; expected version CAS; operation idempotency | S3 / P-78 |
 | committed order/items | Unique (tenant, store, session, generation); immutable price/options/tax/publication/payment-method snapshot; order commit and generation advance in one transaction | S3 |
 | payment attempt | Scoped order + attempt identity uniqueness; retry cannot create another charge; reconciliation determines effective attempt | S5 / P-80 |

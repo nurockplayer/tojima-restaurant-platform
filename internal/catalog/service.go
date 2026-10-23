@@ -128,9 +128,10 @@ func (s *Service) ReadPublishedByTableLocator(ctx context.Context, locator strin
 	}
 	defer tx.Rollback(ctx)
 	var scope StoreScope
-	err = tx.QueryRow(ctx, `SELECT t.tenant_id,t.store_id FROM dining_tables t
+	var guestDisplayName *string
+	err = tx.QueryRow(ctx, `SELECT t.tenant_id,t.store_id,st.guest_display_name FROM dining_tables t
 		JOIN stores st USING(tenant_id,store_id) JOIN tenants n USING(tenant_id)
-		WHERE t.public_locator=$1 AND t.enabled AND st.enabled AND st.operating AND n.enabled`, locator).Scan(&scope.TenantID, &scope.StoreID)
+		WHERE t.public_locator=$1 AND t.enabled AND st.enabled AND st.operating AND n.enabled`, locator).Scan(&scope.TenantID, &scope.StoreID, &guestDisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PublishedMenu{}, ErrNotFound
 	}
@@ -144,6 +145,7 @@ func (s *Service) ReadPublishedByTableLocator(ctx context.Context, locator strin
 	if err = tx.Commit(ctx); err != nil {
 		return PublishedMenu{}, err
 	}
+	menu.GuestDisplayName = guestDisplayName
 	return menu, nil
 }
 
@@ -154,8 +156,9 @@ func (s *Service) ReadStoreMenu(ctx context.Context, scope StoreScope) (Publishe
 	}
 	defer tx.Rollback(ctx)
 	var actual StoreScope
-	err = tx.QueryRow(ctx, `SELECT s.tenant_id,s.store_id FROM stores s JOIN tenants n USING(tenant_id)
-		WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.enabled AND s.operating AND n.enabled`, scope.TenantID, scope.StoreID).Scan(&actual.TenantID, &actual.StoreID)
+	var guestDisplayName *string
+	err = tx.QueryRow(ctx, `SELECT s.tenant_id,s.store_id,s.guest_display_name FROM stores s JOIN tenants n USING(tenant_id)
+		WHERE s.tenant_id=$1 AND s.store_id=$2 AND s.enabled AND s.operating AND n.enabled`, scope.TenantID, scope.StoreID).Scan(&actual.TenantID, &actual.StoreID, &guestDisplayName)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return PublishedMenu{}, ErrNotFound
 	}
@@ -172,6 +175,7 @@ func (s *Service) ReadStoreMenu(ctx context.Context, scope StoreScope) (Publishe
 	if err = tx.Commit(ctx); err != nil {
 		return PublishedMenu{}, err
 	}
+	menu.GuestDisplayName = guestDisplayName
 	return menu, nil
 }
 
