@@ -16,6 +16,20 @@ Authority: Owner accepted all director defaults on 2026-10-19 ([P-74](https://li
 | D10 | Production hosting, IdP and backup (EXT-3) are proposed separately after 東島さん's demo feedback; they do not block the demo or Sandbox. | 8m/8n unchanged |
 | D11 | PRs #18 and #20 closed as superseded by #35 (#19 shows merged because #35 contains its head). | Done |
 
+## D2 superseded: API-provisioned merchants (2026-10-26 05:00 JST)
+
+Hosted onboarding for Stripe-collected accounts needs a merchant login with 2FA, which repeatedly stalled. On 2026-10-26 the Owner asked the director to finish D2/D3 without further browser work, stored the Sandbox `sk_test_` key once in the macOS Keychain item `tojima-stripe-sandbox` (D3 changed: agents' scripts read it at runtime and never print or save it), and acknowledged platform loss liability in the Sandbox platform profile. `scripts/stripe-sandbox-merchants.py` then created three platform-controlled Accounts v2 merchants (platform collects requirements and carries fees/losses, `dashboard=none`, Stripe test data only):
+
+| Tenant | Account | `tojima_test_fixture` | 2026-10-26 state |
+|---|---|---|---|
+| A | `acct_1UUXcL1Hm4VOReK9` | `synthetic_merchant_a_api` | `charges_enabled=true`, card_payments active |
+| B | `acct_1UUXd51Hm4v7xrOu` | `synthetic_merchant_b_api` | same |
+| C | `acct_1UUXdU1Hm4vaUfKX` | `synthetic_merchant_c_api` | same |
+
+Payouts stay disabled until Stripe finishes test document verification; Sandbox payment tests don't need payouts. The old `acct_1URmck1Hm4yzytJz`, the half-onboarded `acct_1URooZ1Hm482Mkia` and `acct_1UUWZI1Hm4RnzVOv` are not used. Production charge mode (EXT-1) is still open: these fixtures use platform-owned losses only because Stripe requires it for API onboarding.
+
+The steps below are kept for history.
+
 ## D2 Owner steps (Stripe Dashboard, Sandbox "Tachiko Choko 沙盒")
 
 The Stripe connector available to agents cannot create connected accounts or onboarding links, so these steps are the Owner's.
