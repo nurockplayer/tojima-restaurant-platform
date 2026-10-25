@@ -9,9 +9,10 @@ package payments
 // Scope: the adopted values are injected exactly as a deployment must inject
 // them, so these tests prove behaviour under the adopted configuration, not
 // that a wiring literal still says 4h. The one production default,
-// ordering.DefaultOrderReadTTL, is exercised through ordering.New and asserted
-// directly. Deadlines are read back against the database clock, and checkout
-// proofs are checked at exact boundary times supplied to Verify.
+// ordering.DefaultOrderReadTTL, is exercised through ordering.NewWithOrderPolicy
+// (built on ordering.New) and asserted directly. Deadlines are read back against
+// the database clock, and checkout proofs are checked at exact boundary times
+// supplied to Verify.
 
 import (
 	"context"
@@ -402,6 +403,11 @@ func TestEXT4LongMealOutlivesSession(t *testing.T) {
 		t.Fatalf("checkout should be open before expiry: status=%+v err=%v", status, err)
 	}
 
+	// The four-hour boundary is absolute: joining and committing did not extend it.
+	if moved := p.sessionExpiresAt(t, grant.Session.ID); !moved.Equal(expiry) {
+		t.Fatalf("session expiry moved from %s to %s before expiry", expiry, moved)
+	}
+
 	p.expireSession(t, grant.Session.ID)
 
 	// After four hours: no rejoin, no cart, no new order, no continuation.
@@ -416,10 +422,6 @@ func TestEXT4LongMealOutlivesSession(t *testing.T) {
 		IdempotencyKey: "ext4-meal-late", PreviewFingerprint: "unused", PaymentMethod: ordering.Cash,
 	}); !errors.Is(err, ordering.ErrDenied) {
 		t.Fatalf("order after session expiry: got %v, want ErrDenied", err)
-	}
-	// The boundary is absolute: none of the guest actions above extended it.
-	if moved := p.sessionExpiresAt(t, grant.Session.ID); !moved.Equal(expiry) {
-		t.Fatalf("session expiry moved from %s to %s", expiry, moved)
 	}
 	// The Stripe page cannot be resumed from the app after the boundary; only
 	// the already-open page can still complete (asserted below).
