@@ -53,36 +53,71 @@ Row 8h stays GAP until a deployed ingress passes these checks; the application
 itself does not throttle, so a run against a plain local runtime is expected to
 FAIL.
 
-`cmd/bursttest` is a deployment-agnostic probe: it sends empty `{}` bodies to a
-synthetic session ID, never sends cookies, auth headers or secrets, sets
-`User-Agent: tojima-bursttest/1`, and refuses non-loopback hosts unless
-`-allow-remote` is given.
+`cmd/bursttest` is a deployment-agnostic **count-threshold probe**: it assumes
+the ingress counts requests in a fixed or sliding count window. A token bucket
+(for example nginx `limit_req` without `burst`) may reject earlier than the count
+window suggests, and nginx's default rejection is 503, which the probe does not
+count as 429 — configure the ingress to return 429 for this test.
+
+It sends empty `{}` bodies to a synthetic session ID, never sends cookies, auth
+headers or secrets (a `-base-url` with userinfo, a query or a fragment is
+refused), sets `User-Agent: tojima-bursttest/1`, and refuses non-loopback hosts
+unless `-allow-remote` is given.
 
 ```sh
+# Build once: the exit-code contract below holds for the compiled binary,
+# not for `go run` (which reports exit status 2 as 1).
+go build -o /tmp/bursttest ./cmd/bursttest
+
 # Loopback (e.g. against a local proxy that enforces D8):
-go run ./cmd/bursttest -base-url http://127.0.0.1:8080 -profile v1
+/tmp/bursttest -base-url http://127.0.0.1:8080 -profile v1
 
 # Deployed pilot ingress, one profile at a time:
-go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile v1 -allow-remote
-go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile commit -allow-remote
-go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile checkout -allow-remote
+/tmp/bursttest -base-url https://<pilot-ingress> -profile v1 -allow-remote
+/tmp/bursttest -base-url https://<pilot-ingress> -profile commit -allow-remote
+/tmp/bursttest -base-url https://<pilot-ingress> -profile checkout -allow-remote
 ```
 
-PASS means no 429 among the first `-expect-limit` requests (120 for `v1`, 10 for
-`commit`/`checkout`) and at least one 429 after them. Exit 0 = PASS, 1 = FAIL,
-2 = usage error. `-requests` (default limit + 20), `-window` (default 60s) and
-`-concurrency` (default 4) adjust the burst; run all profiles from the same
-client IP so one client's budget is measured, and space runs out if the ingress
-window is rolling.
+PASS is an exact boundary check: no transport error, and the first 429 is request
+`-expect-limit` (0-based; 120 for `v1`, 10 for `commit`/`checkout`) — requests
+before it were allowed and that request was rejected. A first 429 after that
+point fails with "limit looser than expected"; an earlier one fails with "limit
+tighter than expected". If the last request starts more than `-window` + 10%
+(or 1s, whichever is larger) after the burst started, the result is
+`INVALID (dispatch overran window ...)` and the run does not count. Exit
+0 = PASS, 1 = FAIL/INVALID, 2 = usage error.
 
-日本語：D8 の入口制限（`/v1` は120/分/IP、cart commit と checkout-context は10/分/IP）を
-`cmd/bursttest` で確認する。最初の `-expect-limit` 件に 429 がなく、その後に 429 が
-1件以上あれば PASS（終了0）、なければ FAIL（終了1）、用法誤りは終了2。
-非 loopback は `-allow-remote` が必要。アプリ自体は制限しないため、素のローカル実行は FAIL が正常。
+Before each profile, wait until this client IP's budget has fully reset: the
+counting period plus any mitigation/block time (for example a Cloudflare
+mitigation timeout) must have passed. For a fixed window, start right at the
+beginning of a minute so the default 10s burst finishes without crossing a
+window boundary. `-requests` (default limit + 20), `-window` (default 10s) and
+`-concurrency` (default 1; higher values can reorder requests against the
+index-based rule) adjust the burst.
 
-繁中：用 `cmd/bursttest` 驗證 D8 的入口限制（`/v1` 每 IP 120/分，cart commit 與
-checkout-context 每 IP 10/分）。前 `-expect-limit` 筆沒有 429、之後至少一筆 429 為 PASS
-（結束碼 0），否則 FAIL（1），用法錯誤為 2。非 loopback 須加 `-allow-remote`；
+A PASS covers only the probed path and profile. It does not prove the ingress
+rule matches **all** `/v1/...` paths or that the counter is per client IP rather
+than per IP plus path; confirm the deployed rule's path matching and key in the
+ingress configuration by hand. Run every profile from the same client IP.
+
+日本語：`cmd/bursttest` は固定／sliding の count window を前提とする count threshold probe。
+token bucket（burst なしの nginx `limit_req` 等）は早めに拒否しうるため、429 を返す設定で試験する
+（nginx 既定の 503 は 429 と数えない）。PASS は「transport error なし、かつ最初の 429 が
+ちょうど `-expect-limit` 件目（0 始まり）」の完全一致。それより後なら "limit looser"、前なら
+"limit tighter" で FAIL、最終要求の開始が window＋10%（最大1秒）を超えたら INVALID。
+各 profile の前に IP 予算と mitigation/block 時間の経過を待ち、fixed window は分の先頭から
+10 秒で走らせる。PASS は当該 path のみの証拠で、全 `/v1/...` の path 一致と per-IP（per-IP+path
+でない）counter は ingress 設定で別途確認する。終了コードは build 済み binary で使う
+（`go run` は exit 2 を 1 にする）。アプリ自体は制限しないため、素のローカル実行は FAIL が正常。
+
+繁中：`cmd/bursttest` 是假設固定／滑動 count window 的「計數門檻」探測器；token bucket
+（例如未設 burst 的 nginx `limit_req`）可能提早拒絕，nginx 預設的 503 不算 429，需改成回 429。
+PASS 是精確邊界：無 transport error，且第一個 429 正好是第 `-expect-limit` 筆（0 起算）；
+更晚為 "limit looser"、更早為 "limit tighter"，皆 FAIL；最後一筆開始時間超出 window＋10%
+（或 1 秒，取大者）則為 INVALID。每個 profile 前要等 IP 預算與 mitigation/block 時間歸零，
+fixed window 從整分鐘開頭起跑，讓預設 10 秒的 burst 不跨界。PASS 只證明該 path，
+仍需人工確認 ingress rule 涵蓋全部 `/v1/...` 且 counter 是 per-IP（非 per-IP+path）。
+exit code 契約只對編譯後的 binary 成立（`go run` 會把 2 變成 1）。
 應用本身不做限流，直接對本地 runtime 跑出 FAIL 屬預期。
 
 ## Actual binary configuration / 実際の設定 / 實際設定

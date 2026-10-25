@@ -60,8 +60,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 	profileName := fs.String("profile", "v1", "profile to probe: v1, commit or checkout")
 	sessionID := fs.String("session-id", defaultSessionID, "synthetic session ID used in the path")
 	requests := fs.Int("requests", 0, "total requests to send (default -expect-limit + 20)")
-	window := fs.Duration("window", time.Minute, "time window for the whole burst")
-	concurrency := fs.Int("concurrency", 4, "number of concurrent senders")
+	window := fs.Duration("window", 10*time.Second, "time window for the whole burst")
+	concurrency := fs.Int("concurrency", 1, "number of concurrent senders")
 	expectLimit := fs.Int("expect-limit", 0, "requests allowed before 429 (default 120 for v1, 10 for commit and checkout)")
 	allowRemote := fs.Bool("allow-remote", false, "allow a non-loopback host")
 	if err := fs.Parse(args); err != nil {
@@ -75,6 +75,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	base, err := url.Parse(*baseURL)
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
 		fmt.Fprintf(stderr, "bursttest: -base-url must be an http(s) URL with a host, got %q\n", *baseURL)
+		return exitUsage
+	}
+	// Go turns userinfo into a Basic Authorization header, and query/fragment
+	// would leak into the probe URL; the probe must never carry credentials.
+	if base.User != nil || base.RawQuery != "" || base.Fragment != "" {
+		fmt.Fprintln(stderr, "bursttest: -base-url must not contain userinfo, a query or a fragment")
 		return exitUsage
 	}
 	if !isLoopback(base) && !*allowRemote {
@@ -116,8 +122,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 		Timeout:       30 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	statuses, errs := burst(context.Background(), client, target, spec, *requests, *window, *concurrency)
+	statuses, errs, d := burst(context.Background(), client, target, spec, *requests, *window, *concurrency)
 	s := summarise(statuses, errs, *expectLimit)
+	allowance := max(*window/10, time.Second)
+	overrun := d.lastStart.Sub(d.start.Add(*window))
 
 	fmt.Fprintf(stdout, "bursttest: profile=%s method=%s url=%s requests=%d window=%s concurrency=%d expect-limit=%d\n",
 		spec.name, spec.method, target, *requests, *window, *concurrency, *expectLimit)
@@ -133,9 +141,23 @@ func run(args []string, stdout, stderr io.Writer) int {
 	if s.errorCount > 0 {
 		fmt.Fprintf(stdout, "transport errors: %d (first: %v)\n", s.errorCount, s.firstErr)
 	}
+	// A slow ingress can push the last request past the window, which
+	// invalidates the count comparison instead of failing the limit.
+	if overrun > allowance {
+		fmt.Fprintf(stdout, "result: INVALID (dispatch overran window by %s, allowance %s)\n", overrun.Round(time.Millisecond), allowance)
+		return exitFail
+	}
 	if s.pass {
 		fmt.Fprintln(stdout, "result: PASS")
 		return exitPass
+	}
+	switch {
+	case s.errorCount > 0:
+		fmt.Fprintln(stdout, "reason: transport errors prevented a verdict")
+	case s.first429 < 0 || s.first429 > *expectLimit:
+		fmt.Fprintln(stdout, "reason: limit looser than expected")
+	default:
+		fmt.Fprintln(stdout, "reason: limit tighter than expected")
 	}
 	fmt.Fprintln(stdout, "result: FAIL")
 	return exitFail
@@ -150,13 +172,20 @@ func isLoopback(u *url.URL) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// dispatch records when the burst started and when its last request started.
+type dispatch struct {
+	start     time.Time
+	lastStart time.Time
+}
+
 // burst spreads total requests evenly across window and sends up to
 // concurrency at a time. Results keep the send order by request index.
-func burst(ctx context.Context, client *http.Client, target string, spec profile, total int, window time.Duration, concurrency int) ([]int, []error) {
+func burst(ctx context.Context, client *http.Client, target string, spec profile, total int, window time.Duration, concurrency int) ([]int, []error, dispatch) {
 	statuses := make([]int, total)
 	errs := make([]error, total)
+	starts := make([]time.Time, total)
 	gap := window / time.Duration(total)
-	start := time.Now()
+	d := dispatch{start: time.Now(), lastStart: time.Now()}
 
 	jobs := make(chan int)
 	var wg sync.WaitGroup
@@ -165,9 +194,10 @@ func burst(ctx context.Context, client *http.Client, target string, spec profile
 		go func() {
 			defer wg.Done()
 			for i := range jobs {
-				if wait := time.Until(start.Add(time.Duration(i) * gap)); wait > 0 {
+				if wait := time.Until(d.start.Add(time.Duration(i) * gap)); wait > 0 {
 					time.Sleep(wait)
 				}
+				starts[i] = time.Now()
 				statuses[i], errs[i] = send(ctx, client, target, spec)
 			}
 		}()
@@ -177,7 +207,12 @@ func burst(ctx context.Context, client *http.Client, target string, spec profile
 	}
 	close(jobs)
 	wg.Wait()
-	return statuses, errs
+	for _, started := range starts {
+		if started.After(d.lastStart) {
+			d.lastStart = started
+		}
+	}
+	return statuses, errs, d
 }
 
 func send(ctx context.Context, client *http.Client, target string, spec profile) (int, error) {
@@ -220,8 +255,9 @@ func (s summary) codes() []int {
 	return codes
 }
 
-// summarise applies the PASS rule: no 429 among the first expectLimit
-// requests, at least one 429 after them, and no transport errors.
+// summarise applies the PASS rule: no transport errors and the first 429 is
+// exactly request expectLimit (0-based), i.e. requests 0..expectLimit-1 were
+// allowed and request expectLimit was rejected.
 func summarise(statuses []int, errs []error, expectLimit int) summary {
 	s := summary{total: len(statuses), counts: map[int]int{}, first429: -1}
 	for i, code := range statuses {
@@ -237,6 +273,6 @@ func summarise(statuses []int, errs []error, expectLimit int) summary {
 			s.first429 = i
 		}
 	}
-	s.pass = s.errorCount == 0 && s.first429 >= expectLimit
+	s.pass = s.errorCount == 0 && s.first429 == expectLimit
 	return s
 }
