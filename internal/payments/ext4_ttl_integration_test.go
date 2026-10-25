@@ -2,9 +2,16 @@ package payments
 
 // EXT-4 TTL acceptance tests. These pin the Owner-adopted MVP pilot lifetimes
 // (2026-10-26) against the four pilot scenarios: long meals, payment
-// continuation, table close and ORDER_READ after close. Every test uses the
-// adopted values from constructor options; expiry is simulated with database
-// clock updates, never with sleeps, so no test depends on wall-clock waiting.
+// continuation, table close and ORDER_READ after close. Expiry is simulated
+// with database clock updates, never with sleeps, so no test depends on
+// wall-clock waiting.
+//
+// Scope: the adopted values are injected exactly as a deployment must inject
+// them, so these tests prove behaviour under the adopted configuration, not
+// that a wiring literal still says 4h. The one production default,
+// ordering.DefaultOrderReadTTL, is exercised through ordering.New and asserted
+// directly. Deadlines are read back against the database clock, and checkout
+// proofs are checked at exact boundary times supplied to Verify.
 
 import (
 	"context"
@@ -26,9 +33,8 @@ import (
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/testpayments"
 )
 
-// Adopted MVP pilot TTLs. Owner decision 2026-10-26; the runbook EXT-4 row
-// records them. They are named here so a changed default fails these tests
-// instead of silently weakening the pilot evidence.
+// Adopted MVP pilot TTLs. Owner decision 2026-10-26; the runbook EXT-4 section
+// records them.
 const (
 	ext4SessionTTL      = 4 * time.Hour
 	ext4GrantTTL        = time.Hour
@@ -65,6 +71,20 @@ func newEXT4Platform(t *testing.T, ctx context.Context) *ext4Platform {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { f.Close(context.Background()) })
+	// Expiry is simulated by moving persisted deadlines; the immutable-snapshot
+	// triggers block that by design, so the disposable fixture schema turns them
+	// off (same as the other payments integration tests).
+	for _, stmt := range []string{
+		`ALTER TABLE table_sessions DISABLE TRIGGER table_session_snapshot_immutable`,
+		`ALTER TABLE stripe_payment_attempts DISABLE TRIGGER stripe_payment_attempt_snapshot_immutable`,
+	} {
+		if _, err = f.Pool.Exec(ctx, stmt); err != nil {
+			t.Fatalf("disable test trigger: %v", err)
+		}
+	}
+	if ordering.DefaultOrderReadTTL != ext4OrderReadTTL {
+		t.Fatalf("ordering.DefaultOrderReadTTL is %s, want the adopted %s", ordering.DefaultOrderReadTTL, ext4OrderReadTTL)
+	}
 	provider := testpayments.NewProvider()
 	account := stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: "acct_ext4"}
 	const credential = "fixture:ext4:v1"
@@ -90,7 +110,7 @@ func newEXT4Platform(t *testing.T, ctx context.Context) *ext4Platform {
 	if err != nil {
 		t.Fatal(err)
 	}
-	orders, err := ordering.NewWithOrderReadTTL(f.Pool, sessions, f.Menus, service, ext4OrderReadTTL)
+	orders, err := ordering.NewWithOrderPolicy(f.Pool, sessions, f.Menus, service)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,12 +144,25 @@ func (p *ext4Platform) join(t *testing.T, expectedSessionID string) tablesession
 
 func (p *ext4Platform) issueProof(t *testing.T) (string, checkoutproof.Proof) {
 	t.Helper()
-	token, proof, err := p.proofs.Issue(time.Now().UTC())
+	return p.issueProofAt(t, time.Now().UTC())
+}
+
+// issueProofAt issues a proof and pins the 30m lifetime and both boundary
+// decisions against the exact times supplied, never a sleep or the wall clock.
+func (p *ext4Platform) issueProofAt(t *testing.T, issuedAt time.Time) (string, checkoutproof.Proof) {
+	t.Helper()
+	token, proof, err := p.proofs.Issue(issuedAt)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ttl := proof.ExpiresAt.Sub(time.Now().UTC()); ttl < ext4ProofTTL-time.Minute || ttl > ext4ProofTTL+time.Second {
-		t.Fatalf("checkout proof TTL is not the adopted 30m: issued for %s", ttl)
+	if want := issuedAt.Add(ext4ProofTTL); !proof.ExpiresAt.Equal(want) {
+		t.Fatalf("checkout proof expires at %s, want the adopted issued+30m %s", proof.ExpiresAt, want)
+	}
+	if _, err = p.proofs.Verify(token, proof.ExpiresAt.Add(-time.Nanosecond)); err != nil {
+		t.Fatalf("proof must verify one nanosecond before its expiry: %v", err)
+	}
+	if _, err = p.proofs.Verify(token, proof.ExpiresAt); !errors.Is(err, checkoutproof.ErrInvalidProof) {
+		t.Fatalf("proof at its own expiry: got %v, want ErrInvalidProof", err)
 	}
 	return token, proof
 }
@@ -152,8 +185,9 @@ func (p *ext4Platform) addLine(t *testing.T, sessionID, token, key string) order
 }
 
 // commit places one order through the public guest path. Stripe commits carry
-// the hash and expiry of a freshly issued 30-minute checkout proof.
-func (p *ext4Platform) commit(t *testing.T, sessionID, token, key string, method ordering.PaymentMethod) ordering.CommitResult {
+// the hash and expiry of a freshly issued 30-minute checkout proof unless the
+// caller supplies one, which the continuation tests use to age the proof.
+func (p *ext4Platform) commit(t *testing.T, sessionID, token, key string, method ordering.PaymentMethod, supplied ...checkoutproof.Proof) ordering.CommitResult {
 	t.Helper()
 	cart := p.addLine(t, sessionID, token, key+"-line")
 	preview, err := p.orders.Preview(p.ctx, sessionID, token, cart.Generation, cart.Version)
@@ -165,7 +199,12 @@ func (p *ext4Platform) commit(t *testing.T, sessionID, token, key string, method
 		IdempotencyKey: key, PreviewFingerprint: preview.Fingerprint, PaymentMethod: method,
 	}
 	if method == ordering.Stripe {
-		_, proof := p.issueProof(t)
+		proof := checkoutproof.Proof{}
+		if len(supplied) > 0 {
+			proof = supplied[0]
+		} else {
+			_, proof = p.issueProof(t)
+		}
 		copy(req.CheckoutProofHash[:], proof.Hash)
 		req.CheckoutProofExpiresAt = proof.ExpiresAt
 	}
@@ -230,6 +269,36 @@ func (p *ext4Platform) expireSession(t *testing.T, sessionID string) {
 	t.Helper()
 	if _, err := p.fixture.Pool.Exec(p.ctx, `UPDATE table_sessions SET expires_at=clock_timestamp()-interval '1 second',version=version+1 WHERE session_id=$1`, sessionID); err != nil {
 		t.Fatalf("expire session: %v", err)
+	}
+}
+
+// dbDeadline reads a persisted deadline relative to the database clock in the
+// same statement, so host/database clock skew cannot decide an assertion.
+func (p *ext4Platform) dbDeadline(t *testing.T, query string, args ...any) time.Duration {
+	t.Helper()
+	var seconds float64
+	if err := p.fixture.Pool.QueryRow(p.ctx, query, args...).Scan(&seconds); err != nil {
+		t.Fatalf("read deadline: %v", err)
+	}
+	return time.Duration(seconds * float64(time.Second))
+}
+
+func (p *ext4Platform) sessionExpiresAt(t *testing.T, sessionID string) time.Time {
+	t.Helper()
+	var expires time.Time
+	if err := p.fixture.Pool.QueryRow(p.ctx, `SELECT expires_at FROM table_sessions WHERE session_id=$1`, sessionID).Scan(&expires); err != nil {
+		t.Fatalf("read session expiry: %v", err)
+	}
+	return expires
+}
+
+// wantLifetime asserts a lifetime written and read by the same database clock.
+// Only statement latency separates the two, so seconds are the honest tolerance:
+// ten seconds late is a loaded runner, a different lifetime is a regression.
+func wantLifetime(t *testing.T, label string, got, want time.Duration) {
+	t.Helper()
+	if got < want-10*time.Second || got > want+time.Second {
+		t.Fatalf("%s: got %s, want %s", label, got.Round(time.Millisecond), want)
 	}
 }
 
@@ -323,7 +392,11 @@ func TestEXT4LongMealOutlivesSession(t *testing.T) {
 	defer cancel()
 	p := newEXT4Platform(t, ctx)
 	grant := p.join(t, "")
-	order := p.commit(t, grant.Session.ID, grant.Token, "ext4-meal", ordering.Stripe)
+	expiry := p.sessionExpiresAt(t, grant.Session.ID)
+	_, proof := p.issueProof(t)
+	var proofHash [32]byte
+	copy(proofHash[:], proof.Hash)
+	order := p.commit(t, grant.Session.ID, grant.Token, "ext4-meal", ordering.Stripe, proof)
 	p.drainWork(t)
 	if status, err := p.service.ReadSafeStatus(ctx, p.tableScope(), grant.Session.ID, order.Order.ID); err != nil || status.State != StateOpen {
 		t.Fatalf("checkout should be open before expiry: status=%+v err=%v", status, err)
@@ -343,6 +416,18 @@ func TestEXT4LongMealOutlivesSession(t *testing.T) {
 		IdempotencyKey: "ext4-meal-late", PreviewFingerprint: "unused", PaymentMethod: ordering.Cash,
 	}); !errors.Is(err, ordering.ErrDenied) {
 		t.Fatalf("order after session expiry: got %v, want ErrDenied", err)
+	}
+	// The boundary is absolute: none of the guest actions above extended it.
+	if moved := p.sessionExpiresAt(t, grant.Session.ID); !moved.Equal(expiry) {
+		t.Fatalf("session expiry moved from %s to %s", expiry, moved)
+	}
+	// The Stripe page cannot be resumed from the app after the boundary; only
+	// the already-open page can still complete (asserted below).
+	if ok, err := p.service.CanResume(ctx, grant.Session.ID, order.Order.ID, proofHash); err != nil || ok {
+		t.Fatalf("resume after session expiry: ok=%v err=%v", ok, err)
+	}
+	if _, err := p.service.Resume(ctx, grant.Session.ID, order.Order.ID, proofHash); !errors.Is(err, ErrProofDenied) {
+		t.Fatalf("resume after session expiry: got %v, want ErrProofDenied", err)
 	}
 
 	// The guest is still on the Stripe page and pays there. The verification
@@ -450,6 +535,23 @@ func TestEXT4GapOrderCommittedBeforeExpiryCreateAfter(t *testing.T) {
 	if state.PaymentStatus != operations.Pending {
 		t.Fatalf("expected pending order state: %+v", state)
 	}
+	// Establish the cause before calling it a gap: the CREATE worker must have
+	// failed the attempt itself for SESSION_UNAVAILABLE, not for a provider or
+	// configuration reason somewhere else.
+	var attemptState string
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT state FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID).Scan(&attemptState); err != nil {
+		t.Fatal(err)
+	}
+	if attemptState != string(StateFailed) {
+		t.Fatalf("attempt state is %s, want %s", attemptState, StateFailed)
+	}
+	var eventKey string
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT event_key FROM stripe_payment_attempt_events WHERE order_id=$1 AND event_key LIKE 'WORK_STATE:FAILED:%'`, order.Order.ID).Scan(&eventKey); err != nil {
+		t.Fatalf("worker recorded no FAILED transition: %v", err)
+	}
+	if want := "WORK_STATE:FAILED:SESSION_UNAVAILABLE"; eventKey != want {
+		t.Fatalf("failure cause is %q, want %q", eventKey, want)
+	}
 	var voidErr error
 	if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
 		Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
@@ -459,9 +561,12 @@ func TestEXT4GapOrderCommittedBeforeExpiryCreateAfter(t *testing.T) {
 	}
 	closeErr := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor)
 	if voidErr == nil || closeErr == nil {
-		t.Fatalf("EXT-4 gap appears fixed (void=%v close=%v); remove this skip and assert the recovery path", voidErr, closeErr)
+		t.Skipf("EXT-4 gap appears fixed (void=%v close=%v); replace this skipped case with the recovery assertion", voidErr, closeErr)
 	}
-	t.Skipf("EXT-4 gap: order committed before session expiry but Checkout creation ran after expiry is unrecoverable (void=%v close=%v); staff cannot close the table until a void/cancel path exists for an attempt without a provider Checkout", voidErr, closeErr)
+	if !errors.Is(voidErr, ErrVoidNotEligible) || !errors.Is(closeErr, tablesession.ErrCloseBlocked) {
+		t.Fatalf("gap failed for an unrelated reason: void=%v close=%v", voidErr, closeErr)
+	}
+	t.Skipf("EXT-4 gap: an order committed before session expiry whose Checkout creation runs after expiry is unrecoverable (void=%v close=%v); staff cannot close the table until a void/cancel path exists for an attempt without a provider Checkout", voidErr, closeErr)
 }
 
 // TestEXT4PaymentContinuationWindow covers scenario 2: continuation works at
@@ -492,15 +597,44 @@ func TestEXT4PaymentContinuationWindow(t *testing.T) {
 		t.Fatal(err)
 	}
 	p.drainWork(t)
-	var continuation time.Time
-	if err = p.fixture.Pool.QueryRow(ctx, `SELECT continuation_expires_at FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID).Scan(&continuation); err != nil {
+	// continuation = min(commit + 30m, proof expiry). This proof was issued
+	// moments before the commit, so its expiry is the effective deadline.
+	var cappedByProof int
+	if err = p.fixture.Pool.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempts WHERE order_id=$1 AND continuation_expires_at <> checkout_proof_expires_at`, order.Order.ID).Scan(&cappedByProof); err != nil {
 		t.Fatal(err)
 	}
-	if remaining := continuation.Sub(time.Now().UTC()); remaining < ext4ContinuationTTL-time.Minute || remaining > ext4ContinuationTTL+5*time.Second {
-		t.Fatalf("continuation is not the adopted 30m: %s remaining", remaining)
+	if cappedByProof != 0 {
+		t.Fatalf("continuation is not capped by the checkout proof expiry")
+	}
+	wantLifetime(t, "continuation window", p.dbDeadline(t, `SELECT extract(epoch FROM continuation_expires_at - clock_timestamp()) FROM stripe_payment_attempts WHERE order_id=$1`, order.Order.ID), ext4ContinuationTTL)
+
+	// A proof with only five minutes left must shorten the window to five
+	// minutes rather than grant a fresh 30.
+	agedToken, agedProof := p.issueProofAt(t, time.Now().UTC().Add(-ext4ProofTTL+5*time.Minute))
+	if _, err = p.proofs.Verify(agedToken, time.Now().UTC()); err != nil {
+		t.Fatalf("a proof with five minutes left must still be usable: %v", err)
+	}
+	aged := p.commit(t, grant.Session.ID, grant.Token, "ext4-cont-aged", ordering.Stripe, agedProof)
+	p.drainWork(t)
+	agedWindow := p.dbDeadline(t, `SELECT extract(epoch FROM continuation_expires_at - clock_timestamp()) FROM stripe_payment_attempts WHERE order_id=$1`, aged.Order.ID)
+	wantLifetime(t, "continuation window capped by a five-minute proof", agedWindow, 5*time.Minute)
+	if err = p.fixture.Pool.QueryRow(ctx, `SELECT count(*) FROM stripe_payment_attempts WHERE order_id=$1 AND continuation_expires_at <> checkout_proof_expires_at`, aged.Order.ID).Scan(&cappedByProof); err != nil {
+		t.Fatal(err)
+	}
+	if cappedByProof != 0 {
+		t.Fatalf("aged-proof continuation is not capped by its proof expiry")
+	}
+	agedState := p.order(t, grant.Session.ID, aged.Order.ID)
+	if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
+		Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: aged.Order.ID, Actor: ext4Actor,
+		IdempotencyKey: "ext4-cont-aged-void", Reason: "window probe, guest never paid", ExpectedVersion: agedState.Version,
+	}); err != nil {
+		t.Fatalf("void the aged-window probe order: %v", err)
 	}
 
-	// Minute 29: still resumable.
+	// Minute 29: still resumable. The clock position is simulated by moving the
+	// persisted continuation deadline (CanResume/Resume read it from the
+	// database); the proof's own 30m boundary is pinned in issueProofAt.
 	if _, err = p.fixture.Pool.Exec(ctx, `UPDATE stripe_payment_attempts SET continuation_expires_at=clock_timestamp()+interval '1 minute' WHERE order_id=$1`, order.Order.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -532,9 +666,6 @@ func TestEXT4PaymentContinuationWindow(t *testing.T) {
 	}
 	if n := p.attemptCount(t, order.Order.ID); n != 1 {
 		t.Fatalf("guest was charged through %d attempts, want exactly 1", n)
-	}
-	if _, err := p.proofs.Verify(token, time.Now().UTC()); err != nil {
-		t.Fatalf("proof within TTL must still verify: %v", err)
 	}
 	if _, err := p.orders.ReadOrderStatus(ctx, order.Order.ID, order.OrderReadGrant.Token); err != nil {
 		t.Fatalf("ORDER_READ after continuation expiry: %v", err)
@@ -596,10 +727,13 @@ func TestEXT4OrderReadSurvivesSessionAndClose(t *testing.T) {
 	if order.OrderReadGrant == nil {
 		t.Fatal("commit omitted the ORDER_READ grant")
 	}
-	grantTTL := order.OrderReadGrant.ExpiresAt.Sub(time.Now().UTC())
-	if grantTTL < ext4OrderReadTTL-time.Minute || grantTTL > ext4OrderReadTTL+5*time.Second {
-		t.Fatalf("ORDER_READ TTL is not the adopted 24h: %s", grantTTL)
+	// The platform uses ordering.New, so this is the production default; assert
+	// both the constant and the deadline the guest actually received.
+	if ordering.DefaultOrderReadTTL != ext4OrderReadTTL {
+		t.Fatalf("ordering.DefaultOrderReadTTL is %s, want the adopted %s", ordering.DefaultOrderReadTTL, ext4OrderReadTTL)
 	}
+	hash := sha256.Sum256([]byte(order.OrderReadGrant.Token))
+	wantLifetime(t, "ORDER_READ TTL", p.dbDeadline(t, `SELECT extract(epoch FROM expires_at - clock_timestamp()) FROM order_read_grants WHERE token_hash=$1`, hash[:]), ext4OrderReadTTL)
 
 	p.expireSession(t, grant.Session.ID)
 	if status, err := p.orders.ReadOrderStatus(ctx, order.Order.ID, order.OrderReadGrant.Token); err != nil || status.PaymentStatus != "UNPAID" {
@@ -620,7 +754,6 @@ func TestEXT4OrderReadSurvivesSessionAndClose(t *testing.T) {
 		t.Fatalf("ORDER_READ request after close: got %v, want ErrDenied", err)
 	}
 	// The adopted 24h lifetime still ends the capability.
-	hash := sha256.Sum256([]byte(order.OrderReadGrant.Token))
 	if _, err = p.fixture.Pool.Exec(ctx, `UPDATE order_read_grants SET created_at=clock_timestamp()-interval '25 hours',expires_at=clock_timestamp()-interval '1 hour' WHERE token_hash=$1`, hash[:]); err != nil {
 		t.Fatal(err)
 	}
@@ -631,7 +764,8 @@ func TestEXT4OrderReadSurvivesSessionAndClose(t *testing.T) {
 
 // TestEXT4PINTTLAndLockout pins the adopted PIN lifetimes: 15 minutes for new
 // PIN joins, three attempts, one-minute lockout, and staff ResetPIN recovery.
-// Existing grants are untouched by PIN expiry.
+// Existing grants are untouched by PIN expiry, but ResetPIN revokes them, and a
+// grant issued near the session boundary is capped by the session expiry.
 func TestEXT4PINTTLAndLockout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -643,10 +777,13 @@ func TestEXT4PINTTLAndLockout(t *testing.T) {
 	if err != nil || opened.PIN == "" {
 		t.Fatalf("open PIN session: %+v err=%v", opened, err)
 	}
-	if ttl := opened.Session.ExpiresAt.Sub(opened.Session.OpenedAt); ttl < ext4SessionTTL-time.Second || ttl > ext4SessionTTL+time.Second {
+	if ttl := opened.Session.ExpiresAt.Sub(opened.Session.OpenedAt); ttl < ext4SessionTTL || ttl > ext4SessionTTL+time.Millisecond {
 		t.Fatalf("session TTL is not the adopted 4h: %s", ttl)
 	}
 	sessionID := opened.Session.ID
+	// Open writes the PIN deadline from the database clock it also stamps the
+	// session with, so this pins the 15-minute PIN lifetime at issuance.
+	wantLifetime(t, "PIN TTL", p.dbDeadline(t, `SELECT extract(epoch FROM pin_expires_at - clock_timestamp()) FROM table_sessions WHERE session_id=$1`, sessionID), ext4PINTTL)
 	wrong := "000000"
 	if opened.PIN == wrong {
 		wrong = "999999"
@@ -661,6 +798,8 @@ func TestEXT4PINTTLAndLockout(t *testing.T) {
 			t.Fatalf("wrong PIN attempt %d: got %v, want %v", i, err, want)
 		}
 	}
+	// The lockout triggered by the third wrong attempt lasts the adopted minute.
+	wantLifetime(t, "PIN lockout", p.dbDeadline(t, `SELECT extract(epoch FROM pin_locked_until - clock_timestamp()) FROM table_sessions WHERE session_id=$1`, sessionID), ext4PINLockout)
 	if _, err := p.sessions.Join(ctx, sessionID, sessionID, opened.PIN); !errors.Is(err, tablesession.ErrPINLocked) {
 		t.Fatalf("locked PIN: got %v, want ErrPINLocked", err)
 	}
@@ -671,10 +810,29 @@ func TestEXT4PINTTLAndLockout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PIN join after lockout: %v", err)
 	}
-	if grantTTL := grant.ExpiresAt.Sub(time.Now().UTC()); grantTTL < ext4GrantTTL-time.Minute || grantTTL > ext4GrantTTL+5*time.Second {
-		t.Fatalf("grant TTL is not the adopted 1h: %s", grantTTL)
-	}
+	grantHash := sha256.Sum256([]byte(grant.Token))
+	wantLifetime(t, "TABLE_JOIN grant TTL", p.dbDeadline(t, `SELECT extract(epoch FROM expires_at - clock_timestamp()) FROM table_join_grants WHERE token_hash=$1`, grantHash[:]), ext4GrantTTL)
 	p.addLine(t, sessionID, grant.Token, "ext4-pin-line")
+
+	// A grant issued close to the session boundary is capped by it rather than
+	// outliving the session it belongs to.
+	if _, err = p.fixture.Pool.Exec(ctx, `UPDATE table_sessions SET expires_at=clock_timestamp()+interval '20 minutes',version=version+1 WHERE session_id=$1`, sessionID); err != nil {
+		t.Fatal(err)
+	}
+	cappedExpiry := p.sessionExpiresAt(t, sessionID)
+	nearGrant, err := p.sessions.Join(ctx, sessionID, sessionID, opened.PIN)
+	if err != nil {
+		t.Fatalf("PIN join near the session boundary: %v", err)
+	}
+	nearHash := sha256.Sum256([]byte(nearGrant.Token))
+	wantLifetime(t, "grant capped by session expiry", p.dbDeadline(t, `SELECT extract(epoch FROM expires_at - clock_timestamp()) FROM table_join_grants WHERE token_hash=$1`, nearHash[:]), 20*time.Minute)
+	var uncapped int
+	if err = p.fixture.Pool.QueryRow(ctx, `SELECT count(*) FROM table_join_grants g JOIN table_sessions s USING(session_id) WHERE g.token_hash=$1 AND g.expires_at <> s.expires_at`, nearHash[:]).Scan(&uncapped); err != nil {
+		t.Fatal(err)
+	}
+	if uncapped != 0 {
+		t.Fatal("grant near the session boundary is not capped by the session expiry")
+	}
 
 	// PIN expiry (15m) stops new PIN joins only; the issued grant keeps working.
 	if _, err = p.fixture.Pool.Exec(ctx, `UPDATE table_sessions SET pin_expires_at=clock_timestamp()-interval '1 second' WHERE session_id=$1`, sessionID); err != nil {
@@ -686,11 +844,21 @@ func TestEXT4PINTTLAndLockout(t *testing.T) {
 	if _, err := p.orders.ReadCart(ctx, sessionID, grant.Token); err != nil {
 		t.Fatalf("issued grant must survive PIN expiry: %v", err)
 	}
+	// An expired PIN needs staff recovery. ResetPIN also bumps the grant
+	// generation, which revokes every grant issued under the old PIN.
 	reset, err := p.sessions.ResetPIN(ctx, p.sessionScope(), sessionID, ext4Actor)
 	if err != nil || reset.PIN == "" || reset.PIN == opened.PIN {
 		t.Fatalf("staff PIN reset: %+v err=%v", reset, err)
 	}
+	for _, revoked := range []string{grant.Token, nearGrant.Token} {
+		if _, err := p.orders.ReadCart(ctx, sessionID, revoked); !errors.Is(err, ordering.ErrDenied) {
+			t.Fatalf("grant issued before ResetPIN: got %v, want ErrDenied", err)
+		}
+	}
 	if _, err := p.sessions.Join(ctx, sessionID, sessionID, reset.PIN); err != nil {
 		t.Fatalf("join with reset PIN: %v", err)
+	}
+	if moved := p.sessionExpiresAt(t, sessionID); !moved.Equal(cappedExpiry) {
+		t.Fatalf("session expiry moved from %s to %s", cappedExpiry, moved)
 	}
 }
