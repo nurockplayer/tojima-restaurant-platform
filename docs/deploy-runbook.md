@@ -30,7 +30,7 @@ first deployment. Local synthetic tests cannot close external gates.
 | --- | --- | --- | --- |
 | EXT-1 | Payments/merchant owner approves Stripe Connect charge mode, tenant/store→account mapping, test credentials/endpoint ownership and real two-merchant Sandbox async paid/failed/expiry/reconcile/refund evidence. Current adapter accepts only its explicit fixture mode and `sk_test_` keys; this is not live activation. | 決済責任者が Connect 方式・店舗/account 対応・試験鍵と endpoint 管理・実 Sandbox 2店舗の非同期決済／失敗／期限切れ／照合／返金を受入。現 adapter は fixture mode と `sk_test_` のみで本番決済未承認。 | 付款負責人核准 Connect 模式、店別帳戶、測試金鑰及 endpoint 管理，驗證真實 Sandbox 雙商家非同步付款／失敗／到期／核對／退款；目前只接受 fixture mode 與 `sk_test_`，不代表正式啟用。 |
 | EXT-3 | Identity/hosting/security/recovery owners approve real MOD-08 current membership + MFA, runtime composition, HTTPS/cookies/origin/ingress, direct `/order` SPA entry, Secret Manager/rotation, monitoring, backup retention and restore access. Approve RPO/RTO and execute a timed restore rehearsal with integrity checks. | 実 MOD-08 の現在所属・MFA、本番構成、HTTPS/cookie/origin/ingress、`/order` 直接表示、Secret Manager・鍵更新、監視、backup 保存と復元権限を決定。RPO/RTO と実復元・整合性確認を受入。 | 核准真實 MOD-08 當前權限與 MFA、正式組裝、HTTPS/cookie/origin/入口、`/order` 直入、Secret Manager／輪替、監控、備份保留及還原權限；核准 RPO/RTO 並實測還原時間與完整性。 |
-| EXT-4 | Product Owner approves session, TABLE_JOIN, PIN, checkout-proof/continuation and ORDER_READ TTLs and retention/sharing policy. Owner decision D5 (2026-10-19) approves ORDER_READ's 24h lifetime for the MVP pilot; the other TTLs and retention/sharing policy remain open. Supported constructor range is 1 minute–7 days. | session・各 grant・PIN・Checkout 継続・ORDER_READ の TTL、保存・共有方針を承認。ORDER_READ の24時間は D5（2026-10-19）で MVP 試店向けに承認済み、他の TTL と保存・共有方針は未決。設定範囲1分〜7日。 | 核准 session、各 grant、PIN、Checkout 憑證／延續、ORDER_READ 的 TTL 與保留／分享政策；ORDER_READ 24小時已由 D5（2026-10-19）核准用於 MVP 試店，其他 TTL 與保留／分享政策仍待決定；建構參數範圍1分鐘至7天。 |
+| EXT-4 | Product Owner approves session, TABLE_JOIN, PIN, checkout-proof/continuation and ORDER_READ TTLs and retention/sharing policy. Owner decision 2026-10-26 adopts the MVP pilot TTLs (session 4h, TABLE_JOIN 1h, PIN 15m with 3 attempts and a 1m lockout, checkout proof and payment continuation 30m, ORDER_READ 24h per D5 2026-10-19); retention/sharing policy remains open. Supported constructor range is 1 minute–7 days. | session・TABLE_JOIN・PIN・Checkout 継続・ORDER_READ の TTL は 2026-10-26 の Owner 決定で承認（session 4時間、TABLE_JOIN 1時間、PIN 15分・3回・1分ロック、Checkout 30分、ORDER_READ 24時間＝D5）。保存・共有方針は未決。設定範囲1分〜7日。 | 核准 session、TABLE_JOIN、PIN、Checkout 憑證／延續、ORDER_READ 的 TTL 與保留／分享政策；Owner 於 2026-10-26 核定 MVP 試店數值（session 4 小時、TABLE_JOIN 1 小時、PIN 15 分鐘／3 次／鎖定 1 分鐘、Checkout 憑證與付款延續 30 分鐘、ORDER_READ 24 小時依 D5）；保留／分享政策仍待決定；建構參數範圍 1 分鐘至 7 天。 |
 | P-81 C | Product Owner explicitly accepts the MVP omission/deferment or approves the MOD-01 ingredient/recipe identity contract and delivery scope. Catalog/hold tests do not implement ingredient mapping. | MVP での延期・除外か MOD-01 食材／レシピ identity 契約と実装範囲を明示。catalog/hold 試験は食材対応の実装ではない。 | 明確接受 MVP 延後／排除，或核准 MOD-01 食材／食譜 identity 契約與交付範圍；菜單／停售測試不等於食材映射。 |
 | Shared tablet: My Orders | Decided by D6 (2026-10-19): the MVP supports guests' own phones only; shared-tablet clearing is post-MVP. Do not deploy shared store tablets for guest ordering in the pilot. Closing a table does not revoke independent ORDER_READ links. | D6（2026-10-19）で決定：MVP は客自身のスマホのみ、共用タブレットの消去機能は Post-MVP。試店で客用共用タブレットを置かない。閉卓だけでは ORDER_READ は失効しない。 | 已由 D6（2026-10-19）決定：MVP 只支援顧客自己的手機，共用平板清除列 Post-MVP；試店不放置供顧客點餐的共用平板。關桌不會撤銷獨立 ORDER_READ。 |
 | Fixed QR, 3c | Decided by D7 (re-confirmed 2026-10-19): STAFF_OPEN with one fixed QR per table. While a table is open, anyone with the QR (including a photo) can join, and PAY_LATER cash orders go to the kitchen without staff acceptance. Configure stores as STAFF_OPEN; join/PIN rate limits follow 8h. | D7（2026-10-19 再確認）で決定：STAFF_OPEN＋卓ごとの固定 QR。開卓中は QR（写真含む）を持つ人なら参加でき、後払い現金はスタッフ受付なしで厨房へ。店舗は STAFF_OPEN に設定、join/PIN のレート制限は 8h に従う。 | 已由 D7（2026-10-19 重新確認）決定：STAFF_OPEN＋每桌固定 QR。開桌期間持 QR（含照片）者都能加入，後付現金單不經店員接單直接進廚房。店家設定為 STAFF_OPEN，加入／PIN 速率限制依 8h。 |
@@ -43,6 +43,53 @@ local and finite; evaluate deployed proxy/APM/collector logging separately.
 8j は有限のローカル証拠で、配備先 proxy/APM/collector のログは別途確認する。
 另保留 5h 憑證遺失驗證、7f 無障礙、7g 手機實機及現金／廚房／關桌／退款人工驗收；
 8j 僅涵蓋有限本地路徑，部署端 proxy/APM/collector 日誌須另驗。
+
+## EXT-4 pilot TTLs / EXT-4 試店 TTL / EXT-4 試店有效期限
+
+Owner decision 2026-10-26 adopts these MVP pilot values. Retention and sharing
+policy stays open; this section deliberately records no retention periods.
+Pinned by `internal/payments/ext4_ttl_integration_test.go` (run with
+`sh scripts/test-postgres.sh`, which needs a disposable PostgreSQL container).
+
+| Setting | Adopted | What it governs | When it expires |
+| --- | --- | --- | --- |
+| `tablesession.Options.SessionTTL` | 4h | Physical seating session, fixed at `opened_at` (absolute, not sliding). Gates guest join, cart/order commit, payment continuation and asynchronous Checkout creation. | Guests cannot join or order; staff can still settle cash, approve reviews, advance fulfillment and close the table, then open a new session. |
+| `tablesession.Options.GrantTTL` | 1h | TABLE_JOIN grants issued by each join, capped at the session's remaining lifetime. | That browser token stops reading/ordering; a new join issues a new grant (rate-limited by `GrantWindow`). Table close revokes all join tokens; ORDER_READ is independent. |
+| `tablesession.Options.PINTTL` (3 attempts, 1m lockout) | 15m | Only new SESSION_PIN joins. Existing grants are untouched. | PIN joins return `ErrInvalidPIN`; staff `ResetPIN` issues a fresh PIN. |
+| `checkoutproof.Config.TTL` | 30m | The browser checkout context bound to one Stripe order commit/continuation. | The proof cannot commit a new Stripe order or resume a Checkout. |
+| `payments.Config.ContinuationTTL` | 30m (capped by the proof expiry) | Only re-displaying the private Stripe Checkout URL (`CanResume`/`Resume`). | Resume is denied, but a payment completed on the Stripe page already open still settles by webhook — exactly once. If the session is no longer open it lands `PAID` + manager review. |
+| ORDER_READ (D5, 2026-10-19) | 24h | Per-order guest status link issued at commit (or requested while a join grant is valid). | The link stops working; it cannot be re-issued after table close. It intentionally survives session expiry and close. |
+
+Staff recovery when a long meal outlives the session: ask the guest to finish
+the Stripe page already open (the payment still settles; a late match flags
+review), approve the review, settle any cash, serve the orders, close the
+expired session (allowed), then open a new session for the next party. The
+earlier guests keep their 24h ORDER_READ links either way.
+
+Known gap, tracked under EXT-4: an order committed seconds before session
+expiry whose asynchronous Checkout creation runs after expiry ends as a FAILED
+attempt with no provider Checkout. It cannot be voided (void needs an existing
+Checkout) and blocks table close; `TestEXT4GapOrderCommittedBeforeExpiryCreateAfter`
+pins it as a skipped test. Staff should escalate, not retry.
+
+日本語：Owner 決定（2026-10-26）で MVP 試店の TTL を承認。保存・共有方針は未決のため
+本節に保存期間は書かない。session 4時間（開卓時刻から固定）、TABLE_JOIN 1時間（session 残り
+時間が上限）、PIN 15分（試行3回・1分ロック、新規 PIN 参加のみ）、Checkout 証明 30分、
+支払継続 30分（Stripe の URL 再表示のみ。決済ページ上で完了した支払いは webhook で一度だけ
+記録され、session 終了後なら PAID＋店長確認になる）、ORDER_READ 24時間（閉卓・session 終了
+後も有効）。長い会食が session を超えたら、開いている Stripe ページで支払い→確認承認→
+現金精算→提供→期限切れ session を閉卓→新しい session を開く。既知の gap：session 期限直前に
+確定した注文の Checkout 作成が期限後に走ると、Checkout を持たない FAILED 試行になり取消も
+閉卓もできない（skip テストで固定）。スタッフは再試行せず escalation する。
+
+繁中：Owner 於 2026-10-26 核定 MVP 試店 TTL；保留／分享政策仍待決定，本節不寫保留期間。
+session 4 小時（自開桌起固定）、TABLE_JOIN 1 小時（以 session 剩餘時間為上限）、PIN 15 分鐘
+（3 次、鎖定 1 分鐘，只管新的 PIN 加入）、Checkout 憑證 30 分鐘、付款延續 30 分鐘（只影響
+重新顯示 Stripe 私有網址；已在 Stripe 頁面完成的付款仍由 webhook 記錄一次，session 結束後
+付款記為 PAID＋店長覆核）、ORDER_READ 24 小時（關桌與 session 到期後仍有效）。長餐超過
+session 時：請客人完成已開的 Stripe 頁面→核准覆核→現金結帳→出餐→關閉過期 session→開新
+session。已知 gap（EXT-4）：session 到期前幾秒送出的訂單若 Checkout 建立排在到期後，會成為
+沒有 Checkout 的 FAILED 記錄，無法作廢、也無法關桌（以 skip 測試固定）；店員應上報，不要重試。
 
 ## How to burst-test ingress (8h) / 入口 burst 試験 / 入口爆量測試
 
