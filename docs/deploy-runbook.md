@@ -83,8 +83,8 @@ ResetPIN で復旧し、その際は既存の TABLE_JOIN も失効するため�
 支払継続 30分（Stripe の URL 再表示のみ。決済ページ上で完了した支払いは webhook で一度だけ
 記録され、session 終了後なら PAID＋店長確認になる）、ORDER_READ 24時間（閉卓・session 終了
 後も有効）。1分〜7日の範囲は ORDER_READ のみ。長い会食が session を超えたら、開いている
-Stripe ページで支払い→確認承認→
-現金精算→提供→期限切れ session を閉卓→新しい session を開く。既知の gap：session 期限直前に
+Stripe ページで支払い→確認承認→現金精算→提供→期限切れ session を閉卓→新しい session を開く。
+既知の gap：session 期限直前に
 確定した注文の Checkout 作成が期限後に走ると、Checkout を持たない FAILED 試行になり取消も
 閉卓もできない（skip テストで固定）。スタッフは再試行せず escalation する。
 
@@ -94,9 +94,9 @@ session 4 小時（自開桌起固定）、TABLE_JOIN 1 小時（以 session 剩
 TABLE_JOIN，客人須重新加入）、Checkout 憑證 30 分鐘、付款延續 30 分鐘（只影響
 重新顯示 Stripe 私有網址；已在 Stripe 頁面完成的付款仍由 webhook 記錄一次，session 結束後
 付款記為 PAID＋店長覆核）、ORDER_READ 24 小時（關桌與 session 到期後仍有效）；1 分鐘至 7 天
-範圍僅適用 ORDER_READ。長餐超過
-session 時：請客人完成已開的 Stripe 頁面→核准覆核→現金結帳→出餐→關閉過期 session→開新
-session。已知 gap（EXT-4）：session 到期前幾秒送出的訂單若 Checkout 建立排在到期後，會成為
+範圍僅適用 ORDER_READ。長餐超過 session 時：請客人完成已開的 Stripe 頁面→核准覆核→現金結帳
+→出餐→關閉過期 session→開新 session。已知 gap（EXT-4）：session 到期前幾秒送出的訂單若
+Checkout 建立排在到期後，會成為
 沒有 Checkout 的 FAILED 記錄，無法作廢、也無法關桌（以 skip 測試固定）；店員應上報，不要重試。
 
 ## How to burst-test ingress (8h) / 入口 burst 試験 / 入口爆量測試
