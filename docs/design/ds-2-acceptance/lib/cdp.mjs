@@ -22,7 +22,7 @@ const KEYS = {
 };
 
 export class Chrome {
-  constructor({ chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' } = {}) {
+  constructor({ chromePath = process.env.CHROME_PATH || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome' } = {}) {
     this.chromePath = chromePath;
     this.seq = 0;
     this.pending = new Map();
