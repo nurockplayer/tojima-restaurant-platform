@@ -43,6 +43,48 @@ local and finite; evaluate deployed proxy/APM/collector logging separately.
 另保留 5h 憑證遺失驗證、7f 無障礙、7g 手機實機及現金／廚房／關桌／退款人工驗收；
 8j 僅涵蓋有限本地路徑，部署端 proxy/APM/collector 日誌須另驗。
 
+## How to burst-test ingress (8h) / 入口 burst 試験 / 入口爆量測試
+
+Owner decision D8 sets the pilot ingress limits: above 120 requests/min per
+client IP on any `/v1/...` path, and above 10 requests/min per client IP on cart
+commit (`POST /v1/guest/sessions/{sessionID}/cart/commit`) and payment creation
+(`POST /v1/guest/sessions/{sessionID}/checkout-context`), the ingress returns 429.
+Row 8h stays GAP until a deployed ingress passes these checks; the application
+itself does not throttle, so a run against a plain local runtime is expected to
+FAIL.
+
+`cmd/bursttest` is a deployment-agnostic probe: it sends empty `{}` bodies to a
+synthetic session ID, never sends cookies, auth headers or secrets, sets
+`User-Agent: tojima-bursttest/1`, and refuses non-loopback hosts unless
+`-allow-remote` is given.
+
+```sh
+# Loopback (e.g. against a local proxy that enforces D8):
+go run ./cmd/bursttest -base-url http://127.0.0.1:8080 -profile v1
+
+# Deployed pilot ingress, one profile at a time:
+go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile v1 -allow-remote
+go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile commit -allow-remote
+go run ./cmd/bursttest -base-url https://<pilot-ingress> -profile checkout -allow-remote
+```
+
+PASS means no 429 among the first `-expect-limit` requests (120 for `v1`, 10 for
+`commit`/`checkout`) and at least one 429 after them. Exit 0 = PASS, 1 = FAIL,
+2 = usage error. `-requests` (default limit + 20), `-window` (default 60s) and
+`-concurrency` (default 4) adjust the burst; run all profiles from the same
+client IP so one client's budget is measured, and space runs out if the ingress
+window is rolling.
+
+日本語：D8 の入口制限（`/v1` は120/分/IP、cart commit と checkout-context は10/分/IP）を
+`cmd/bursttest` で確認する。最初の `-expect-limit` 件に 429 がなく、その後に 429 が
+1件以上あれば PASS（終了0）、なければ FAIL（終了1）、用法誤りは終了2。
+非 loopback は `-allow-remote` が必要。アプリ自体は制限しないため、素のローカル実行は FAIL が正常。
+
+繁中：用 `cmd/bursttest` 驗證 D8 的入口限制（`/v1` 每 IP 120/分，cart commit 與
+checkout-context 每 IP 10/分）。前 `-expect-limit` 筆沒有 429、之後至少一筆 429 為 PASS
+（結束碼 0），否則 FAIL（1），用法錯誤為 2。非 loopback 須加 `-allow-remote`；
+應用本身不做限流，直接對本地 runtime 跑出 FAIL 屬預期。
+
 ## Actual binary configuration / 実際の設定 / 實際設定
 
 No executable loads `.env` automatically. Do not invent `DATABASE_URL`,
