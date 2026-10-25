@@ -104,7 +104,7 @@ ingress configuration by hand. Run every profile from the same client IP.
 token bucket（burst なしの nginx `limit_req` 等）は早めに拒否しうるため、429 を返す設定で試験する
 （nginx 既定の 503 は 429 と数えない）。PASS は「transport error なし、かつ最初の 429 が
 ちょうど `-expect-limit` 件目（0 始まり）」の完全一致。それより後なら "limit looser"、前なら
-"limit tighter" で FAIL、最終要求の開始が window＋10%（最大1秒）を超えたら INVALID。
+"limit tighter" で FAIL、最終要求の開始が window＋10% と 1 秒の大きい方を超えたら INVALID。
 各 profile の前に IP 予算と mitigation/block 時間の経過を待ち、fixed window は分の先頭から
 10 秒で走らせる。PASS は当該 path のみの証拠で、全 `/v1/...` の path 一致と per-IP（per-IP+path
 でない）counter は ingress 設定で別途確認する。終了コードは build 済み binary で使う
