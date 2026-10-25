@@ -9,7 +9,7 @@ Final code tree: `4c7ac5c` + the bot P1 sync fix and React Aria locale trimming 
 - `webkit-check.mjs` repeats the sheet focus/scroll checks in Playwright WebKit (iPhone-sized 390×844).
 - Credentials for the demo are written to a temp file that the demo deletes on SIGINT; no credentials appear in any report.
 - Screenshots in `shots/` are downscaled PNGs of the captured states.
-- Running: `node capture.mjs <before|after> <baseUrl> <credsFile> <outDir> [--combos=ja:375,zh:320] [--skip-ds1]` (Node 24, local Google Chrome, no npm dependencies) and `node webkit-check.mjs <credsFile> <outDir>` (needs `playwright-core` with its WebKit build installed outside the repo). Neither is wired into CI.
+- Running: `node capture.mjs <before|after> <baseUrl> <credsFile> <outDir> [--combos=ja:375,zh:320] [--skip-ds1]` (Node 24, local Google Chrome by default or any Chromium via `CHROME_PATH`, e.g. Brave; no npm dependencies) and `node webkit-check.mjs <credsFile> <outDir>` (needs `playwright-core` with its WebKit build installed outside the repo). Neither is wired into CI.
 
 ## Results
 
