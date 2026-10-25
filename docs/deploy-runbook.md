@@ -358,9 +358,10 @@ It applies all migrations to the source through the repository's own
 `migrations/postgres.Up`, seeds a small synthetic tenant/store/table/session/
 cart/menu/order set (marked as synthetic), takes `pg_dump -Fc`, `pg_restore`s it
 into a fresh container, then compares the schema-only dumps, the migration-ledger
-rows and, for every `public` table, the row count plus an order-independent
-content checksum. It prints dump/restore/verify/total timings, dump size, table
-count and `RESULT: PASS` (exit 0) or `RESULT: FAIL <reason>` (exit 1).
+rows, the `pg_sequences` state and, for every `public` table, the row count plus
+an order-independent content checksum. It prints dump/restore/verify/total
+timings, dump size, table and sequence counts and `RESULT: PASS` (exit 0) or
+`RESULT: FAIL <reason>` (exit 1).
 
 ```sh
 lockf -k /tmp/tojima-local-test.lock sh scripts/restore-drill.sh
@@ -368,19 +369,24 @@ lockf -k /tmp/tojima-local-test.lock sh scripts/restore-drill.sh
 
 What it proves: the repository's migrations produce a PostgreSQL database that
 dumps and restores losslessly in the same image, and the drill is repeatable.
+It compares only the `public` schema and its sequences: roles and privileges are
+deliberately excluded (`pg_restore --no-owner --no-privileges`), so a difference
+in ownership or grants would not be detected.
 What it does **not** prove: no hosting backup, retention, PITR/WAL archiving,
 RPO/RTO, encryption, off-site copy, access control or provider/payment
 reconciliation. Row 8n stays GAP until the Owner approves RPO/RTO and a real
 hosting backup/restore is executed.
 
 日本語：`scripts/restore-drill.sh` は使い捨て `postgres:17` コンテナ2つで
-migrate→seed→`pg_dump`→`pg_restore`→schema／ledger／全 `public` テーブルの checksum 比較を
-自動実行し、各時間と PASS/FAIL を出す。ローカルでの可逆性と再現性だけを証明し、配備先の
+migrate→seed→`pg_dump`→`pg_restore`→schema／ledger／sequence／全 `public` テーブルの
+checksum 比較を自動実行し、各時間と PASS/FAIL を出す。`public` と sequence のみで
+role・権限は比較しない。ローカルでの可逆性と再現性だけを証明し、配備先の
 backup・保持・PITR・RPO/RTO・暗号化・アクセス制御は含まない（8n は GAP のまま）。
 
 繁中：`scripts/restore-drill.sh` 用兩個拋棄式 `postgres:17` 容器自動執行 migrate→seed→
-`pg_dump`→`pg_restore`→schema／ledger／所有 `public` 資料表 checksum 比對，並印出各段耗時與
-PASS/FAIL。只證明本地可逆性與可重複性，不含託管備份、保留政策、PITR、RPO/RTO、加密、
+`pg_dump`→`pg_restore`→schema／ledger／sequence／所有 `public` 資料表 checksum 比對，並印出
+各段耗時與 PASS/FAIL。只比對 `public` 與 sequence，不含角色與權限。只證明本地可逆性與
+可重複性，不含託管備份、保留政策、PITR、RPO/RTO、加密、
 異地副本、存取控制；8n 仍為 GAP。
 
 Local automated failure recovery is independently repeatable:

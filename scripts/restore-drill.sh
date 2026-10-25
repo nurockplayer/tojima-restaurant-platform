@@ -182,12 +182,24 @@ for drill_table in $drill_tables; do
         || fail "table $drill_table differs (source $drill_source_sum, restored $drill_target_sum)"
     drill_table_count=$((drill_table_count + 1))
 done
+
+# (d) Sequence state must match; a restored sequence that lost its progress
+# would still pass the table checksums and only fail on the next insert.
+drill_seq_sql="SELECT schemaname || '.' || sequencename || '|' || coalesce(last_value::text, 'null') FROM pg_sequences ORDER BY 1"
+docker exec "$drill_source" psql -At -U postgres -d tojima_test -c "$drill_seq_sql" > "$drill_dir/source-sequences.txt" \
+    || fail "source sequence query failed"
+docker exec "$drill_target" psql -At -U postgres -d tojima_test -c "$drill_seq_sql" > "$drill_dir/target-sequences.txt" \
+    || fail "restored sequence query failed"
+cmp -s "$drill_dir/source-sequences.txt" "$drill_dir/target-sequences.txt" || fail "sequences differ"
+drill_seq_count=$(wc -l < "$drill_dir/source-sequences.txt" | tr -d ' ')
+
 verify_ms=$(( $(now_ms) - verify_start ))
 total_ms=$(( $(now_ms) - drill_start ))
 dump_bytes=$(wc -c < "$drill_dump" | tr -d ' ')
 
 echo "ledger rows: $drill_ledger_rows"
 echo "tables verified: $drill_table_count"
+echo "sequences verified: $drill_seq_count"
 echo "dump size: $dump_bytes bytes"
 echo "dump: ${dump_ms} ms"
 echo "restore: ${restore_ms} ms"
