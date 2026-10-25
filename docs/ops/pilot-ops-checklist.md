@@ -80,9 +80,10 @@ table does not revoke independent ORDER_READ links (D6).
   `operation_kds_cards`). Continue accepting and advancing orders through the
   staff operations screens; READY is not SERVED, and a table closes only through
   the explicit close path above. Recovery criteria: `TBD (Owner)`.
-- **Database restore.** Follow [Migration plan](../deploy-runbook.md) and
-  [Backup/restore rehearsal](../deploy-runbook.md). Local restore evidence does
-  not prove hosting backup, retention or RPO/RTO; 8n and EXT-3 stay GAP.
+- **Database restore.** Follow [Migration plan](../deploy-runbook.md#migration-plan--migration-手順--migration-程序)
+  and [Backup/restore rehearsal](../deploy-runbook.md#backuprestore-rehearsal--復元予行--備份還原演練).
+  Local restore evidence does not prove hosting backup, retention or RPO/RTO;
+  8n and EXT-3 stay GAP.
 
 ### 5. Stop criteria and owners
 
@@ -133,7 +134,7 @@ burst 測試前仍為 GAP。
 密鑰只列名稱：DEMO 用 `TOJIMA_DEMO_GATE_SECRET`／`TOJIMA_DEMO_PUBLIC_ORIGIN`，測試用
 `TEST_DATABASE_URL`，Sandbox 用 `TOJIMA_STRIPE_*`（僅 `-stripe-sandbox`）。正式 DB／IdP／
 付款密鑰與 Secret Manager、輪替負責人與週期尚未實作／`TBD (Owner)`。DEMO gateway 輪替為
-停止後以新的 32 位元以上值重啟；任何值都不得寫入文件、DB 或日誌。
+停止後以新的 32 位元組（bytes）以上值重啟；任何值都不得寫入文件、DB 或日誌。
 
 緊急停止：總部停售需 `TENANT_ADMIN`＋MFA；單店停售為 `STAFF_CASHIER`／`STORE_MANAGER`
 （後者需 MFA）；關桌為 `STAFF_CASHIER`／`STORE_MANAGER`（後者需 MFA）；停止申請為
