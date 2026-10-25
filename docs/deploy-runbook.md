@@ -15,8 +15,9 @@ adapter and deployment/migration entry point still need Owner acceptance.
 Sources / 根拠 / 依據: [README](../README.md), [P-80 scope](p80-test-scope.md),
 [Stripe adapter](p80-stripe-provider.md), [P-81 scope](p81-test-scope.md),
 [P-82 scope](p82-test-scope.md), [P-83 scope](p83-test-scope.md),
-[P-84 matrix](p84-acceptance-matrix.md). Scope documents contain historical lane
-receipts; use the current code and matrix for the integrated boundary.
+[P-84 matrix](p84-acceptance-matrix.md), [pilot operations checklist](ops/pilot-ops-checklist.md).
+Scope documents contain historical lane receipts; use the current code and matrix
+for the integrated boundary.
 
 ## Owner gates / Owner 確認 / Owner 關卡
 
@@ -132,11 +133,18 @@ actually read; Go/toolchain and PostgreSQL client environment are separate.
 | --- | --- | --- |
 | `go run ./cmd/server` | Required `APP_ADDR=host:port`, e.g. `127.0.0.1:8080`. Health only; no DB/migration/IdP/Stripe wiring. / 必須、healthのみ。 / 必填，只有health。 | [main](../cmd/server/main.go), [config](../internal/config/config.go), [health](../internal/httpapi/health.go) |
 | `go run ./cmd/guesttest` | Required `TEST_DATABASE_URL` to disposable **loopback** PostgreSQL. Optional `-web web/dist`. Fixed `127.0.0.1:8081`. Automatically creates/migrates/seeds a random schema; drops owned schema at normal shutdown. / loopback試験DB、専用schemaを作成・終了時削除。 / loopback測試DB，自建並於正常結束時刪除專屬schema。 | [main](../cmd/guesttest/main.go), [fixture](../internal/testguest/fixture.go) |
-| `go run ./cmd/operationstest` | Same required `TEST_DATABASE_URL`; required `-credentials NEW_PATH` outside served web root; optional `-web-dist web/dist`, `-port 8082` (1024–65535), `-payments-fixture`, `-catalog-fixture`, `-demo-shironagasukujira`. Demo cannot combine with payments. Binds `127.0.0.1`; private 0600 credential file and random schema removed at normal shutdown. / 専用の試験IdP、公開領域外の新規credential file必須。 / 專屬測試IdP，必須新建公開目錄外的credential檔。 | [main](../cmd/operationstest/main.go), [payments fixture + worker](../cmd/operationstest/payment_fixture.go) |
+| `go run ./cmd/operationstest` | Same required `TEST_DATABASE_URL`; required `-credentials NEW_PATH` outside served web root; optional `-web-dist web/dist`, `-port 8082` (1024–65535), `-payments-fixture`, `-catalog-fixture`, `-demo-shironagasukujira`, `-guest-display-name`, `-stripe-sandbox`, `-stripe-tenant A\|B\|C`. Demo cannot combine with payments. Binds `127.0.0.1`; private 0600 credential file and random schema removed at normal shutdown. / 専用の試験IdP、公開領域外の新規credential file必須。 / 專屬測試IdP，必須新建公開目錄外的credential檔。 | [main](../cmd/operationstest/main.go), [payments fixture + worker](../cmd/operationstest/payment_fixture.go) |
+| `go run ./cmd/demogateway` | Demo entrance only. Optional `-listen 127.0.0.1:8090`, `-upstream http://127.0.0.1:8082`; required for the public demo `TOJIMA_DEMO_PUBLIC_ORIGIN` and `TOJIMA_DEMO_GATE_SECRET` (at least 32 bytes, no line breaks). Loopback listener only. / デモ入口専用、loopbackのみ。 / 僅供 DEMO 入口，只綁 loopback。 | [main](../cmd/demogateway/main.go), [gateway](../internal/demogateway/gateway.go) |
+| `go build ./cmd/bursttest` | Deployment-agnostic ingress burst probe for 8h. Flags `-base-url`, `-profile v1\|commit\|checkout`, `-requests`, `-window`, `-concurrency`, `-expect-limit`, `-allow-remote`; no environment variables, no credentials. / 8h の入口 burst 試験用。 / 8h 入口爆量測試用。 | [main](../cmd/bursttest/main.go) |
 
 `-payments-fixture` creates random signing material and a synthetic merchant;
 it reads no Stripe key and makes no Stripe network call. The fixture file holds
 test staff credentials and the synthetic webhook secret: never publish it.
+`-stripe-sandbox` is the only mode that reads Stripe variables — `TOJIMA_STRIPE_MODE`,
+`TOJIMA_STRIPE_API_VERSION`, `TOJIMA_STRIPE_TEST_SECRET_KEY`,
+`TOJIMA_STRIPE_TEST_WEBHOOK_SECRET`, `TOJIMA_STRIPE_TEST_ACCOUNT_A/B/C` and
+`TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY`, all test-mode only and documented in
+[Stripe Sandbox test runtime](p80-stripe-test-runtime.md).
 `web` uses optional **build-time** `VITE_API_BASE_URL`, default same origin
 ([transport](../web/src/shared/http.ts)); it is not a Go runtime variable.
 
@@ -218,6 +226,8 @@ PostgreSQL migration: it is the legacy disposable SQLite check.
 | [011 item_adjustments_refunds](../migrations/postgres/011_item_adjustments_refunds.up.sql) | Effective lines/tax, refunds/ledger/work / 調整・返金 / 調整退款 | Explicitly refuses when **any** `order_adjustments` or `operation_refunds` row exists, regardless of final status; restored CHECKs may also refuse newer history / 履歴破棄を拒否 / 有任何調整或退款即拒絕抹除。 |
 | [012 stop_requests](../migrations/postgres/012_stop_requests.up.sql) | Kitchen-confirmed stop requests and close guard / 停止申請 / 停止申請 | Explicitly refuses when **any** `cancellation_requests` row exists (also finalized/rejected/withdrawn); restores C1 guard/action/event constraints / 全状態の履歴で拒否 / 任何狀態歷史皆拒絕。 |
 | [013 stop_request_state_lock](../migrations/postgres/013_stop_request_state_lock.up.sql) | Locks operation state before accepting direct stop inserts; upgrades existing 012 databases / 停止申請の行ロック / 停止申請列鎖 | Restores the 012 request guard and reopens the direct-insert/fulfillment race; no history is removed / 競合が再発 / 重新引入競態。 |
+| [014 stripe_unpaid_void](../migrations/postgres/014_stripe_unpaid_void.up.sql) | D9 manager void: `VOIDED` payment status, `STRIPE_VOID` action/idempotency and late-payment refund events / 未払いStripe注文の取消 / 未付款 Stripe 訂單作廢 | Explicitly refuses while any `VOIDED` state, `STRIPE_UNPAID_VOIDED`/`STRIPE_LATE_PAYMENT_REFUND` event or `STRIPE_VOID` action exists; restores pre-D9 constraints / void履歴があると拒否 / 有作廢歷史即拒絕。 |
+| [015 store_guest_display_name](../migrations/postgres/015_store_guest_display_name.up.sql) | Optional public `stores.guest_display_name` (NULL omits the guest topbar name) / 店舗表示名 / 店家顯示名稱 | Drops the column; export non-NULL values first. Migration 015 must be deployed before the app; see [guest store display name](ops/store-guest-display-name.md) / 値の先出しが必要 / 須先匯出非空值。 |
 
 Read the paired downs before any rollback. A failed `Down` rolls back the entire
 transaction. Do not delete audit/history rows or disable guards to force it.
@@ -288,8 +298,8 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT current_database(), current_schema();
 SELECT version, applied_at FROM schema_migrations ORDER BY version;
--- Exactly versions 1..13, not merely max(version)=13.
-SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13] AS ledger_complete
+-- Exactly versions 1..15, not merely max(version)=15.
+SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] AS ledger_complete
 FROM schema_migrations;
 SELECT to_regclass('order_read_grants'), to_regclass('order_adjustments'),
        to_regclass('operation_refunds'), to_regclass('cancellation_requests'),
@@ -339,7 +349,7 @@ PGOPTIONS='-c search_path=p84c_rehearsal' pg_restore --dbname="$restore_url" \
 psql "$restore_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT * FROM restore_probe; -- p84c-disposable-only, exactly one row
-SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..13
+SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..15
 SELECT to_regclass('cancellation_requests');
 SQL
 # Confirm Up is idempotent on the restored schema.
@@ -399,12 +409,12 @@ TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55439/tojima_test?sslmode=disab
 
 This induces a duplicate-function failure mid-008 after column/index changes,
 checks exact prior ledger timestamps and schema objects/definitions (001–006),
-checks 007 and partial 008 rollback, removes the conflict, reruns Up through 013
+checks 007 and partial 008 rollback, removes the conflict, reruns Up through 015
 and verifies Down/Up. It does **not** establish production backup/restore or
 RPO/RTO: matrix **8n remains partially GAP**, owned by database/hosting recovery.
-008途中で失敗させ、既存001–006・ledger不変と007/008 rollback、原因除去後の013までの
+008途中で失敗させ、既存001–006・ledger不変と007/008 rollback、原因除去後の015までの
 再実行・Down/Upを確認。実backup/restore・RPO/RTOは未受入、**8nは一部GAP**。
-在008中途注入失敗，檢查001–006與ledger不變、007／部分008回滾、排除衝突後重跑至013及
+在008中途注入失敗，檢查001–006與ledger不變、007／部分008回滾、排除衝突後重跑至015及
 Down/Up；未驗收正式backup/restore或RPO/RTO，**8n維持部分GAP**。
 
 ## Smoke after an authorized deployment / 配備後確認 / 核准部署後smoke
