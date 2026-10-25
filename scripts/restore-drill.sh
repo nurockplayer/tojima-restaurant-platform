@@ -17,7 +17,7 @@ now_ms() { python3 -c 'import time; print(int(time.time() * 1000))'; }
 fail() { echo "RESULT: FAIL $*" >&2; exit 1; }
 
 cleanup() {
-    docker rm -f "$drill_source" "$drill_target" >/dev/null 2>&1 || true
+    docker rm -f -v "$drill_source" "$drill_target" >/dev/null 2>&1 || true
     rm -rf "$drill_dir"
 }
 trap cleanup EXIT HUP INT TERM

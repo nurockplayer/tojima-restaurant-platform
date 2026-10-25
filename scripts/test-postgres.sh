@@ -7,7 +7,7 @@ pg_test_container="tojima-p76-test-$$"
 pg_test_image="postgres:17"
 
 cleanup() {
-    docker rm -f "$pg_test_container" >/dev/null 2>&1 || true
+    docker rm -f -v "$pg_test_container" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT HUP INT TERM
 
