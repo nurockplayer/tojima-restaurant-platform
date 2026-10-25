@@ -350,6 +350,39 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 -c 'DROP SCHEMA p84c_rehearsal CASCA
 rm -r "$rehearsal_dir"
 ```
 
+### Scripted restore drill (8n, local) / スクリプト復元訓練 / 腳本化還原演練
+
+`scripts/restore-drill.sh` repeats the rehearsal automatically with two
+disposable `postgres:17` containers (`--memory 1g --cpus 1`, removed on exit).
+It applies all migrations to the source through the repository's own
+`migrations/postgres.Up`, seeds a small synthetic tenant/store/table/session/
+cart/menu/order set (marked as synthetic), takes `pg_dump -Fc`, `pg_restore`s it
+into a fresh container, then compares the schema-only dumps, the migration-ledger
+rows and, for every `public` table, the row count plus an order-independent
+content checksum. It prints dump/restore/verify/total timings, dump size, table
+count and `RESULT: PASS` (exit 0) or `RESULT: FAIL <reason>` (exit 1).
+
+```sh
+lockf -k /tmp/tojima-local-test.lock sh scripts/restore-drill.sh
+```
+
+What it proves: the repository's migrations produce a PostgreSQL database that
+dumps and restores losslessly in the same image, and the drill is repeatable.
+What it does **not** prove: no hosting backup, retention, PITR/WAL archiving,
+RPO/RTO, encryption, off-site copy, access control or provider/payment
+reconciliation. Row 8n stays GAP until the Owner approves RPO/RTO and a real
+hosting backup/restore is executed.
+
+日本語：`scripts/restore-drill.sh` は使い捨て `postgres:17` コンテナ2つで
+migrate→seed→`pg_dump`→`pg_restore`→schema／ledger／全 `public` テーブルの checksum 比較を
+自動実行し、各時間と PASS/FAIL を出す。ローカルでの可逆性と再現性だけを証明し、配備先の
+backup・保持・PITR・RPO/RTO・暗号化・アクセス制御は含まない（8n は GAP のまま）。
+
+繁中：`scripts/restore-drill.sh` 用兩個拋棄式 `postgres:17` 容器自動執行 migrate→seed→
+`pg_dump`→`pg_restore`→schema／ledger／所有 `public` 資料表 checksum 比對，並印出各段耗時與
+PASS/FAIL。只證明本地可逆性與可重複性，不含託管備份、保留政策、PITR、RPO/RTO、加密、
+異地副本、存取控制；8n 仍為 GAP。
+
 Local automated failure recovery is independently repeatable:
 ローカル障害注入試験：本地注入失敗測試：
 
