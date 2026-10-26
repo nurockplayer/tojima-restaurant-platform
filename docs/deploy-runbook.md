@@ -73,11 +73,21 @@ table an expired PIN blocks new joins only, and the fix is `ResetPIN` — note
 that this revokes the join tokens of guests still seated, who then need the new
 PIN to keep ordering.
 
-Known gap, tracked under EXT-4: an order committed seconds before session
-expiry whose asynchronous Checkout creation runs after expiry ends as a FAILED
-attempt with no provider Checkout. It cannot be voided (void needs an existing
-Checkout) and blocks table close; `TestEXT4GapOrderCommittedBeforeExpiryCreateAfter`
-pins it as a skipped test. Staff should escalate, not retry.
+If an order committed seconds before session expiry reaches its first
+asynchronous CREATE only after expiry, it ends FAILED / SESSION_UNAVAILABLE
+without a provider Checkout. A store manager with the existing void permission
+can use the same unpaid Stripe void action (current version, reason and
+idempotency key), then close the table. Recovery atomically records the normal
+void audit and cancellation, revokes continuation and permits Close; it does not
+record cash or invent a provider expiry. It requires the unique CREATE work to
+be DONE after exactly one lease, with SESSION_UNAVAILABLE and its failure event,
+and no provider bindings or payment observations. The work is locked and checked
+again during void. Leased, reclaimed or ambiguous work is refused: a missing
+Checkout ID alone does not prove that no provider request is still in flight.
+Wait for worker/webhook evidence in those cases, reconcile once provider IDs
+are bound, and escalate if they remain unknown; do not manually retry Checkout
+creation. `TestEXT4GapOrderCommittedBeforeExpiryCreateAfter`
+asserts recovery and Close, alongside an in-flight lease-reclaim refusal test.
 
 日本語：Owner 決定（2026-10-26）で MVP 試店の TTL を承認。保存・共有方針は未決のため
 本節に保存期間は書かない。session 4時間（開卓時刻から固定）、TABLE_JOIN 1時間（session 残り
@@ -87,9 +97,15 @@ ResetPIN で復旧し、その際は既存の TABLE_JOIN も失効するため�
 記録され、session 終了後なら PAID＋店長確認になる）、ORDER_READ 24時間（閉卓・session 終了
 後も有効）。1分〜7日の範囲は ORDER_READ のみ。長い会食が session を超えたら、開いている
 Stripe ページで支払い→確認承認→現金精算→提供→期限切れ session を閉卓→新しい session を開く。
-既知の gap：session 期限直前に
-確定した注文の Checkout 作成が期限後に走ると、Checkout を持たない FAILED 試行になり取消も
-閉卓もできない（skip テストで固定）。スタッフは再試行せず escalation する。
+session 期限直前に確定した注文の初回 Checkout 作成が期限後に走り、provider 呼出し前に
+FAILED／SESSION_UNAVAILABLE で終了した場合は、既存の取消権限を持つ店長が未払い Stripe
+取消（現在の version・理由・冪等キーが必要）で復旧し、閉卓できる。通常の取消監査と注文取消、
+支払継続の失効を同一トランザクションで記録し、現金精算や provider の失効記録は作らない。
+CREATE work が初回 lease のみで DONE、失敗理由とイベントが一致し、provider ID・決済観測が
+空であることをロック下で再確認する。lease 中・再取得済み・結果不明は拒否するため、先行する
+provider 呼出しが残る注文を誤って取消しない。worker／webhook の証拠を待ち、provider ID
+確定後に照合し、不明のままなら上位対応を依頼する。Checkout 作成は手動再試行しない。
+EXT-4 テストで復旧・閉卓と lease 再取得時の拒否を検証する。
 
 繁中：Owner 於 2026-10-26 核定 MVP 試店 TTL；保留／分享政策仍待決定，本節不寫保留期間。
 session 4 小時（自開桌起固定）、TABLE_JOIN 1 小時（以 session 剩餘時間為上限）、PIN 15 分鐘
@@ -98,9 +114,15 @@ TABLE_JOIN，客人須重新加入）、Checkout 憑證 30 分鐘、付款延續
 重新顯示 Stripe 私有網址；已在 Stripe 頁面完成的付款仍由 webhook 記錄一次，session 結束後
 付款記為 PAID＋店長覆核）、ORDER_READ 24 小時（關桌與 session 到期後仍有效）；1 分鐘至 7 天
 範圍僅適用 ORDER_READ。長餐超過 session 時：請客人完成已開的 Stripe 頁面→核准覆核→現金結帳
-→出餐→關閉過期 session→開新 session。已知 gap（EXT-4）：session 到期前幾秒送出的訂單若
-Checkout 建立排在到期後，會成為
-沒有 Checkout 的 FAILED 記錄，無法作廢、也無法關桌（以 skip 測試固定）；店員應上報，不要重試。
+→出餐→關閉過期 session→開新 session。session 到期前幾秒送出的訂單若首次 Checkout 建立
+排在到期後，於呼叫 provider 前以 FAILED／SESSION_UNAVAILABLE 結束，具既有作廢權限的
+店長可用原本的未付款 Stripe 作廢操作（目前 version、原因、冪等鍵），再關桌。一般作廢稽核、
+訂單取消與付款延續撤銷在同一交易記錄，不記為現金付款，也不虛構 provider 到期結果。
+作廢時鎖住並再次確認 CREATE work 只取得過一次 lease、已 DONE、失敗原因與事件一致，且無
+provider ID 或付款觀測。仍持有 lease、已重新取得 lease 或結果不明者會被拒絕，避免先前的
+provider 請求仍可能完成時誤作廢；這些情況須等待 worker／webhook 證據，provider ID 確定後
+再核對，仍不明則上報，不要手動重試建立 Checkout。EXT-4 測試驗證復原與關桌，以及 lease
+被重新取得時拒絕作廢。
 
 ## How to burst-test ingress (8h) / 入口 burst 試験 / 入口爆量測試
 
@@ -237,6 +259,10 @@ merchant configuration stores account IDs/references, not secret values.
    **008 must run with all writers stopped. No rolling upgrade across 008.**
    Keep pre-008 binaries stopped afterwards. Its backfill captures already-held
    Checkouts; old concurrent writers cannot maintain that invariant.
+   **The same applies to 016: no rolling upgrade across 016.** Every pre-016
+   payment worker must have exited before 016 runs and must never be restarted:
+   it calls Stripe without setting `dispatched_at`, so a later worker could
+   record SESSION_UNAVAILABLE and let staff void an order whose Checkout exists.
 3. Run `postgres.Up` once on the explicitly selected schema; it takes advisory
    transaction lock `771904283`, creates the ledger and applies every missing
    version in one transaction. Any failure rolls back the entire pending set,
@@ -248,7 +274,7 @@ merchant configuration stores account IDs/references, not secret values.
 日本語：①SHA・DB/schema/search_path・ledger・backupと復元手順・停止担当を記録し、
 **実行前にbackupを取得・検証**。復元した使い捨て環境で候補を予行する。
 ②API・webhook・決済／返金／期限切れworker・管理処理を含む**全writerを停止**。
-**008を跨ぐrolling upgrade禁止**。以後も旧バイナリを再開しない。
+**008・016を跨ぐrolling upgrade禁止**。以後も旧バイナリを再開しない（016前の決済workerは `dispatched_at` を記録しない）。
 ③選択schemaに `postgres.Up` を実行。advisory lockと全未適用版を一つのtransactionで扱う。
 失敗時は全未適用版とledgerがrollbackされる。原因を確認・解消して同候補を再実行し、
 適用済み扱いに書き換えない。④ledger・object・backfill／work・整合性を確認後、互換の
@@ -256,7 +282,7 @@ merchant configuration stores account IDs/references, not secret values.
 
 繁中：①記錄SHA、DB/schema/search_path、ledger、備份位置／還原程序與停機負責人；
 **migration前備份並驗證**，先在還原出的拋棄環境演練。②停止API、webhook、付款／退款／
-到期worker及管理自動化等**所有writer**；**禁止跨008滾動升級**，之後也不得重啟舊版。
+到期worker及管理自動化等**所有writer**；**禁止跨008、016滾動升級**，之後也不得重啟舊版（016前的付款worker不會記錄 `dispatched_at`）。
 ③對指定schema呼叫 `postgres.Up`，同一transaction以advisory lock套用全部缺少版本；
 失敗會回滾全部未提交版本及ledger。查明衝突並排除後重跑同候選版，不可手動標記已套用。
 ④核對ledger、物件、backfill／work及完整性後才啟動相容且驗收過的runtime，執行smoke並留去機密紀錄。
@@ -286,6 +312,7 @@ PostgreSQL migration: it is the legacy disposable SQLite check.
 | [013 stop_request_state_lock](../migrations/postgres/013_stop_request_state_lock.up.sql) | Locks operation state before accepting direct stop inserts; upgrades existing 012 databases / 停止申請の行ロック / 停止申請列鎖 | Restores the 012 request guard and reopens the direct-insert/fulfillment race; no history is removed / 競合が再発 / 重新引入競態。 |
 | [014 stripe_unpaid_void](../migrations/postgres/014_stripe_unpaid_void.up.sql) | D9 manager void: `VOIDED` payment status, `STRIPE_VOID` action/idempotency and late-payment refund events / 未払いStripe注文の取消 / 未付款 Stripe 訂單作廢 | Explicitly refuses while any `VOIDED` state, `STRIPE_UNPAID_VOIDED`/`STRIPE_LATE_PAYMENT_REFUND` event or `STRIPE_VOID` action exists; restores pre-D9 constraints / void履歴があると拒否 / 有作廢歷史即拒絕。 |
 | [015 store_guest_display_name](../migrations/postgres/015_store_guest_display_name.up.sql) | Optional public `stores.guest_display_name` (NULL omits the guest topbar name) / 店舗表示名 / 店家顯示名稱 | Drops the column; export non-NULL values first. Migration 015 must be deployed before the app; see [guest store display name](ops/store-guest-display-name.md) / 値の先出しが必要 / 須先匯出非空值。 |
+| [016 payment_work_dispatch_fence](../migrations/postgres/016_payment_work_dispatch_fence.up.sql) | `stripe_payment_work.dispatched_at` fence; conservative backfill marks claimed CREATE work dispatched / 決済送信fence / 付款送出fence | Drops the column; pre-016 binaries must stay stopped (no rolling upgrade across 016) / 016前のworkerを再開しない / 不得重啟016前的worker |
 
 Read the paired downs before any rollback. A failed `Down` rolls back the entire
 transaction. Do not delete audit/history rows or disable guards to force it.
@@ -356,8 +383,8 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT current_database(), current_schema();
 SELECT version, applied_at FROM schema_migrations ORDER BY version;
--- Exactly versions 1..15, not merely max(version)=15.
-SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] AS ledger_complete
+-- Exactly versions 1..16, not merely max(version)=16.
+SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] AS ledger_complete
 FROM schema_migrations;
 SELECT to_regclass('order_read_grants'), to_regclass('order_adjustments'),
        to_regclass('operation_refunds'), to_regclass('cancellation_requests'),
@@ -407,7 +434,7 @@ PGOPTIONS='-c search_path=p84c_rehearsal' pg_restore --dbname="$restore_url" \
 psql "$restore_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT * FROM restore_probe; -- p84c-disposable-only, exactly one row
-SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..15
+SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..16
 SELECT to_regclass('cancellation_requests');
 SQL
 # Confirm Up is idempotent on the restored schema.

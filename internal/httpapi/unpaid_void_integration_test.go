@@ -100,3 +100,72 @@ func TestPostgresUnpaidStripeVoidHTTP(t *testing.T) {
 		t.Fatalf("cash refusal status=%d body=%s", response.Code, response.Body.String())
 	}
 }
+
+func TestPostgresUnpaidStripeVoidHTTPRecoversExpiredSessionCreateFailure(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pf := newPaymentHTTPFixture(t)
+	f := pf.fixture
+	grant, err := f.Sessions.DirectJoin(ctx, f.Locator, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	orderID := createP82HTTPOrder(t, pf, grant.Session.ID, grant.Token, "tea", 1, ordering.Stripe, "void-http-expired-create")
+	// Move only this disposable fixture's immutable deadline to simulate expiry.
+	if _, err = f.Pool.Exec(ctx, `ALTER TABLE table_sessions DISABLE TRIGGER table_session_snapshot_immutable`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Pool.Exec(ctx, `UPDATE table_sessions SET expires_at=clock_timestamp()-interval '1 second',version=version+1 WHERE session_id=$1`, grant.Session.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.Pool.Exec(ctx, `ALTER TABLE table_sessions ENABLE TRIGGER table_session_snapshot_immutable`); err != nil {
+		t.Fatal(err)
+	}
+	if worked, err := pf.service.ProcessNext(ctx); err != nil || !worked {
+		t.Fatalf("failed CREATE worked=%v err=%v", worked, err)
+	}
+	var checkoutID, attemptState, workStatus, safeErrorCode string
+	var attempts int
+	if err = f.Pool.QueryRow(ctx, `SELECT coalesce(checkout_session_id,''),state FROM stripe_payment_attempts WHERE order_id=$1`, orderID).Scan(&checkoutID, &attemptState); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.Pool.QueryRow(ctx, `SELECT status,attempts,coalesce(safe_error_code,'') FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, orderID).Scan(&workStatus, &attempts, &safeErrorCode); err != nil {
+		t.Fatal(err)
+	}
+	if checkoutID != "" || attemptState != "FAILED" || workStatus != "DONE" || attempts != 1 || safeErrorCode != "SESSION_UNAVAILABLE" {
+		t.Fatalf("CREATE did not fail without Checkout as expected: checkout=%q attempt=%q work=%q attempts=%d error=%q", checkoutID, attemptState, workStatus, attempts, safeErrorCode)
+	}
+	var eventKey string
+	if err = f.Pool.QueryRow(ctx, `SELECT event_key FROM stripe_payment_attempt_events WHERE order_id=$1 AND event_key='WORK_STATE:FAILED:SESSION_UNAVAILABLE'`, orderID).Scan(&eventKey); err != nil {
+		t.Fatalf("missing SESSION_UNAVAILABLE failure event: %v", err)
+	}
+
+	path := pf.staffPath("table-01", grant.Session.ID, "/orders/"+orderID+"/payment/void-unpaid")
+	order := readP82HTTPOrder(t, pf, grant.Session.ID, orderID)
+	body := fmt.Sprintf(`{"expected_version":%d,"reason":"checkout creation failed after table session expiry"}`, int64JSON(order["version"]))
+	request := func(body, bearer, key string) *httptest.ResponseRecorder {
+		t.Helper()
+		return pf.requestWithKey(t, http.MethodPost, path, body, bearer, nil, "", "", key)
+	}
+	if err = pf.directory.Set(pf.creds.Manager.SubjectID, []authz.Membership{{TenantID: "test-tenant", StoreID: "other-store", Role: authz.StoreManager}}); err != nil {
+		t.Fatal(err)
+	}
+	if denied := request(body, pf.creds.Manager.Token, "expired-create-cross-store"); denied.Code != http.StatusForbidden || !strings.Contains(denied.Body.String(), `"error":"forbidden"`) {
+		t.Fatalf("cross-store manager status=%d body=%s", denied.Code, denied.Body.String())
+	}
+	if err = pf.directory.Set(pf.creds.Manager.SubjectID, []authz.Membership{{TenantID: "test-tenant", StoreID: "test-store", Role: authz.StoreManager}}); err != nil {
+		t.Fatal(err)
+	}
+	voided := request(body, pf.creds.Manager.Token, "expired-create-void")
+	if voided.Code != http.StatusOK {
+		t.Fatalf("manager void after failed CREATE status=%d body=%s", voided.Code, voided.Body.String())
+	}
+	replay := request(body, pf.creds.Manager.Token, "expired-create-void")
+	if replay.Code != http.StatusOK || replay.Body.String() != voided.Body.String() {
+		t.Fatalf("void replay differs: original=%d %s replay=%d %s", voided.Code, voided.Body.String(), replay.Code, replay.Body.String())
+	}
+	closed := pf.request(t, http.MethodPost, pf.staffPath("table-01", grant.Session.ID, "/close"), `{}`, pf.creds.Cashier.Token, nil, "", "")
+	if closed.Code != http.StatusOK {
+		t.Fatalf("close table after HTTP void status=%d body=%s", closed.Code, closed.Body.String())
+	}
+}

@@ -18,9 +18,11 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -514,15 +516,21 @@ func TestEXT4OrderNearExpiryStillPays(t *testing.T) {
 	}
 }
 
-// TestEXT4GapOrderCommittedBeforeExpiryCreateAfter records a real EXT-4 gap:
+// TestEXT4GapOrderCommittedBeforeExpiryCreateAfter covers recovery of the EXT-4 gap:
 // an order committed moments before the four-hour boundary whose asynchronous
 // Checkout creation runs after it becomes a FAILED attempt with no provider
-// object. It can be neither voided nor reviewed, and it blocks table close.
+// object. Staff void the uncreated Checkout, then close the expired session.
 func TestEXT4GapOrderCommittedBeforeExpiryCreateAfter(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	p := newEXT4Platform(t, ctx)
 	grant := p.join(t, "")
+	// A paid sibling must remain paid exactly once through the recovery.
+	paidOrder := p.commit(t, grant.Session.ID, grant.Token, "ext4-gap-paid", ordering.Stripe)
+	p.drainWork(t)
+	p.payViaWebhook(t, paidOrder.Order.ID, "evt-ext4-gap-paid")
+	p.payViaWebhook(t, paidOrder.Order.ID, "evt-ext4-gap-paid-duplicate")
+	p.serve(t, grant.Session.ID, paidOrder.Order.ID)
 	if _, err := p.fixture.Pool.Exec(ctx, `UPDATE table_sessions SET expires_at=clock_timestamp()+interval '2 minutes',version=version+1 WHERE session_id=$1`, grant.Session.ID); err != nil {
 		t.Fatal(err)
 	}
@@ -554,21 +562,221 @@ func TestEXT4GapOrderCommittedBeforeExpiryCreateAfter(t *testing.T) {
 	if want := "WORK_STATE:FAILED:SESSION_UNAVAILABLE"; eventKey != want {
 		t.Fatalf("failure cause is %q, want %q", eventKey, want)
 	}
-	var voidErr error
-	if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
+	if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); !errors.Is(err, tablesession.ErrCloseBlocked) {
+		t.Fatalf("unrecovered order must block Close: %v", err)
+	}
+	r := VoidRequest{
 		Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
 		IdempotencyKey: "ext4-gap-void", Reason: "checkout creation could not start after session expiry", ExpectedVersion: state.Version,
+	}
+	for _, scope := range []operations.TableScope{
+		{TenantID: r.Scope.TenantID, StoreID: "another-store", TableID: r.Scope.TableID},
+		{TenantID: "another-tenant", StoreID: r.Scope.StoreID, TableID: r.Scope.TableID},
+	} {
+		wrong := r
+		wrong.Scope = scope
+		if _, err := p.service.VoidUnpaidCheckout(ctx, wrong); !errors.Is(err, ErrNotFound) {
+			t.Fatalf("cross-scope void must be denied: %v", err)
+		}
+	}
+	stale := r
+	stale.ExpectedVersion++
+	if _, err := p.service.VoidUnpaidCheckout(ctx, stale); !errors.Is(err, operations.ErrConflict) {
+		t.Fatalf("stale version must be denied: %v", err)
+	}
+	voided, err := p.service.VoidUnpaidCheckout(ctx, r)
+	if err != nil || voided.PaymentStatus != operations.Voided || voided.FulfillmentStatus != operations.Cancelled || voided.EffectiveTotalGrossJPY != 0 {
+		t.Fatalf("recover uncreated Checkout: %+v err=%v", voided, err)
+	}
+	assertReplay := func() {
+		t.Helper()
+		replay, err := p.service.VoidUnpaidCheckout(ctx, r)
+		originalJSON, originalErr := json.Marshal(voided)
+		replayJSON, replayErr := json.Marshal(replay)
+		if err != nil || originalErr != nil || replayErr != nil || string(originalJSON) != string(replayJSON) {
+			t.Fatalf("double void must replay without mutation: %+v err=%v marshal=%v/%v", replay, err, originalErr, replayErr)
+		}
+	}
+	assertReplay()
+	var auditActor, auditReason string
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT actor_id,reason FROM operation_order_events WHERE order_id=$1 AND event_type='STRIPE_UNPAID_VOIDED'`, r.OrderID).Scan(&auditActor, &auditReason); err != nil || auditActor != r.Actor || auditReason != r.Reason {
+		t.Fatalf("void audit: actor=%q reason=%q err=%v", auditActor, auditReason, err)
+	}
+	var voidEvents, attemptEvents, adjustments, paidEvents, kds, outbox int
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT
+		(SELECT count(*) FROM operation_order_events WHERE order_id=$1 AND event_type='STRIPE_UNPAID_VOIDED'),
+		(SELECT count(*) FROM stripe_payment_attempt_events WHERE order_id=$1 AND event_key='STRIPE_VOID:ext4-gap-void'),
+		(SELECT count(*) FROM order_adjustments WHERE order_id=$1 AND whole_order_cancel AND refund_amount_jpy=0),
+		(SELECT count(*) FROM operation_order_events WHERE order_id=$2 AND event_type='STRIPE_PAID_VERIFIED'),
+		(SELECT count(*) FROM operation_kds_cards WHERE order_id=$1),
+		(SELECT count(*) FROM operation_outbox WHERE order_id=$1)`, r.OrderID, paidOrder.Order.ID).
+		Scan(&voidEvents, &attemptEvents, &adjustments, &paidEvents, &kds, &outbox); err != nil || voidEvents != 1 || attemptEvents != 1 || adjustments != 1 || paidEvents != 1 || kds != 0 || outbox != 0 {
+		t.Fatalf("effects: void=%d attempt=%d adjustment=%d paid=%d kds=%d outbox=%d err=%v", voidEvents, attemptEvents, adjustments, paidEvents, kds, outbox, err)
+	}
+	var localProof bool
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT state='EXPIRED' AND continuation_revoked_at IS NOT NULL AND checkout_session_id IS NULL AND payment_intent_id IS NULL AND checkout_status IS NULL AND provider_payment_status IS NULL AND provider_expires_at IS NULL FROM stripe_payment_attempts WHERE order_id=$1`, r.OrderID).Scan(&localProof); err != nil || !localProof {
+		t.Fatalf("local cancellation must not fabricate provider evidence: %v err=%v", localProof, err)
+	}
+	p.drainWork(t)
+	if creates, sessions := p.provider.Counts(); creates != 1 || sessions != 1 {
+		t.Fatalf("only the paid sibling may have a provider Checkout: creates=%d sessions=%d", creates, sessions)
+	}
+	if paid := p.order(t, grant.Session.ID, paidOrder.Order.ID); paid.PaymentStatus != operations.Paid || paid.PaymentReviewRequired {
+		t.Fatalf("recovery changed paid sibling: %+v", paid)
+	}
+	if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); err != nil {
+		t.Fatalf("Close after recovery: %v", err)
+	}
+	assertReplay()
+}
+
+// Only completed, never-dispatched work can prove no remote call happened.
+func TestEXT4UncreatedVoidRequiresCompletedUndispatchedCreate(t *testing.T) {
+	for _, kind := range []string{"ready", "leased", "dispatched", "unknown-outcome"} {
+		t.Run(kind, func(t *testing.T) {
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			p := newEXT4Platform(t, ctx)
+			grant := p.join(t, "")
+			order := p.commit(t, grant.Session.ID, grant.Token, "ext4-no-proof", ordering.Stripe)
+			p.expireSession(t, grant.Session.ID)
+			p.drainWork(t)
+			query := map[string]string{
+				"ready":           `UPDATE stripe_payment_work SET status='READY' WHERE order_id=$1 AND work_type='CREATE'`,
+				"leased":          `UPDATE stripe_payment_work SET status='LEASED',lease_token='in-flight',lease_until=clock_timestamp()+interval '1 minute' WHERE order_id=$1 AND work_type='CREATE'`,
+				"dispatched":      `UPDATE stripe_payment_work SET dispatched_at=clock_timestamp() WHERE order_id=$1 AND work_type='CREATE'`,
+				"unknown-outcome": `UPDATE stripe_payment_work SET safe_error_code='PROVIDER_OUTCOME_UNKNOWN' WHERE order_id=$1 AND work_type='CREATE'`,
+			}[kind]
+			if _, err := p.fixture.Pool.Exec(ctx, query, order.Order.ID); err != nil {
+				t.Fatal(err)
+			}
+			before := p.order(t, grant.Session.ID, order.Order.ID)
+			if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
+				Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
+				ExpectedVersion: before.Version, IdempotencyKey: "ext4-no-proof", Reason: "no proof of provider absence",
+			}); !errors.Is(err, ErrVoidNotEligible) {
+				t.Fatalf("unsafe no-Checkout void must be refused: %v", err)
+			}
+			if after := p.order(t, grant.Session.ID, order.Order.ID); !reflect.DeepEqual(after, before) {
+				t.Fatalf("refused void changed order: before=%+v after=%+v", before, after)
+			}
+			if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); !errors.Is(err, tablesession.ErrCloseBlocked) {
+				t.Fatalf("unresolved work must still block Close: %v", err)
+			}
+		})
+	}
+}
+
+func TestEXT4StaleCreateCannotDispatchAfterVoid(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	p := newEXT4Platform(t, ctx)
+	grant := p.join(t, "")
+	order := p.commit(t, grant.Session.ID, grant.Token, "ext4-stale-create", ordering.Stripe)
+	expiry := p.sessionExpiresAt(t, grant.Session.ID)
+	p.expireSession(t, grant.Session.ID)
+	p.drainWork(t)
+	state := p.order(t, grant.Session.ID, order.Order.ID)
+	if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
+		Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
+		ExpectedVersion: state.Version, IdempotencyKey: "ext4-stale-void", Reason: "provider was never called",
 	}); err != nil {
-		voidErr = err
+		t.Fatal(err)
 	}
-	closeErr := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor)
-	if voidErr == nil || closeErr == nil {
-		t.Skipf("EXT-4 gap appears fixed (void=%v close=%v); replace this skipped case with the recovery assertion", voidErr, closeErr)
+	// Make admission true in this isolated fixture so that the lease fence is
+	// tested independently of expiry. No production TTL or session is extended.
+	if _, err := p.fixture.Pool.Exec(ctx, `UPDATE table_sessions SET expires_at=$2 WHERE session_id=$1`, grant.Session.ID, expiry); err != nil {
+		t.Fatal(err)
 	}
-	if !errors.Is(voidErr, ErrVoidNotEligible) || !errors.Is(closeErr, tablesession.ErrCloseBlocked) {
-		t.Fatalf("gap failed for an unrelated reason: void=%v close=%v", voidErr, closeErr)
+	w := workItem{OrderID: order.Order.ID, Lease: "obsolete-lease"}
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT work_id FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID).Scan(&w.ID); err != nil {
+		t.Fatal(err)
 	}
-	t.Skipf("EXT-4 gap: an order committed before session expiry whose Checkout creation runs after expiry is unrecoverable (void=%v close=%v); staff cannot close the table until a void/cancel path exists for an attempt without a provider Checkout", voidErr, closeErr)
+	if err := p.service.processCreate(ctx, w); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale CREATE must fail before provider dispatch: %v", err)
+	}
+	if creates, sessions := p.provider.Counts(); creates != 0 || sessions != 0 {
+		t.Fatalf("voided order acquired a provider Checkout: creates=%d sessions=%d", creates, sessions)
+	}
+	if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); err != nil {
+		t.Fatalf("stale CREATE must not disturb cancellation: %v", err)
+	}
+}
+
+func TestEXT4InFlightCreateCannotBeVoidedAfterLeaseReclaimed(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	p := newEXT4Platform(t, ctx)
+	grant := p.join(t, "")
+	order := p.commit(t, grant.Session.ID, grant.Token, "ext4-in-flight", ordering.Stripe)
+	var checkout stripeprovider.CheckoutResult
+	// Pause inside the first provider request, before its response is bound.
+	// Reclaim its expired lease after the session expires. That second worker
+	// retains UNKNOWN/PROVIDER_OUTCOME_UNKNOWN while the first request is live.
+	p.provider.SetNextCreateHook(func(x stripeprovider.CheckoutResult) {
+		checkout = x
+		p.expireSession(t, grant.Session.ID)
+		if _, err := p.fixture.Pool.Exec(ctx, `UPDATE stripe_payment_work SET lease_until=clock_timestamp()-interval '1 second' WHERE order_id=$1 AND work_type='CREATE'`, order.Order.ID); err != nil {
+			t.Fatal(err)
+		}
+		if worked, err := p.service.ProcessNext(ctx); err != nil || !worked {
+			t.Fatalf("reclaimed CREATE: worked=%v err=%v", worked, err)
+		}
+		if id := p.attemptCheckoutID(t, order.Order.ID); id != "" {
+			t.Fatalf("first response must still be unbound: %s", id)
+		}
+		var reclaimedFailure bool
+		if err := p.fixture.Pool.QueryRow(ctx, `SELECT a.state='UNKNOWN' AND w.status='DONE' AND w.attempts=2 AND w.dispatched_at IS NOT NULL AND w.safe_error_code='PROVIDER_OUTCOME_UNKNOWN'
+			FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='CREATE'`, order.Order.ID).Scan(&reclaimedFailure); err != nil || !reclaimedFailure {
+			t.Fatalf("second lease must fail before first response returns: %v err=%v", reclaimedFailure, err)
+		}
+		state := p.order(t, grant.Session.ID, order.Order.ID)
+		if _, err := p.service.VoidUnpaidCheckout(ctx, VoidRequest{
+			Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
+			ExpectedVersion: state.Version, IdempotencyKey: "ext4-in-flight-void", Reason: "worker failed but first request is live",
+		}); !errors.Is(err, ErrVoidNotEligible) {
+			t.Fatalf("in-flight provider request must prevent local void: %v", err)
+		}
+	})
+	if worked, err := p.service.ProcessNext(ctx); !worked || !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale first response cannot commit: worked=%v err=%v", worked, err)
+	}
+	if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); !errors.Is(err, tablesession.ErrCloseBlocked) {
+		t.Fatalf("unresolved provider request must block Close: %v", err)
+	}
+	paid, err := p.provider.SetOutcome(checkout.SessionID, stripeprovider.CheckoutComplete, stripeprovider.PaymentPaid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted, err := p.service.EnqueueVerifiedWebhook(ctx, stripeprovider.VerifiedEvent{
+		ID: "evt-ext4-in-flight-paid", Type: "checkout.session.completed", AccountID: paid.AccountID,
+		APIVersion: stripeprovider.APIVersion, CreatedAt: time.Now().UTC(), ObjectID: paid.SessionID, Checkout: &paid,
+	}); err != nil || !accepted {
+		t.Fatalf("late paid webhook: accepted=%v err=%v", accepted, err)
+	}
+	p.drainWork(t)
+	p.payViaWebhook(t, order.Order.ID, "evt-ext4-in-flight-paid-duplicate")
+	state := p.order(t, grant.Session.ID, order.Order.ID)
+	if state.PaymentStatus != operations.Paid || !state.PaymentReviewRequired {
+		t.Fatalf("late payment must be retained with review: %+v", state)
+	}
+	var paidEvents int
+	if err := p.fixture.Pool.QueryRow(ctx, `SELECT count(*) FROM operation_order_events WHERE order_id=$1 AND event_type='STRIPE_PAID_VERIFIED'`, order.Order.ID).Scan(&paidEvents); err != nil || paidEvents != 1 {
+		t.Fatalf("paid must be recorded exactly once: events=%d err=%v", paidEvents, err)
+	}
+	if _, err := p.fixture.Operations.ApproveFulfillment(ctx, operations.OrderActionRequest{
+		Scope: p.tableScope(), SessionID: grant.Session.ID, OrderID: order.Order.ID, Actor: ext4Actor,
+		ExpectedVersion: state.Version, IdempotencyKey: "ext4-in-flight-review", Reason: "verified payment after expiry",
+	}); err != nil {
+		t.Fatalf("approve paid order: %v", err)
+	}
+	p.serve(t, grant.Session.ID, order.Order.ID)
+	if err := p.sessions.Close(ctx, p.sessionScope(), grant.Session.ID, ext4Actor); err != nil {
+		t.Fatalf("close after paid review: %v", err)
+	}
+	if creates, sessions := p.provider.Counts(); creates != 1 || sessions != 1 {
+		t.Fatalf("reclaim must not create a second Checkout: creates=%d sessions=%d", creates, sessions)
+	}
 }
 
 // TestEXT4PaymentContinuationWindow covers scenario 2: continuation works at
