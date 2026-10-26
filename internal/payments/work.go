@@ -114,22 +114,19 @@ func (s *Service) processCreate(ctx context.Context, w workItem) error {
 			return s.finishWork(ctx, w, false, 0, "RETRY_WINDOW_ELAPSED")
 		}
 		if !s.orderStillAdmissible(ctx, a) {
-			if e := s.updateAttemptFailure(ctx, w, a.order, "SESSION_UNAVAILABLE", false); e != nil {
-				return e
-			}
-			return s.finishWork(ctx, w, false, 0, "SESSION_UNAVAILABLE")
+			return s.finishUnavailableCreate(ctx, w, a.order)
 		}
-		// Reject a lease already obsolete at dispatch. A request can still
-		// outlive its lease after this check, so local void additionally requires
-		// DONE work with exactly one claim: a reclaimed request is never proof
-		// that no provider Checkout exists.
-		var leased bool
-		if err = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stripe_payment_work
+		// Atomically fence dispatch with the current lease. After this commit,
+		// the request counts as possibly dispatched forever, even if the worker
+		// stalls or loses its lease before receiving a provider response.
+		cmd, fenceErr := s.db.Exec(ctx, `UPDATE stripe_payment_work
+			SET dispatched_at=coalesce(dispatched_at,clock_timestamp()),updated_at=clock_timestamp()
 			WHERE work_id=$1 AND order_id=$2 AND work_type='CREATE' AND status='LEASED'
-			AND lease_token=$3 AND lease_until>clock_timestamp())`, w.ID, a.order, w.Lease).Scan(&leased); err != nil {
-			return err
+			AND lease_token=$3 AND lease_until>clock_timestamp()`, w.ID, a.order, w.Lease)
+		if fenceErr != nil {
+			return fenceErr
 		}
-		if !leased {
+		if cmd.RowsAffected() != 1 {
 			return ErrConflict
 		}
 		result, err = resolved.Provider.CreateCheckout(ctx, stripeprovider.CreateCheckoutRequest{
@@ -269,6 +266,14 @@ func (s *Service) updateAttemptFailure(ctx context.Context, w workItem, orderID,
 		return e
 	}
 	defer tx.Rollback(ctx)
+	if e = s.updateAttemptFailureTx(ctx, tx, w, orderID, code, unknown); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) updateAttemptFailureTx(ctx context.Context, tx pgx.Tx, w workItem, orderID, code string, unknown bool) error {
+	var e error
 	if e = lockPaymentSessionAny(ctx, tx, orderID); e != nil {
 		return e
 	}
@@ -297,7 +302,7 @@ func (s *Service) updateAttemptFailure(ctx context.Context, w workItem, orderID,
 	// while the same transaction holds the attempt lock against webhook writes.
 	switch AttemptState(before) {
 	case StatePaid, StateReviewRequired, StateFailed, StateExpired, StateProcessing:
-		return tx.Commit(ctx)
+		return nil
 	}
 	_, e = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state=$2,updated_at=clock_timestamp() WHERE order_id=$1 AND state NOT IN ('PAID','REVIEW_REQUIRED','FAILED','EXPIRED','PROCESSING')`, orderID, string(state))
 	if e != nil {
@@ -306,8 +311,43 @@ func (s *Service) updateAttemptFailure(ctx context.Context, w workItem, orderID,
 	if e = s.appendAttemptEvent(ctx, tx, orderID, "WORK_STATE:"+string(state)+":"+code, before, string(state), "provider"); e != nil {
 		return e
 	}
+	return nil
+}
+
+func (s *Service) finishUnavailableCreate(ctx context.Context, w workItem, orderID string) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if err = lockPaymentSessionAny(ctx, tx, orderID); err != nil {
+		return err
+	}
+	var dispatched bool
+	err = tx.QueryRow(ctx, `SELECT dispatched_at IS NOT NULL FROM stripe_payment_work
+		WHERE work_id=$1 AND order_id=$2 AND work_type='CREATE' AND status='LEASED'
+		AND lease_token=$3 AND lease_until>clock_timestamp() FOR UPDATE`, w.ID, orderID, w.Lease).Scan(&dispatched)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrConflict
+	}
+	if err != nil {
+		return err
+	}
+	code := "SESSION_UNAVAILABLE"
+	if dispatched {
+		code = "PROVIDER_OUTCOME_UNKNOWN"
+	}
+	// Hold the lease row lock through the attempt event and DONE transition.
+	// A prior dispatch must retain the unknown-outcome review path.
+	if err = s.updateAttemptFailureTx(ctx, tx, w, orderID, code, dispatched); err != nil {
+		return err
+	}
+	if err = s.finishWorkTx(ctx, tx, w, false, 0, code); err != nil {
+		return err
+	}
 	return tx.Commit(ctx)
 }
+
 func (s *Service) setAttemptUnknown(ctx context.Context, w workItem, orderID, code string) error {
 	return s.updateAttemptFailure(ctx, w, orderID, code, true)
 }
@@ -318,7 +358,15 @@ func (s *Service) finishWork(ctx context.Context, w workItem, retry bool, after 
 		return e
 	}
 	defer tx.Rollback(ctx)
+	if e = s.finishWorkTx(ctx, tx, w, retry, after, code); e != nil {
+		return e
+	}
+	return tx.Commit(ctx)
+}
+
+func (s *Service) finishWorkTx(ctx context.Context, tx pgx.Tx, w workItem, retry bool, after time.Duration, code string) error {
 	var cmd pgconn.CommandTag
+	var e error
 	if retry {
 		cmd, e = tx.Exec(ctx, `UPDATE stripe_payment_work SET status='READY',lease_token=NULL,lease_until=NULL,available_at=clock_timestamp()+$3::interval,safe_error_code=$4,updated_at=clock_timestamp() WHERE work_id=$1 AND status='LEASED' AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease, intervalString(after), code)
 	} else {
@@ -330,7 +378,7 @@ func (s *Service) finishWork(ctx context.Context, w workItem, retry bool, after 
 	if cmd.RowsAffected() != 1 {
 		return ErrConflict
 	}
-	return tx.Commit(ctx)
+	return nil
 }
 func (s *Service) completeLeased(ctx context.Context, tx pgx.Tx, w workItem) error {
 	cmd, e := tx.Exec(ctx, `UPDATE stripe_payment_work SET status='DONE',lease_token=NULL,lease_until=NULL,updated_at=clock_timestamp() WHERE work_id=$1 AND status='LEASED' AND lease_token=$2 AND lease_until>clock_timestamp()`, w.ID, w.Lease)

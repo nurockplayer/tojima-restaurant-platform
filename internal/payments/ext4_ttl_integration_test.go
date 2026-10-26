@@ -630,10 +630,9 @@ func TestEXT4GapOrderCommittedBeforeExpiryCreateAfter(t *testing.T) {
 	assertReplay()
 }
 
-// The first completed lease is evidence, not just a convenient state filter.
-// READY/LEASED work and reclaimed leases cannot prove no remote call happened.
-func TestEXT4UncreatedVoidRequiresFirstCompletedCreate(t *testing.T) {
-	for _, kind := range []string{"ready", "leased", "reclaimed", "unknown-outcome"} {
+// Only completed, never-dispatched work can prove no remote call happened.
+func TestEXT4UncreatedVoidRequiresCompletedUndispatchedCreate(t *testing.T) {
+	for _, kind := range []string{"ready", "leased", "dispatched", "unknown-outcome"} {
 		t.Run(kind, func(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
@@ -645,7 +644,7 @@ func TestEXT4UncreatedVoidRequiresFirstCompletedCreate(t *testing.T) {
 			query := map[string]string{
 				"ready":           `UPDATE stripe_payment_work SET status='READY' WHERE order_id=$1 AND work_type='CREATE'`,
 				"leased":          `UPDATE stripe_payment_work SET status='LEASED',lease_token='in-flight',lease_until=clock_timestamp()+interval '1 minute' WHERE order_id=$1 AND work_type='CREATE'`,
-				"reclaimed":       `UPDATE stripe_payment_work SET attempts=2 WHERE order_id=$1 AND work_type='CREATE'`,
+				"dispatched":      `UPDATE stripe_payment_work SET dispatched_at=clock_timestamp() WHERE order_id=$1 AND work_type='CREATE'`,
 				"unknown-outcome": `UPDATE stripe_payment_work SET safe_error_code='PROVIDER_OUTCOME_UNKNOWN' WHERE order_id=$1 AND work_type='CREATE'`,
 			}[kind]
 			if _, err := p.fixture.Pool.Exec(ctx, query, order.Order.ID); err != nil {
@@ -713,7 +712,7 @@ func TestEXT4InFlightCreateCannotBeVoidedAfterLeaseReclaimed(t *testing.T) {
 	var checkout stripeprovider.CheckoutResult
 	// Pause inside the first provider request, before its response is bound.
 	// Reclaim its expired lease after the session expires. That second worker
-	// records FAILED/SESSION_UNAVAILABLE while the first request is still live.
+	// retains UNKNOWN/PROVIDER_OUTCOME_UNKNOWN while the first request is live.
 	p.provider.SetNextCreateHook(func(x stripeprovider.CheckoutResult) {
 		checkout = x
 		p.expireSession(t, grant.Session.ID)
@@ -727,7 +726,7 @@ func TestEXT4InFlightCreateCannotBeVoidedAfterLeaseReclaimed(t *testing.T) {
 			t.Fatalf("first response must still be unbound: %s", id)
 		}
 		var reclaimedFailure bool
-		if err := p.fixture.Pool.QueryRow(ctx, `SELECT a.state='FAILED' AND w.status='DONE' AND w.attempts=2 AND w.safe_error_code='SESSION_UNAVAILABLE'
+		if err := p.fixture.Pool.QueryRow(ctx, `SELECT a.state='UNKNOWN' AND w.status='DONE' AND w.attempts=2 AND w.dispatched_at IS NOT NULL AND w.safe_error_code='PROVIDER_OUTCOME_UNKNOWN'
 			FROM stripe_payment_attempts a JOIN stripe_payment_work w USING(order_id) WHERE a.order_id=$1 AND w.work_type='CREATE'`, order.Order.ID).Scan(&reclaimedFailure); err != nil || !reclaimedFailure {
 			t.Fatalf("second lease must fail before first response returns: %v err=%v", reclaimedFailure, err)
 		}

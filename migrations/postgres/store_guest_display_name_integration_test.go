@@ -123,7 +123,7 @@ func Test015LevelThreeRollbackExportsAndRestoresPopulatedData(t *testing.T) {
 	if err := target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(s)-'guest_display_name' ORDER BY tenant_id,store_id)::text FROM stores s`).Scan(&storesBefore); err != nil {
 		t.Fatal(err)
 	}
-	if err := target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<15`).Scan(&ledgerBefore); err != nil {
+	if err := target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<>15`).Scan(&ledgerBefore); err != nil {
 		t.Fatal(err)
 	}
 
@@ -206,7 +206,7 @@ func Test015LevelThreeRollbackExportsAndRestoresPopulatedData(t *testing.T) {
 	if !reflect.DeepEqual(restored, wantRestored) {
 		t.Fatalf("restored public names differ from export: %#v", restored)
 	}
-	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<15`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
+	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<>15`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
 		t.Fatalf("Up after level-3 rollback changed existing ledger entries: got=%s want=%s err=%v", ledgerAfter, ledgerBefore, err)
 	}
 	var version15Count int

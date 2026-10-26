@@ -45,7 +45,7 @@ func readVoidAttempt(ctx context.Context, q voidReader, r VoidRequest, locked bo
 			AND a.checkout_status IS NULL AND a.provider_payment_status IS NULL AND a.payment_intent_status IS NULL
 			AND a.provider_expires_at IS NULL AND a.last_reconciled_at IS NULL
 			AND EXISTS(SELECT 1 FROM stripe_payment_work w WHERE w.order_id=a.order_id AND w.work_type='CREATE'
-				AND w.status='DONE' AND w.attempts=1 AND w.safe_error_code='SESSION_UNAVAILABLE')
+				AND w.status='DONE' AND w.dispatched_at IS NULL AND w.safe_error_code='SESSION_UNAVAILABLE')
 			AND EXISTS(SELECT 1 FROM stripe_payment_attempt_events e WHERE e.order_id=a.order_id
 				AND e.event_key='WORK_STATE:FAILED:SESSION_UNAVAILABLE')))
 		AND NOT EXISTS(SELECT 1 FROM operation_kds_cards k WHERE k.order_id=os.order_id)
@@ -165,10 +165,10 @@ func (s *Service) commitUnpaidVoid(ctx context.Context, r VoidRequest, req opera
 	}
 	if a.checkout == "" {
 		// A NULL binding alone cannot exclude a lost response or a stale worker.
-		// The unique CREATE row must have finished its FIRST lease by refusing
-		// admission before any provider call. A reclaimed lease increments
-		// attempts, so an older in-flight request can never satisfy this proof.
-		// Lock it against claims while rechecking eligibility and cancelling.
+		// Migration 006's stripe_payment_work_create_once_uq guarantees one CREATE
+		// row per order. Its durable dispatch fence must remain NULL and the row
+		// must be DONE; DONE work cannot be claimed or pass the dispatch fence.
+		// Lock it while rechecking eligibility and cancelling.
 		var workID string
 		if err = tx.QueryRow(ctx, `SELECT work_id FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE' FOR UPDATE`, a.order).Scan(&workID); err != nil {
 			return operations.OrderState{}, err
