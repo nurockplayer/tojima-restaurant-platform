@@ -1,0 +1,22 @@
+# Keep the build context small and never send secrets or host state.
+.git
+.github
+.gitignore
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+Claude outputs
+.claude
+.serena
+.vscode
+.idea
+**/node_modules
+web/dist
+web/coverage
+/bin
+/build
+docs
+deploy
+scripts

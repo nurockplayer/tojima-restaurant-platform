@@ -20,7 +20,7 @@ curl --fail http://127.0.0.1:8080/healthz
 # {"status":"ok"}
 ```
 
-`APP_ADDR` is required; see `.env.example`. The process does not automatically load `.env`. Health only reports that HTTP is serving; it makes no DB/IdP/payment-readiness claim. SIGINT/SIGTERM stops the process. This executable exposes only health. `httpapi.NewSessionHandler` and `httpapi.NewMenuHandler` supply integration-test endpoints with explicit identity/membership adapters; no fixture identity is wired into the executable. `NewGuestHandler` composes real guest entry, menus and carts without exposing staff/admin routes. The separate `cmd/guesttest` below creates disposable local acceptance data.
+`APP_ADDR` is required; see `.env.example`. A container image and a local compose stack (PostgreSQL, one-shot migrations, health server) are described in [docs/ops/containers.md](docs/ops/containers.md). The process does not automatically load `.env`. Health only reports that HTTP is serving; it makes no DB/IdP/payment-readiness claim. SIGINT/SIGTERM stops the process. This executable exposes only health. `httpapi.NewSessionHandler` and `httpapi.NewMenuHandler` supply integration-test endpoints with explicit identity/membership adapters; no fixture identity is wired into the executable. `NewGuestHandler` composes real guest entry, menus and carts without exposing staff/admin routes. The separate `cmd/guesttest` below creates disposable local acceptance data.
 
 ## Checks and migration boundary
 

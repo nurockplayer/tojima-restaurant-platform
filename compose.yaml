@@ -1,0 +1,65 @@
+# Local single-node stack: PostgreSQL 17, one-shot migrations, health-only server.
+# The database password is never committed: copy .env.example to .env first.
+#   cp .env.example .env && edit POSTGRES_PASSWORD
+#   docker compose up -d --build --wait
+# See docs/ops/containers.md for build, smoke test and current boundaries.
+name: tojima
+
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-tojima}
+      POSTGRES_USER: ${POSTGRES_USER:-tojima}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Applies migrations/postgres in order through the same Go runner the test
+  # scripts use, then exits. The server starts only after it succeeds.
+  migrate:
+    build:
+      context: .
+    # The image's ENTRYPOINT is /server; run the migrate binary instead.
+    entrypoint: ["/migrate"]
+    # Discrete libpq variables instead of a URL so any password character
+    # works without percent-encoding. pgx reads these when DATABASE_URL is unset.
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-tojima}
+      PGUSER: ${POSTGRES_USER:-tojima}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      PGSSLMODE: disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  server:
+    build:
+      context: .
+    environment:
+      APP_ADDR: 0.0.0.0:8080
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      # Loopback by default; set APP_BIND=0.0.0.0 to publish beyond the host.
+      - "${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}:8080"
+    healthcheck:
+      # The image is distroless, so the server binary probes itself.
+      test: ["CMD", "/server", "-healthcheck"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+volumes:
+  pgdata:

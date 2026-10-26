@@ -56,3 +56,11 @@ jobs:
         run: |
           pnpm --dir web check
           pnpm --dir web build
+
+  container:
+    # No registry, no push and no secrets: only prove the image still builds.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build container image
+        run: docker build --tag tojima-server:ci .
