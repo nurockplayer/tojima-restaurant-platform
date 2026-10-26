@@ -3,8 +3,11 @@ module github.com/nurockplayer/tojima-restaurant-platform
 go 1.27.1
 
 require (
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/jackc/pgx/v5 v5.7.6
 	github.com/stripe/stripe-go/v87 v87.0.0
+	golang.org/x/oauth2 v0.37.0
 )
 
 require (
