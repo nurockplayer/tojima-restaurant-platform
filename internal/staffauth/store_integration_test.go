@@ -431,6 +431,18 @@ func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
 		t.Fatalf("tx started after the restore committed must log in: %v", err)
 	}
 
+	// A subject-only back-channel logout fences logins that started before it.
+	beforeLogout := dbNow(t, ctx, pool)
+	if _, err = store.RevokeByIDP(ctx, "", "subject-epoch"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-pending", false, beforeLogout); !errors.Is(err, ErrStaleAuth) {
+		t.Fatalf("login started before a sub-only logout: got %v, want ErrStaleAuth", err)
+	}
+	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-new", false, dbNow(t, ctx, pool)); err != nil {
+		t.Fatalf("login started after a sub-only logout: %v", err)
+	}
+
 	// A tx stamped before a later hold/restore is stale.
 	before := dbNow(t, ctx, pool)
 	if err = store.Hold(ctx, "subject-epoch", "again", "operator"); err != nil {

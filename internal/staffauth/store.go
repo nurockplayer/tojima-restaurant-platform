@@ -321,6 +321,15 @@ func (s *Store) RevokeByIDP(ctx context.Context, sid, sub string) (int64, error)
 		}
 		tag, err = tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason='backchannel_logout' WHERE idp_sid=$1 AND ($2='' OR subject_id=$2) AND revoked_at IS NULL`, sid, sub)
 	} else {
+		// Without a sid, every pending login of the subject is fenced too:
+		// advance the auth epoch under the exclusive lock, like Hold does.
+		if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+			return 0, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO staff_subjects(subject_id,auth_epoch,epoch_changed_at) VALUES($1,1,clock_timestamp())
+			ON CONFLICT(subject_id) DO UPDATE SET auth_epoch=staff_subjects.auth_epoch+1,epoch_changed_at=clock_timestamp()`, sub); err != nil {
+			return 0, err
+		}
 		tag, err = tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason='backchannel_logout' WHERE subject_id=$1 AND revoked_at IS NULL`, sub)
 	}
 	if err != nil {
