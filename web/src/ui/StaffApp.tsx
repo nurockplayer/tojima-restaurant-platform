@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, amountJPY, newOperationKey } from '../api/client';
-import { operationsClient } from '../api/operations';
+import { operationsClient, setCookieSessionUnauthorizedHandler } from '../api/operations';
 import type { AdjustmentPreview, AdjustmentRequest, Capabilities, CashPreview, CashSettings, OpenedSession, Receipt, SessionOperations, StaffContext, StaffOrder, StaffTable } from '../api/operations';
 import { probeStaffAuth, staffLoginURL, staffStepUpURL, submitStaffLogout } from '../api/staff-auth';
 import type { StaffAuthState } from '../api/staff-auth';
@@ -40,7 +40,7 @@ const copy = {
     kdsStale: '厨房看板の接続が切れています。表示が最新ではない可能性があります。自動で再接続しています。', kdsLastSync: '最終同期',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     retry: '同じ操作を確認して再試行', network: '処理結果を確認できません。再試行は同じ操作を照合します。', stale: '最新情報を読み直しました。内容を確認してから操作してください。',
-    error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。',
+    error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。', authUnavailable: 'ログイン状態を確認できません。しばらくしてから再試行してください。', retryAuth: '再試行',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: 'キャンセル', session: '卓セッション', updated: '同期済み', demoCash: '現金（デモ・テスト専用）', demoCashTitle: '現金精算（デモ・テスト専用）', demoReceipt: 'テスト用領収書 · 実際の入金ではありません', demoClose: 'デモ環境のテーブルを閉じる',
   },
   zh: {
@@ -63,7 +63,7 @@ const copy = {
     kdsStale: '廚房看板連線中斷，畫面可能不是最新狀態，系統正在自動重新連線。', kdsLastSync: '最後同步',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     retry: '以相同操作確認並重試', network: '目前無法確認操作結果。重試會比對同一筆操作。', stale: '已更新最新狀態，請確認內容後再操作。',
-    error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。',
+    error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。', authUnavailable: '無法確認登入狀態，請稍後再試。', retryAuth: '重試',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: '取消', session: '桌次工作階段', updated: '已同步', demoCash: '現金（展示測試專用）', demoCashTitle: '現金結帳（展示測試專用）', demoReceipt: '測試收據 · 非實際收款', demoClose: '關閉展示測試桌次',
   },
 } as const;
@@ -72,8 +72,8 @@ interface PendingWrite { key: string; epoch: number; run: () => Promise<unknown>
 interface ActiveStaffContext { epoch: number; context: StaffContext; bearer: string; ready: boolean }
 
 export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { kind: 'unsupported' } }: DemoSurfaceProps) {
-  const cookieMode = !demo && staffAuth.kind !== 'unsupported';
   const [authState, setAuthState] = useState<StaffAuthState>(staffAuth);
+  const cookieMode = !demo && authState.kind !== 'unsupported';
   const [authPrompt, setAuthPrompt] = useState<'login' | 'step-up' | null>(null);
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
@@ -164,13 +164,44 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
   const clearPaymentView = () => {
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
   };
+  const clearLocalSession = useCallback((preserveContext: boolean) => {
+    epoch.current += 1;
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
+    active.current = null;
+    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1; reviewRequest.current += 1;
+    if (!preserveContext) sessionStorage.removeItem(CONTEXT_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    openerRef.current = null; kdsPoll.current = null;
+    adjustPreviewRequest.current++; setAdjustPreviewBusy(false);
+    setConnected(false); setCapabilities(null); setToken('');
+    if (!preserveContext) setContext({ tenantID: '', storeID: '' });
+    setTables([]); setKdsOrders([]); setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError('');
+    setApproveOrder(null); setApproveReason(''); setVoidOrder(null); setVoidReason(''); setAdjustOrder(null); setStopOrder(null); setStopMode(null); setStopRequestID('');
+    setAdjustReason(''); setCancelQty([]); setAdjustPreview(null); setCashHandback(false); setDeliveryConfirmed(false); setKdsStale(false); setKdsSyncedAt(null);
+    setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice('');
+    setLoading(false); setBusy(false); pendingWrite.current = null; writeInitiated.current = false; setUncertain(false); setAuthPrompt(null);
+  }, []);
+  const expireCookieSession = useCallback(() => {
+    clearLocalSession(true);
+    setAuthState({ kind: 'signed-out' });
+    setAuthPrompt('login');
+  }, [clearLocalSession]);
   const refreshAuthPrompt = useCallback(async () => {
     const next = await probeStaffAuth();
     setAuthState(next);
-    if (next.kind === 'signed-out') setAuthPrompt('login');
+    if (next.kind === 'signed-out') expireCookieSession();
     else if (next.kind === 'signed-in' && !next.stepUpFresh) setAuthPrompt('step-up');
     else setAuthPrompt(null);
-  }, []);
+  }, [expireCookieSession]);
+  const retryAuthProbe = useCallback(async () => {
+    setLoading(true);
+    try { await refreshAuthPrompt(); }
+    finally { setLoading(false); }
+  }, [refreshAuthPrompt]);
+  useEffect(() => {
+    if (!cookieMode) return;
+    return setCookieSessionUnauthorizedHandler(expireCookieSession);
+  }, [cookieMode, expireCookieSession]);
   useEffect(() => { clearPaymentView(); }, [connected, selectedTableID, table?.session_id]);
 
   const loadTables = useCallback(async (ctx: StaffContext, bearer: string) => {
@@ -325,10 +356,13 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
 
   useEffect(() => {
     if (restored.current) return;
-    restored.current = true;
     const storedContext = sessionStorage.getItem(CONTEXT_KEY);
-    const storedToken = sessionStorage.getItem(TOKEN_KEY);
-    if (!storedContext || (!cookieMode && !storedToken) || (cookieMode && authState.kind !== 'signed-in')) return;
+    const storedToken = cookieMode ? null : sessionStorage.getItem(TOKEN_KEY);
+    if (cookieMode) sessionStorage.removeItem(TOKEN_KEY);
+    if (cookieMode && authState.kind !== 'signed-in') return;
+    restored.current = true;
+    if (!cookieMode && !storedToken) return;
+    if (!storedContext) return;
     try {
       const saved = JSON.parse(storedContext) as StaffContext;
       if (saved.tenantID && saved.storeID) void connect(saved, cookieMode ? '' : storedToken!);
@@ -598,14 +632,7 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
   };
 
   const disconnect = () => {
-    epoch.current += 1;
-    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
-    active.current = null;
-    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1; reviewRequest.current += 1;
-    sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
-    openerRef.current = null; kdsPoll.current = null;
-    adjustPreviewRequest.current++; setAdjustPreviewBusy(false);
-    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError(''); setApproveOrder(null); setApproveReason(''); setAdjustOrder(null); setStopOrder(null); setStopMode(null); setStopRequestID(''); setAdjustReason(''); setCancelQty([]); setAdjustPreview(null); setCashHandback(false); setDeliveryConfirmed(false); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; writeInitiated.current = false; setUncertain(false);
+    clearLocalSession(false);
   };
   const logout = () => { disconnect(); submitStaffLogout(); };
 
@@ -615,7 +642,11 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
   const blockers = detail?.close_blockers ?? [];
 
   if (!connected) return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
-    {cookieMode && authState.kind === 'signed-out' ? <section className="entry-card staff-entry">
+    {cookieMode && authState.kind === 'unavailable' ? <section className="entry-card staff-entry">
+      <div className="eyebrow">{t.subtitle}</div><h1>{t.connect}</h1>
+      <p className="error" role="alert">{t.authUnavailable}</p>
+      <button className="button primary wide" type="button" disabled={loading} onClick={() => void retryAuthProbe()}>{loading ? t.loading : t.retryAuth}</button>
+    </section> : cookieMode && authState.kind === 'signed-out' ? <section className="entry-card staff-entry">
       <div className="eyebrow">{t.subtitle}</div><h1>{t.login}</h1><p>{t.loginIntro}</p>
       <a className="button primary wide" href={staffLoginURL(window.location.pathname + window.location.search)}>{t.login}</a>
       {error && <p className="error" role="alert">{error}</p>}

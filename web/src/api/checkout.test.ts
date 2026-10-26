@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { checkoutClient } from './checkout';
+import { setCookieSessionUnauthorizedHandler } from './operations';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -87,6 +88,22 @@ describe('checkout proof browser API', () => {
       expect(init.credentials).toBe('same-origin');
       expect(init.referrerPolicy).toBe('no-referrer');
     }
+  });
+
+  it('keeps cookie-authenticated staff payment calls same-origin and reports a 401', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test/gateway/api/');
+    const fetchMock = vi.fn().mockResolvedValue(json({ error: 'unauthenticated' }, 401));
+    vi.stubGlobal('fetch', fetchMock);
+    let expired = false;
+    const unregister = setCookieSessionUnauthorizedHandler(() => { expired = true; });
+    try {
+      await expect(checkoutClient.staffStatus({ tenantID: 'tenant-1', storeID: 'store-1' }, '', 'table-1', 'session-1', 'order-1')).rejects.toMatchObject({ status: 401 });
+      expect(fetchMock.mock.calls[0]?.[0]).toBe('/v1/staff/tenants/tenant-1/stores/store-1/tables/table-1/sessions/session-1/orders/order-1/payment');
+      const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+      expect(new Headers(init.headers).get('authorization')).toBeNull();
+      expect(init.credentials).toBe('same-origin');
+      expect(expired).toBe(true);
+    } finally { unregister(); }
   });
 
   it('uses the configured same-origin API prefix for guest proof and staff calls', async () => {

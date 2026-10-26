@@ -46,6 +46,18 @@ describe('staff cookie authentication UI', () => {
     expect(host!.querySelector('input[type="password"]')).toBeNull();
   });
 
+  it('fails closed in unavailable mode and lets the operator retry the session probe', async () => {
+    const calls: string[] = [];
+    sessionStorage.setItem('tojima.staff.access-token', 'stale-test-token');
+    await render({ kind: 'unavailable' }, async (url) => { calls.push(url); return json({ error: 'temporary' }, 503); });
+    expect(host!.querySelector('input[type="password"]')).toBeNull();
+    expect(host!.textContent).toContain('ログイン状態を確認できません。しばらくしてから再試行してください。');
+    expect(sessionStorage.getItem('tojima.staff.access-token')).toBeNull();
+    await click('再試行');
+    await waitFor(() => expect(calls).toContain('/staff/auth/session'));
+    expect(host!.querySelector('input[type="password"]')).toBeNull();
+  });
+
   it('connects with the cookie session and sends no authorization header', async () => {
     const calls: Array<{ url: string; headers: Headers }> = [];
     await render(signedIn, async (url, init) => {
@@ -106,10 +118,9 @@ describe('staff cookie authentication UI', () => {
     expect(sessionReads).toBe(1);
   });
 
-  it('offers login when a connected cookie session expires during a write', async () => {
+  it('clears workspace data and preserves context when a cookie staff write returns 401', async () => {
     sessionStorage.setItem('tojima.staff.context', JSON.stringify(ctx));
     await render(signedIn, async (url) => {
-      if (url === '/staff/auth/session') return json({ error: 'unauthenticated' }, 401);
       if (url.endsWith('/operations/access')) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
       if (url.endsWith('/operations/kds')) return json({ orders: [{ id: 'order-1', fulfillment_status: 'ACCEPTED', created_at: '2026-10-27T00:00:00Z', table_name: 'T1', generation: 1, payment_status: 'PAID', payment_method: 'CASH', total_gross_jpy: '100', lines: [{ product_name: 'Ramen', quantity: 1, line_gross_jpy: '100', options: [] }] }] });
       if (url.endsWith('/fulfillment')) return json({ error: 'unauthenticated' }, 401);
@@ -119,6 +130,30 @@ describe('staff cookie authentication UI', () => {
     const start = [...host!.querySelectorAll('button')].find((item) => item.textContent?.includes('調理開始'))!;
     await act(async () => { start.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
     await waitFor(() => expect(within(host!).getByRole('link', { name: 'ログイン' })).toBeTruthy());
+    expect(host!.querySelector('.staff-workspace')).toBeNull();
+    expect(host!.textContent).not.toContain('Ramen');
+    expect(host!.textContent).not.toContain('T1');
+    expect(sessionStorage.getItem('tojima.staff.context')).toBe(JSON.stringify(ctx));
+    expect(sessionStorage.getItem('tojima.staff.access-token')).toBeNull();
+  });
+
+  it('clears workspace data when a 403 re-probe discovers a signed-out session', async () => {
+    sessionStorage.setItem('tojima.staff.context', JSON.stringify(ctx));
+    await render({ ...signedIn, stepUpFresh: false }, async (url) => {
+      if (url === '/staff/auth/session') return json({ error: 'unauthenticated' }, 401);
+      if (url.endsWith('/operations/access')) return json({ can_cash: false, can_serve: false, can_kitchen: true, can_manage: false });
+      if (url.endsWith('/operations/kds')) return json({ orders: [{ id: 'order-1', fulfillment_status: 'ACCEPTED', created_at: '2026-10-27T00:00:00Z', table_name: 'T1', generation: 1, payment_status: 'PAID', payment_method: 'CASH', total_gross_jpy: '100', lines: [{ product_name: 'Ramen', quantity: 1, line_gross_jpy: '100', options: [] }] }] });
+      if (url.endsWith('/fulfillment')) return json({ error: 'forbidden' }, 403);
+      throw new Error(`Unexpected ${url}`);
+    }, 'kds');
+    await waitFor(() => expect(host!.querySelector('.staff-workspace')).toBeTruthy());
+    const start = [...host!.querySelectorAll('button')].find((item) => item.textContent?.includes('調理開始'))!;
+    await act(async () => { start.click(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    await waitFor(() => expect(within(host!).getByRole('link', { name: 'ログイン' })).toBeTruthy());
+    expect(host!.querySelector('.staff-workspace')).toBeNull();
+    expect(host!.textContent).not.toContain('Ramen');
+    expect(host!.textContent).not.toContain('T1');
+    expect(sessionStorage.getItem('tojima.staff.context')).toBe(JSON.stringify(ctx));
   });
 
   it('keeps the existing token entry when auth is unsupported', async () => {

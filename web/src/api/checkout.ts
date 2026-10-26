@@ -1,5 +1,6 @@
 import { ApiError } from './client';
 import type { StaffContext } from './operations';
+import { notifyCookieSessionUnauthorized } from './operations';
 import { apiBase } from '../shared/http';
 
 export type CheckoutState = 'CREATE_PENDING' | 'CREATING' | 'UNKNOWN' | 'OPEN' | 'PROCESSING' | 'PAID' | 'EXPIRED' | 'FAILED' | 'REVIEW_REQUIRED';
@@ -44,16 +45,16 @@ export const checkoutClient = {
 
   staffStatus(context: StaffContext, token: string, tableID: string, sessionID: string, orderID: string): Promise<CheckoutStatus> {
     return request<CheckoutStatus>(`${staffOrderPath(context, tableID, sessionID, orderID)}/payment`, {
-      headers: { authorization: `Bearer ${token}` },
-    });
+      headers: token ? { authorization: `Bearer ${token}` } : {},
+    }, false, !token);
   },
 
   reconcile(context: StaffContext, token: string, tableID: string, sessionID: string, orderID: string): Promise<CheckoutStatus> {
     return request<CheckoutStatus>(`${staffOrderPath(context, tableID, sessionID, orderID)}/payment/reconcile`, {
       method: 'POST',
-      headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
+      headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' },
       body: '{}',
-    });
+    }, false, !token);
   },
 };
 
@@ -85,8 +86,8 @@ async function bootstrap(sessionID: string, tableJoinToken: string): Promise<voi
   if (response.status !== 204) throw new Error('checkout_context_unavailable');
 }
 
-async function request<T>(path: string, init: RequestInit, requireSameOrigin = false): Promise<T> {
-  const url = apiURL(path, requireSameOrigin);
+async function request<T>(path: string, init: RequestInit, requireSameOrigin = false, cookieStaff = false): Promise<T> {
+  const url = cookieStaff ? path : apiURL(path, requireSameOrigin);
   let response: Response;
   try {
     response = await fetch(url, {
@@ -100,7 +101,11 @@ async function request<T>(path: string, init: RequestInit, requireSameOrigin = f
     throw new Error('network_unavailable');
   }
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new ApiError(response.status, body as { error: string });
+  if (!response.ok) {
+    const error = new ApiError(response.status, body as { error: string });
+    if (cookieStaff && error.status === 401) notifyCookieSessionUnauthorized();
+    throw error;
+  }
   return body as T;
 }
 

@@ -13,18 +13,37 @@ describe('staff cookie auth helpers', () => {
     expect(fetch).toHaveBeenCalledWith('/staff/auth/session', expect.objectContaining({ cache: 'no-store', credentials: 'same-origin' }));
   });
 
-  it('recognizes signed-out sessions and treats unsupported or malformed responses as unsupported', async () => {
-    expect(await probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ error: 'unauthenticated' }, 401)))).toEqual({ kind: 'signed-out' });
-    expect(await probeStaffAuth(vi.fn().mockResolvedValue(new Response('<html>spa</html>', { status: 200 })))).toEqual({ kind: 'unsupported' });
-    expect(await probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ subject_id: 3 })))).toEqual({ kind: 'unsupported' });
-    expect(await probeStaffAuth(vi.fn().mockRejectedValue(new Error('offline')))).toEqual({ kind: 'unsupported' });
+  it('recognizes the session body when the server omits a JSON content type', async () => {
+    const body = { subject_id: 'staff-1', mfa: true, step_up_fresh: true, expires_at: '2026-10-27T00:00:00Z' };
+    await expect(probeStaffAuth(vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }))))
+      .resolves.toMatchObject({ kind: 'signed-in', subjectID: 'staff-1' });
   });
 
-  it('treats a stalled session request as unsupported after a bounded wait', async () => {
+  it('recognizes signed-out sessions and unsupported routes or SPA responses', async () => {
+    expect(await probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ error: 'unauthenticated' }, 401)))).toEqual({ kind: 'signed-out' });
+    expect(await probeStaffAuth(vi.fn().mockResolvedValue(new Response('', { status: 404 })))).toEqual({ kind: 'unsupported' });
+    expect(await probeStaffAuth(vi.fn().mockResolvedValue(new Response('<html>spa</html>', { status: 200 })))).toEqual({ kind: 'unsupported' });
+    expect(await probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ subject_id: 3 })))).toEqual({ kind: 'unsupported' });
+  });
+
+  it.each([403, 429, 500, 503])('returns unavailable for HTTP %s', async (status) => {
+    await expect(probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ error: 'unavailable' }, status)))).resolves.toEqual({ kind: 'unavailable' });
+  });
+
+  it('returns unavailable for network errors and bounded timeouts', async () => {
+    expect(await probeStaffAuth(vi.fn().mockRejectedValue(new Error('offline')))).toEqual({ kind: 'unavailable' });
     vi.useFakeTimers();
     const pending = probeStaffAuth(() => new Promise<Response>(() => undefined));
     await vi.advanceTimersByTimeAsync(5000);
-    await expect(pending).resolves.toEqual({ kind: 'unsupported' });
+    await expect(pending).resolves.toEqual({ kind: 'unavailable' });
+    const stalledBody = {
+      status: 200,
+      headers: new Headers({ 'content-type': 'application/json' }),
+      json: () => new Promise<unknown>(() => undefined),
+    } as Response;
+    const pendingBody = probeStaffAuth(() => Promise.resolve(stalledBody));
+    await vi.advanceTimersByTimeAsync(5000);
+    await expect(pendingBody).resolves.toEqual({ kind: 'unavailable' });
     vi.useRealTimers();
   });
 
