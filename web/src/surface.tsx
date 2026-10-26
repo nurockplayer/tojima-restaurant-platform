@@ -53,12 +53,12 @@ export class SurfaceBoundary extends Component<BoundaryProps, { failed: boolean 
   }
 }
 
-export function Surface({ name, demo = false, initialView = 'tables', onReload = () => window.location.reload() }: DemoSurfaceProps & { name: SurfaceName; onReload?: () => void }) {
+export function Surface({ name, demo = false, initialView = 'tables', staffAuth = { kind: 'unsupported' }, onReload = () => window.location.reload() }: DemoSurfaceProps & { name: SurfaceName; onReload?: () => void }) {
   const Selected = surfaces[name];
   return (
     <SurfaceBoundary onReload={onReload}>
       <Suspense fallback={<div className="loading-card" role="status">{copy.loading}</div>}>
-        <Selected demo={demo} initialView={initialView} />
+        <Selected demo={demo} initialView={initialView} staffAuth={staffAuth} />
       </Suspense>
     </SurfaceBoundary>
   );

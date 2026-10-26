@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, cartClient } from '../api/client';
 import { operationsClient } from '../api/operations';
+import { bearerHeaders } from './http';
 
 const jsonResponse = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
 
@@ -10,6 +11,20 @@ afterEach(() => {
 });
 
 describe('shared HTTP core', () => {
+  it('omits bearer authorization for cookie sessions and preserves idempotency keys', () => {
+    expect(new Headers(bearerHeaders('')).get('authorization')).toBeNull();
+    expect(new Headers(bearerHeaders('', 'operation-key')).get('Idempotency-Key')).toBe('operation-key');
+  });
+
+  it('keeps cookie-authenticated staff requests on the same origin despite an API base URL', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test');
+    const fetch = vi.fn().mockResolvedValue(jsonResponse({ can_cash: true, can_serve: false, can_kitchen: false, can_manage: false }));
+    vi.stubGlobal('fetch', fetch);
+    await operationsClient.access({ tenantID: 'tenant-1', storeID: 'store-1' }, '');
+    expect(fetch).toHaveBeenCalledWith('/v1/staff/tenants/tenant-1/stores/store-1/operations/access', expect.objectContaining({ credentials: 'same-origin' }));
+    expect(new Headers((fetch.mock.calls[0]?.[1] as RequestInit).headers).get('authorization')).toBeNull();
+  });
+
   it('prefixes guest cart requests with the configured API base URL', async () => {
     vi.stubEnv('VITE_API_BASE_URL', 'https://api.example.test/');
     const fetch = vi.fn().mockResolvedValue(jsonResponse({ open: true }));

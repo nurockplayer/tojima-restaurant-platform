@@ -32,7 +32,7 @@ export interface GuestOrderStatus { id: string; display_state: string; payment_s
 export interface GuestOperations { orders: GuestOrderStatus[]; cash_enabled: boolean }
 
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  return httpRequest<T>(path, { ...init, headers: { ...bearerHeaders(token), ...init.headers } });
+  return httpRequest<T>(path, { ...init, ...(token ? {} : { credentials: 'same-origin' as const }), headers: { ...bearerHeaders(token), ...init.headers } });
 }
 
 const json = (body: unknown, key?: string): RequestInit => ({
