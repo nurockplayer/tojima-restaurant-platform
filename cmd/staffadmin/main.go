@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/authz"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/staffauth"
@@ -112,7 +113,7 @@ func run(parent context.Context, args []string, stdout, stderr io.Writer, store 
 		}
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "staffadmin: %v\n", err)
+		fmt.Fprintln(stderr, operatorError(err))
 		return 1
 	}
 	return 0
@@ -159,7 +160,7 @@ func parseArgs(args []string, stderr io.Writer) (command, error) {
 	case "revoke-sessions":
 		fs.StringVar(&cmd.actor, "actor", "", "operator name")
 		fs.StringVar(&cmd.subject, "subject", "", "Keycloak subject")
-		fs.StringVar(&cmd.reason, "reason", "operator", "revocation reason")
+		fs.StringVar(&cmd.reason, "reason", "", "revocation reason")
 		if err := fs.Parse(args[1:]); err != nil {
 			return command{}, err
 		}
@@ -169,6 +170,10 @@ func parseArgs(args []string, stderr io.Writer) (command, error) {
 		}
 		if err := requireMutation(cmd, stderr); err != nil {
 			return command{}, err
+		}
+		if strings.TrimSpace(cmd.reason) == "" {
+			fmt.Fprintln(stderr, "--reason is required")
+			return command{}, errors.New("revocation reason required")
 		}
 	case "hold":
 		fs.StringVar(&cmd.actor, "actor", "", "operator name")
@@ -247,6 +252,20 @@ func validRole(role authz.Role) bool {
 	default:
 		return false
 	}
+}
+
+func operatorError(err error) string {
+	switch {
+	case errors.Is(err, staffauth.ErrSubjectHeld):
+		return "staffadmin: subject is on hold"
+	case errors.Is(err, staffauth.ErrSubjectNotHeld):
+		return "staffadmin: subject is not on hold"
+	}
+	var pgErr *pgconn.PgError
+	if errors.As(err, &pgErr) && strings.HasPrefix(pgErr.Code, "23") {
+		return "staffadmin: invalid membership (check role/store)"
+	}
+	return "staffadmin: database operation failed"
 }
 
 func shellQuote(value string) string {

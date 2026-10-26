@@ -23,7 +23,7 @@ var (
 	ErrStaleAuth      = errors.New("authentication started before the latest hold/restore")
 	ErrTxInvalid      = errors.New("staff auth transaction invalid, expired or used")
 	ErrIDPLoggedOut   = errors.New("identity provider session already logged out")
-	errSubjectNotHeld = errors.New("staff subject is not on hold")
+	ErrSubjectNotHeld = errors.New("staff subject is not on hold")
 )
 
 type Store struct{ db *pgxpool.Pool }
@@ -293,6 +293,13 @@ func (s *Store) RevokeSubjectSessions(ctx context.Context, subjectID, reason str
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_subjects(subject_id,auth_epoch,epoch_changed_at) VALUES($1,1,clock_timestamp())
+		ON CONFLICT(subject_id) DO UPDATE SET auth_epoch=staff_subjects.auth_epoch+1,epoch_changed_at=clock_timestamp()`, subjectID); err != nil {
+		return 0, err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason=$2 WHERE subject_id=$1 AND revoked_at IS NULL`, subjectID, reason)
 	if err != nil {
 		return 0, err
@@ -397,7 +404,7 @@ func (s *Store) Restore(ctx context.Context, subjectID, actor string) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errSubjectNotHeld
+		return ErrSubjectNotHeld
 	}
 	if err = writeEvent(ctx, tx, subjectID, "", "restore", map[string]string{"actor": actor}); err != nil {
 		return err

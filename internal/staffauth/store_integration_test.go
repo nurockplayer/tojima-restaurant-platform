@@ -238,9 +238,16 @@ func TestStoreRevokeSubjectSessionsRecordsOperator(t *testing.T) {
 	if _, _, err := store.CreateSession(ctx, "revoke-actor-subject", "revoke-actor-idp", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
+	before := dbNow(t, ctx, pool)
 	count, err := store.RevokeSubjectSessions(ctx, "revoke-actor-subject", "operator", "Jane Doe")
 	if err != nil || count != 1 {
 		t.Fatalf("revoke count=%d err=%v", count, err)
+	}
+	if _, _, err = store.CreateSession(ctx, "revoke-actor-subject", "stale-idp", false, before); !errors.Is(err, ErrStaleAuth) {
+		t.Fatalf("pre-revocation login err=%v, want ErrStaleAuth", err)
+	}
+	if _, _, err = store.CreateSession(ctx, "revoke-actor-subject", "fresh-idp", false, dbNow(t, ctx, pool)); err != nil {
+		t.Fatalf("post-revocation login: %v", err)
 	}
 	var actor string
 	if err = pool.QueryRow(ctx, "SELECT detail->>'actor' FROM staff_auth_events WHERE kind='session_revoked' AND subject_id=$1", "revoke-actor-subject").Scan(&actor); err != nil {

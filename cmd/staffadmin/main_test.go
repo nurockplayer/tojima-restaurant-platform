@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/authz"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/staffauth"
 )
@@ -62,7 +63,6 @@ func TestRunSubcommandsPassArguments(t *testing.T) {
 	}{
 		{"grant", []string{"grant", "--actor", "op", "--subject", "sub", "--tenant", "ten", "--store", "st", "--role", "STORE_MANAGER"}, "grant", []any{"sub", "ten", "st", authz.StoreManager, "op"}},
 		{"revoke", []string{"revoke", "--actor", "op", "--subject", "sub", "--tenant", "ten", "--store", "st", "--role", "KITCHEN"}, "revoke", []any{"sub", "ten", "st", authz.Kitchen, "op"}},
-		{"revoke-sessions default reason", []string{"revoke-sessions", "--actor", "op", "--subject", "sub"}, "revoke-sessions", []any{"sub", "operator", "op"}},
 		{"revoke-sessions reason", []string{"revoke-sessions", "--actor", "op", "--subject", "sub", "--reason", "incident"}, "revoke-sessions", []any{"sub", "incident", "op"}},
 		{"hold", []string{"hold", "--actor", "op", "--subject", "sub", "--reason", "reset"}, "hold", []any{"sub", "reset", "op"}},
 		{"restore", []string{"restore", "--actor", "op", "--subject", "sub"}, "restore", []any{"sub", "op"}},
@@ -100,6 +100,8 @@ func TestRunUsageErrorsDoNotCallStore(t *testing.T) {
 		{"whitespace store for staff", []string{"grant", "--actor", "op", "--subject", "sub", "--tenant", "ten", "--store", "   ", "--role", "STAFF_CASHIER"}},
 		{"whitespace store for tenant admin", []string{"grant", "--actor", "op", "--subject", "sub", "--tenant", "ten", "--store", "   ", "--role", "TENANT_ADMIN"}},
 		{"hold without reason", []string{"hold", "--actor", "op", "--subject", "sub"}},
+		{"revoke-sessions without reason", []string{"revoke-sessions", "--actor", "op", "--subject", "sub"}},
+		{"revoke-sessions whitespace reason", []string{"revoke-sessions", "--actor", "op", "--subject", "sub", "--reason", " \t "}},
 		{"unknown subcommand", []string{"list"}},
 	}
 	for _, tt := range tests {
@@ -130,11 +132,36 @@ func TestRunTenantWideTenantAdminAllowed(t *testing.T) {
 }
 
 func TestRunStoreErrorIsRuntimeFailure(t *testing.T) {
-	store := &fakeStore{err: errors.New("storage unavailable")}
+	store := &fakeStore{err: errors.New("connection failed for postgres://user:secret@host/db")}
 	var stdout, stderr strings.Builder
 	code := run(context.Background(), []string{"restore", "--actor", "op", "--subject", "sub"}, &stdout, &stderr, store)
-	if code != 1 || !strings.Contains(stderr.String(), "storage unavailable") {
+	if code != 1 || stderr.String() != "staffadmin: database operation failed\n" {
 		t.Fatalf("code=%d stderr=%q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "secret") {
+		t.Fatalf("credential leaked to output: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunStoreErrorsUseFixedMessages(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"held", staffauth.ErrSubjectHeld, "staffadmin: subject is on hold\n"},
+		{"not held", staffauth.ErrSubjectNotHeld, "staffadmin: subject is not on hold\n"},
+		{"constraint", &pgconn.PgError{Code: "23514", Message: "constraint failed: secret"}, "staffadmin: invalid membership (check role/store)\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &fakeStore{err: tt.err}
+			var stdout, stderr strings.Builder
+			code := run(context.Background(), []string{"restore", "--actor", "op", "--subject", "sub"}, &stdout, &stderr, store)
+			if code != 1 || stderr.String() != tt.want || strings.Contains(stdout.String()+stderr.String(), "secret") {
+				t.Fatalf("code=%d stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+			}
+		})
 	}
 }
 
