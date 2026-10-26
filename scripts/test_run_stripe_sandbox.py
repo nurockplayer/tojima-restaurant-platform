@@ -2,6 +2,7 @@
 import importlib.util
 from contextlib import contextmanager, nullcontext, redirect_stdout, redirect_stderr
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import re
@@ -79,7 +80,8 @@ class EnvironmentTests(unittest.TestCase):
         runtime.poll.return_value = None
         if real_listener is None:
             listener.poll.return_value = None
-        args = SimpleNamespace(prompt_key=False, port=8083, tenant="A",
+        args = SimpleNamespace(prompt_key=False, keychain_service=runner.DEFAULT_KEYCHAIN_SERVICE,
+                               port=8083, tenant="A",
                                runtime_binary="/test/runtime", credentials="/test/credentials",
                                startup_check=True)
         real_killpg = runner.os.killpg
@@ -97,6 +99,9 @@ class EnvironmentTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stdout=b"stripe version 1.54.0\n"),
                 SimpleNamespace(returncode=0, stdout=b"whsec_synthetic123\n"),
             ]) as cli,
+            mock.patch.object(runner, "keychain_key", return_value=self.fixture()["TOJIMA_STRIPE_TEST_SECRET_KEY"]),
+            mock.patch.object(runner.urllib.request, "urlopen",
+                              return_value=io.BytesIO(json.dumps({"id": runner.PLATFORM_ACCOUNT}).encode())),
             mock.patch.object(runner.subprocess, "Popen", side_effect=[listener, runtime]) as popen,
             mock.patch.object(runner, "ListenerOutput") if real_listener is None else nullcontext(),
             mock.patch.object(runner, "startup_check") as check,
@@ -120,6 +125,45 @@ class EnvironmentTests(unittest.TestCase):
             runtime_env = dict(base, **self.fixture(),
                                TOJIMA_STRIPE_TEST_WEBHOOK_SECRET="whsec_synthetic123")
             self.assertEqual(launch.popen.call_args_list[1].kwargs["env"], runtime_env)
+
+    def test_default_merchant_accounts_are_used_and_overrides_win(self):
+        env = self.fixture()
+        for tenant, account in runner.DEFAULT_MERCHANT_ACCOUNTS.items():
+            env.pop("TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant)
+        checked = runner.checked_environment(env)
+        for tenant, account in runner.DEFAULT_MERCHANT_ACCOUNTS.items():
+            self.assertEqual(checked["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant], account)
+        env["TOJIMA_STRIPE_TEST_ACCOUNT_A"] = "acct_customA"
+        self.assertEqual(runner.checked_environment(env)["TOJIMA_STRIPE_TEST_ACCOUNT_A"], "acct_customA")
+
+    def test_platform_account_guard_fails_before_cli_on_wrong_account(self):
+        with self.mocked_run() as launch, mock.patch.object(
+                runner.urllib.request, "urlopen",
+                return_value=io.BytesIO(b'{"id":"acct_wrong"}')):
+            with self.assertRaisesRegex(ValueError, "approved Stripe Sandbox platform account"):
+                runner.run(launch.args)
+            launch.cli.assert_not_called()
+            launch.popen.assert_not_called()
+
+    def test_keychain_failure_is_clear_and_precedes_cli(self):
+        with self.mocked_run() as launch, mock.patch.object(
+                runner, "keychain_key", side_effect=ValueError("Keychain item 'tojima-stripe-sandbox' is missing or inaccessible")):
+            with self.assertRaisesRegex(ValueError, "Keychain item .* missing or inaccessible"):
+                runner.run(launch.args)
+            launch.cli.assert_not_called()
+
+    def test_shared_keychain_reader_uses_service_and_rejects_non_test_keys(self):
+        with mock.patch.object(runner.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout="sk_test_" + "x" * 24 + "\n")) as security:
+            self.assertEqual(runner.keychain_key("custom-sandbox-key"), "sk_test_" + "x" * 24)
+            self.assertEqual(security.call_args.args[0], [
+                "security", "find-generic-password", "-s", "custom-sandbox-key", "-w"])
+        for result, message in (
+                (SimpleNamespace(returncode=44, stdout=""), "missing or inaccessible"),
+                (SimpleNamespace(returncode=0, stdout="sk_live_" + "x" * 24), "not contain a valid sk_test_ key")):
+            with self.subTest(message=message), mock.patch.object(runner.subprocess, "run", return_value=result):
+                with self.assertRaisesRegex(ValueError, message):
+                    runner.keychain_key("custom-sandbox-key")
 
     def test_forwarded_events_match_service_and_provider_projections(self):
         root = Path(__file__).resolve().parents[1]

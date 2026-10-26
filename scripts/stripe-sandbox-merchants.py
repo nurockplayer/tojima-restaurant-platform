@@ -26,23 +26,13 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from stripe_sandbox_keychain import keychain_key
+
 PLATFORM_ACCOUNT = "acct_1URlHu1Hm4CZe205"
 API_VERSION = "2026-09-30.endive"
-KEYCHAIN_SERVICE = "tojima-stripe-sandbox"
 FIXTURE_KEY = "tojima_test_fixture"
 TENANTS = "ABC"
 INCLUDE = ["configuration.merchant", "requirements", "identity", "defaults"]
-
-
-def keychain_key():
-    out = subprocess.run(
-        ["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"],
-        capture_output=True, text=True,
-    )
-    key = out.stdout.strip()
-    if out.returncode != 0 or not key.startswith("sk_test_") or any(c.isspace() for c in key):
-        raise SystemExit(f"Keychain item '{KEYCHAIN_SERVICE}' missing or not an sk_test_ key")
-    return key
 
 
 def form(data, prefix=""):
@@ -196,7 +186,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--status", action="store_true", help="only report existing accounts")
     args = parser.parse_args()
-    stripe = Stripe(keychain_key())
+    try:
+        key = keychain_key()
+    except ValueError as error:
+        raise SystemExit(str(error)) from None
+    stripe = Stripe(key)
     if stripe.call("GET", "/v1/account").get("id") != PLATFORM_ACCOUNT:
         raise SystemExit("key does not belong to the approved Sandbox platform account")
     accounts = find_existing(stripe)

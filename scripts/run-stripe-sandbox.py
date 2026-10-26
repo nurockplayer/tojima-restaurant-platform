@@ -7,6 +7,7 @@ Does not install software, source .env files, log in, or change API versions.
 """
 
 import argparse
+import base64
 import json
 import socket
 import urllib.error
@@ -23,6 +24,8 @@ import threading
 import time
 import warnings
 
+from stripe_sandbox_keychain import DEFAULT_KEYCHAIN_SERVICE, keychain_key
+
 
 EVENTS = ",".join((
     "checkout.session.completed", "checkout.session.async_payment_succeeded",
@@ -34,6 +37,11 @@ EVENTS = ",".join((
 API_VERSION = "2026-09-30.endive"
 MODE = "CONNECTED_DIRECT_TEST_FIXTURE"
 PLATFORM_ACCOUNT = "acct_1URlHu1Hm4CZe205"
+DEFAULT_MERCHANT_ACCOUNTS = {
+    "A": "acct_1UUXcL1Hm4VOReK9",
+    "B": "acct_1UUXd51Hm4v7xrOu",
+    "C": "acct_1UUXdU1Hm4vaUfKX",
+}
 LISTENER_READY_TIMEOUT = 120
 
 
@@ -101,6 +109,8 @@ class ListenerOutput:
 def checked_environment(source):
     """Keyless-testable admission; never embed a supplied value in an error."""
     env = dict(source)
+    for tenant, account in DEFAULT_MERCHANT_ACCOUNTS.items():
+        env.setdefault("TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant, account)
     if env.get("TOJIMA_STRIPE_MODE") != MODE or env.get("TOJIMA_STRIPE_API_VERSION") != API_VERSION:
         raise ValueError("invalid test mode/API version")
     key = env.get("TOJIMA_STRIPE_TEST_SECRET_KEY", "")
@@ -178,13 +188,30 @@ def hidden_key_input():
             raise ValueError("secure terminal echo control is unavailable") from None
 
 
+def verify_platform_account(key):
+    """Fail closed unless the supplied test key belongs to the approved account."""
+    request = urllib.request.Request("https://api.stripe.com/v1/account")
+    request.add_header("Authorization", "Basic " + base64.b64encode((key + ":").encode()).decode())
+    request.add_header("Stripe-Version", API_VERSION)
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            account = json.load(response)
+    except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+        raise ValueError("could not verify Stripe Sandbox platform account") from None
+    if not isinstance(account, dict) or account.get("id") != PLATFORM_ACCOUNT:
+        raise ValueError("key does not belong to the approved Stripe Sandbox platform account")
+
+
 def run(args):
     source = dict(os.environ)
     if args.prompt_key:
         if not sys.stdin.isatty():
             raise ValueError("secure interactive key entry requires a terminal")
         source["TOJIMA_STRIPE_TEST_SECRET_KEY"] = hidden_key_input()
+    else:
+        source["TOJIMA_STRIPE_TEST_SECRET_KEY"] = keychain_key(args.keychain_service)
     env = checked_environment(source)
+    verify_platform_account(env["TOJIMA_STRIPE_TEST_SECRET_KEY"])
     root = Path(__file__).resolve().parents[1]
     cli = shutil.which("stripe")
     if cli is None or not (root / "web/dist/index.html").is_file():
@@ -278,7 +305,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tenant", choices=list("ABC"), required=True)
     parser.add_argument("--port", type=int, default=8083)
-    parser.add_argument("--prompt-key", action="store_true", help="user enters test key through a hidden terminal prompt; never saved")
+    parser.add_argument("--keychain-service", default=DEFAULT_KEYCHAIN_SERVICE,
+                        help="macOS Keychain generic-password service for the Sandbox test key")
+    parser.add_argument("--prompt-key", action="store_true", help="use an explicit hidden terminal prompt instead of Keychain")
     parser.add_argument("--runtime-binary", required=True, help="already built operationstest binary; avoids compilation with credentials")
     parser.add_argument("--startup-check", action="store_true", help="check runtime/HTTP guards then stop; does not exercise Checkout")
     parser.add_argument("--credentials", required=True, help="new owner-only local staff credential file")
@@ -294,7 +323,10 @@ def main():
     except ListenerReadinessError as error:
         print(str(error), file=sys.stderr)
         return 1
-    except (ValueError, OSError, subprocess.SubprocessError):
+    except ValueError as error:
+        print(str(error), file=sys.stderr)
+        return 1
+    except (OSError, subprocess.SubprocessError):
         print("Sandbox startup failed; verify the documented secure environment and prerequisites", file=sys.stderr)
         return 1
 
