@@ -23,7 +23,7 @@ var (
 	ErrStaleAuth      = errors.New("authentication started before the latest hold/restore")
 	ErrTxInvalid      = errors.New("staff auth transaction invalid, expired or used")
 	ErrIDPLoggedOut   = errors.New("identity provider session already logged out")
-	errSubjectNotHeld = errors.New("staff subject is not on hold")
+	ErrSubjectNotHeld = errors.New("staff subject is not on hold")
 )
 
 type Store struct{ db *pgxpool.Pool }
@@ -40,6 +40,16 @@ type Session struct {
 	StrongLogin     bool
 	LastStrongAuth  *time.Time
 	AbsoluteExpires time.Time
+}
+
+type SubjectStatus struct {
+	SubjectID    string
+	Exists       bool
+	HoldAt       *time.Time
+	HoldReason   string
+	AuthEpoch    int64
+	LiveSessions int64
+	Memberships  []authz.Membership
 }
 
 type AuthTxInput struct {
@@ -277,18 +287,29 @@ func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) err
 	return tx.Commit(ctx)
 }
 
-func (s *Store) RevokeSubjectSessions(ctx context.Context, subjectID, reason string) (int64, error) {
+func (s *Store) RevokeSubjectSessions(ctx context.Context, subjectID, reason string, actors ...string) (int64, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+		return 0, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_subjects(subject_id,auth_epoch,epoch_changed_at) VALUES($1,1,clock_timestamp())
+		ON CONFLICT(subject_id) DO UPDATE SET auth_epoch=staff_subjects.auth_epoch+1,epoch_changed_at=clock_timestamp()`, subjectID); err != nil {
+		return 0, err
+	}
 	tag, err := tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason=$2 WHERE subject_id=$1 AND revoked_at IS NULL`, subjectID, reason)
 	if err != nil {
 		return 0, err
 	}
 	n := tag.RowsAffected()
-	if err = writeEvent(ctx, tx, subjectID, "", "session_revoked", map[string]any{"count": n, "reason": reason}); err != nil {
+	detail := map[string]any{"count": n, "reason": reason}
+	if len(actors) > 0 {
+		detail["actor"] = actors[0]
+	}
+	if err = writeEvent(ctx, tx, subjectID, "", "session_revoked", detail); err != nil {
 		return 0, err
 	}
 	if err = tx.Commit(ctx); err != nil {
@@ -383,7 +404,7 @@ func (s *Store) Restore(ctx context.Context, subjectID, actor string) error {
 		return err
 	}
 	if tag.RowsAffected() == 0 {
-		return errSubjectNotHeld
+		return ErrSubjectNotHeld
 	}
 	if err = writeEvent(ctx, tx, subjectID, "", "restore", map[string]string{"actor": actor}); err != nil {
 		return err
@@ -426,6 +447,39 @@ func (s *Store) Current(ctx context.Context, subjectID, tenantID string) ([]auth
 		result = append(result, m)
 	}
 	return result, rows.Err()
+}
+
+func (s *Store) Status(ctx context.Context, subjectID string) (SubjectStatus, error) {
+	status := SubjectStatus{SubjectID: subjectID, Memberships: make([]authz.Membership, 0)}
+	rows, err := s.db.Query(ctx, `SELECT s.hold_at,s.hold_reason,s.auth_epoch,
+		(SELECT count(*) FROM staff_sessions ss WHERE ss.subject_id=s.subject_id AND ss.revoked_at IS NULL AND now()<ss.absolute_expires_at),
+		m.tenant_id,coalesce(m.store_id,''),m.role
+		FROM staff_subjects s LEFT JOIN staff_memberships m ON m.subject_id=s.subject_id AND m.revoked_at IS NULL
+		WHERE s.subject_id=$1 ORDER BY m.tenant_id,coalesce(m.store_id,''),m.role`, subjectID)
+	if err != nil {
+		return SubjectStatus{}, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var holdAt *time.Time
+		var holdReason *string
+		var tenantID, storeID, role *string
+		if err = rows.Scan(&holdAt, &holdReason, &status.AuthEpoch, &status.LiveSessions, &tenantID, &storeID, &role); err != nil {
+			return SubjectStatus{}, err
+		}
+		status.Exists = true
+		status.HoldAt = holdAt
+		if holdReason != nil {
+			status.HoldReason = *holdReason
+		}
+		if tenantID != nil {
+			status.Memberships = append(status.Memberships, authz.Membership{TenantID: *tenantID, StoreID: *storeID, Role: authz.Role(*role)})
+		}
+	}
+	if err = rows.Err(); err != nil {
+		return SubjectStatus{}, err
+	}
+	return status, nil
 }
 
 func (s *Store) Grant(ctx context.Context, subjectID, tenantID, storeID string, role authz.Role, actor string) error {
