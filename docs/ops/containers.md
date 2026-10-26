@@ -56,7 +56,7 @@ not printed. No config value enables payments by default.
 | `GRANT_WINDOW_MAX`, `PIN_MAX_ATTEMPTS`, `PIN_LENGTH` | Required integers: 1–10000, 1–20, 4–8 respectively. |
 | `PIN_PEPPER` | Required standard base64 of at least 32 secret bytes. Keep stable across restarts; no automatic random replacement. |
 | `PAYMENT_CREATE_RETRY_WINDOW`, `PAYMENT_CONTINUATION_TTL`, `PAYMENT_WORK_LEASE_TTL` | Required durations, at least 1ms; create retry must be less than 24h. Required even with Stripe disabled because the shared payment policy is constructed for cash and fail-closed Stripe ordering. |
-| `APP_HEALTH_ONLY` | Default `false`. Explicit `true` serves only `/healthz`, needs only `APP_ADDR`, and rejects DB/Stripe configuration. No DB never silently becomes a healthy empty application. |
+| `APP_HEALTH_ONLY` | Default `false`. Explicit `true` serves only `/healthz`, needs only `APP_ADDR`, and rejects DB/Stripe/staff OIDC configuration. No DB never silently becomes a healthy empty application. |
 
 `.env.example` contains **local example policy**, not accepted production TTLs.
 ORDER_READ retains the existing Owner-approved 24h default. Health is process
@@ -72,7 +72,7 @@ Normal mode mounts the existing table status/join, session status/join, menus,
 shared cart/preview/commit, session order list and operations projection,
 ORDER_READ status and read-grant APIs under `/v1/guest/`. Existing grants and
 tenant/store checks remain authoritative. Cash ordering needs an already
-provisioned cash-enabled store; staff settlement is unavailable in this release.
+provisioned cash-enabled store; staff settlement requires the opt-in staff identity and current membership below.
 
 `STRIPE_MODE` is empty/`disabled` by default: Stripe commits fail closed;
 checkout context/status/resume and the webhook route are unmounted, and no
@@ -108,22 +108,123 @@ Test configuration does not authorize live payments or external account changes.
 
 ### Staff boundary and SPA behavior
 
-**Every method on `/v1/staff`, `/v1/staff/**`, `/v1/admin`, `/v1/admin/**`
-returns 403 before touching the DB.** This includes session open/read/close/PIN,
-QR mode, table/KDS/review views, cash settings/preview/settle, acceptance and
-fulfillment, stop requests, adjustments/refunds/retries, update acknowledgement,
-payment read/reconcile/unpaid-void, and all menu/catalog administration and holds.
-The shared `httpapi.IdentityResolver` + `authz.Authorizer` interfaces are the
-future MOD-08 Keycloak seam; production passes `DenyIdentity` + `DenyAll` and
-adds the outer namespace denial. No env flag, bearer fixture or role header can
-turn it on. `/staff`, `/kitchen`, `/catalog` can load the SPA shell but cannot
-operate their APIs. A provisioned guest journey does not establish staff readiness.
+With `STAFF_AUTH_MODE` unset/empty/`disabled`, every method on `/v1/staff`,
+`/v1/staff/**`, `/v1/admin` and `/v1/admin/**` returns 403 before DB access,
+including encoded namespace variants. `/staff/auth/*` retains SPA fallback.
+With `STAFF_AUTH_MODE=oidc`, the explicit OIDC adapter and current-membership
+policy enable the staff/operations and menu APIs. The outer session check runs
+before resource lookups; unsafe staff/admin methods require the exact configured
+Origin. Ambiguous protected paths (escapes, backslashes, dot/repeated separators
+or namespace case changes) are rejected with 403, rather than interpreted
+differently by nested routers. Resource identifiers keep their original case.
+No header or env grants an identity: a verified live DB session is required.
+`/staff`, `/kitchen`, `/catalog` can load the SPA shell; the web login UX is PR E.
+A provisioned guest journey does not establish staff readiness.
 
 GET/HEAD navigation paths fall back to `index.html`; unknown `/v1` APIs and
 missing asset/file paths return 404. Directories are never listed. Dotfiles,
 traversal and symlink escapes are denied using `os.Root`. HTML and ordinary
 files use `no-cache`; hashed Vite files under `/assets/` use one-year immutable
 caching; APIs use `no-store`, with `nosniff` and `no-referrer` headers.
+
+### Staff sign-in (Keycloak)
+
+1. Keep `STAFF_AUTH_MODE=disabled` for the ordinary stack. To enable staff, set
+   `STAFF_AUTH_MODE=oidc`, `STAFF_OIDC_CLIENT_ID=tojima-staff`, and the variables
+   below in your private `.env`. Generate a distinct DB password, bootstrap admin
+   password and client secret; `openssl rand -base64 48` is suitable. Set
+   `TOJIMA_STAFF_CLIENT_SECRET` and `STAFF_OIDC_CLIENT_SECRET` to the same secret
+   (at least 32 characters). Set `KC_BOOTSTRAP_ADMIN_USERNAME` too. No real
+   credentials or imported users belong in the realm JSON.
+2. For local Compose, use `KEYCLOAK_PUBLIC_URL=http://127.0.0.1:8081`,
+   `APP_PUBLIC_ORIGIN=http://127.0.0.1:8080`,
+   `STAFF_OIDC_ISSUER=http://127.0.0.1:8081/realms/tojima`, and
+   `STAFF_OIDC_DISCOVERY_URL=http://keycloak:8080/realms/tojima`.
+   The issuer must equal the token issuer derived from `KC_HOSTNAME`, which
+   Compose sets to `KEYCLOAK_PUBLIC_URL`. **Do not use the internal discovery
+   URL as the public issuer.** For HTTPS deployments use the external HTTPS
+   origins instead. The issuer accepts HTTP only on `keycloak`, `localhost` or
+   `127.0.0.1`; the app origin accepts HTTP only on `127.0.0.1:<port>`.
+3. Run `docker compose --profile staff up -d --build --wait`. The profile adds
+   Keycloak 26.8.1 pinned by digest, roughly **700 MB** of memory, a separate
+   `keycloak` DB/role in the same PostgreSQL, and a read-only realm import.
+   The listener is loopback-only on `${KEYCLOAK_PORT:-8081}`. Keycloak's
+   management port 9000 stays private; the healthcheck uses bash `/dev/tcp` and
+   an HTTP HEAD request to `/health/ready`, because the image has no curl
+   ([Keycloak health documentation](https://www.keycloak.org/observability/health)).
+   Secrets are required at Keycloak **container startup**: Compose interpolates
+   inactive profiles too, so `${VAR:?…}` would break the default stack.
+4. Open `KEYCLOAK_PUBLIC_URL/admin/`, sign in with the bootstrap credentials,
+   create a permanent admin and retire the bootstrap admin. Select realm
+   `tojima`, configure approved SMTP for verification/invitation, and create
+   each invited user with a verified email workflow, temporary password and
+   required actions `UPDATE_PASSWORD`, `VERIFY_EMAIL`, and `CONFIGURE_TOTP`
+   for manager/admin/finance. Configure factors before granting privileged
+   membership. There is no public registration or password reset. Use the
+   user's Keycloak subject with the existing [staffadmin CLI](../../cmd/staffadmin/main.go)
+   (PR D): `grant`, `revoke`, `revoke-sessions`, `hold`, `restore`, `status`.
+   For example, on an approved CLI build with DB env set:
+   `staffadmin grant --actor operator --subject KEYCLOAK_SUBJECT --tenant TENANT --store STORE --role STAFF_CASHIER`.
+   Credential/email/factor changes require `hold`, the Keycloak change, then
+   `restore`; old sessions never revive. No CLI or UI changes are made here.
+
+Private discovery uses Keycloak's
+[`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`](https://www.keycloak.org/server/hostname)
+to advertise private token/JWKS endpoints while keeping browser endpoints public.
+The optional `STAFF_OIDC_DISCOVERY_URL` is restricted to `http://keycloak:8080`
+with the **same realm path**. Go uses `oidc.InsecureIssuerURLContext` solely to
+select that discovery address, explicitly checks the discovered issuer against
+`STAFF_OIDC_ISSUER`, and leaves ID/logout token issuer/signature/audience checks
+on. Omit this override when the public issuer is reachable inside the server
+container. No TLS verification is disabled. If discovery fails, the server still
+starts, retries after 1, 2, 4, …, 30 seconds, and login, callback, step-up and
+back-channel logout return no-store 503 until ready. Session inspection and
+Origin-protected local logout stay available even before first discovery; local
+logout revokes the DB session and clears cookies, then returns to `/staff/`
+without the optional IdP logout redirect. Existing session resolution
+and current membership checks use Tojima DB only. `/healthz` is still liveness.
+
+The explicit `tojima-browser` forms flow has conditional LoA 1 password and
+LoA 2 OTP, both max age 0; no Cookie or Passkey alternative. Required actions
+are enabled but not defaulted. The realm's default-role composite is empty;
+`account` and `account-console` clients are disabled. An unassigned realm-level
+`offline_access` role/scope is declared only to suppress Keycloak's automatic
+offline default-role grant during import; it is never assigned to `tojima-staff`.
+Built-in OIDC scopes are created explicitly via `CreateDefaultClientScopes`;
+the staff client's defaults are only `acr`, `basic`, `profile`, `email`, with
+no optional scopes or refresh-token use. Realm import runs only for a missing
+realm: editing JSON or changing the secret does **not** update an existing realm.
+Reconcile changes explicitly through an approved admin procedure; never delete
+production data to force a reimport. Verify effective flow/roles/scopes in PR F.
+
+Fresh PostgreSQL volumes run `deploy/postgres/initdb/10-keycloak.sh`; an empty
+`KEYCLOAK_DB_PASSWORD` prints a skip message, so the default profile needs no new
+secret. Existing volumes never rerun initdb. After setting the password in
+`.env`, create the missing role/database once (back up first; omit `CREATE ROLE`
+if it already exists and use an approved password rotation instead):
+
+```sh
+docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U tojima -d tojima <<'SQL'
+\getenv keycloak_password KEYCLOAK_DB_PASSWORD
+CREATE ROLE keycloak LOGIN PASSWORD :'keycloak_password';
+CREATE DATABASE keycloak OWNER keycloak;
+SQL
+```
+
+Use your actual `POSTGRES_USER`/`POSTGRES_DB` if changed. Recreate the postgres
+container after adding the env value so `\getenv` sees it; this preserves the
+volume. The script/SQL never prints the password (do not enable SQL echo or shell
+tracing). Runtime and Keycloak DB roles must stay separate in production.
+
+`orb-test --heavy --host -- sh scripts/staff-auth-smoke.sh` generates disposable
+secrets in a private temporary `.env`, verifies strong ACR discovery, assigned
+client scopes via admin REST (global discovery may still advertise
+`offline_access`), an empty default-role composite, the PKCE S256 / `prompt=login`
+/ `acr_values=basic` redirect, anonymous staff 403 and wrong-Origin POST 403.
+Its trap removes the stack, volumes, local images and temporary credentials,
+then reports dangling volumes. This is wiring evidence; **browser login,
+password/OTP/LoA freshness and logout acceptance remain PR F**. Secure `__Host-`
+cookies stay enabled in local HTTP; full browser acceptance uses HTTPS.
 
 ### Verification
 
@@ -166,7 +267,7 @@ distroless/nonroot で実行。Compose は PostgreSQL 17 → `/migrate` 成功 �
 別途承認された provisioning が必要。空 DB に営業可能な店舗は存在しない。
 
 DB なしで health のみ使う場合は `APP_HEALTH_ONLY=true` を明示する。
-DB/Stripe 設定との併用は拒否。通常起動が DB 不足で health のみに退行することは
+DB/Stripe/staff OIDC 設定との併用は拒否。通常起動が DB 不足で health のみに退行することは
 ない。`/healthz` はプロセス生存のみで、DB/IdP/決済 readiness を示さない。
 `-healthcheck` は `APP_ADDR` だけで動く。SIGINT/SIGTERM は HTTP を最大10秒
 待ち、worker 終了を最大15秒待ってから pool を閉じる。期限内に終了しない場合も
@@ -176,8 +277,8 @@ DB/Stripe 設定との併用は拒否。通常起動が DB 不足で health の�
 
 既存の `/v1/guest/` テーブル・セッション参加、メニュー、カート・見積・送信、
 注文一覧・operations 表示、ORDER_READ と grant API を提供する。ORDER_READ は
-承認済み24時間設定を維持。現金送信は既に設定済みの店舗だけで、スタッフ会計は
-利用不可。既存の loopback harness の動作は変更しない。
+承認済み24時間設定を維持。現金送信は既に設定済みの店舗だけで、スタッフ会計は下記の staff 認証・権限が
+必要。既存の loopback harness の動作は変更しない。
 
 Stripe は既定で無効。無効時は Stripe 送信を拒否し、checkout context/status/
 resume・webhook は未マウント、worker も停止。設定の一部だけ渡すと起動を拒否。
@@ -194,13 +295,48 @@ DB に account/ref、`CONNECTED_DIRECT_TEST_FIXTURE`、API version、承認済�
 webhook endpoint ref の merchant 設定が必要だが起動時には作らない。URL/version/
 金額上限変更は既存 attempt の profile を変えるため、事前に処理・照合する。
 
-**全メソッドの `/v1/staff`・配下、`/v1/admin`・配下は DB アクセス前に403。**
-セッション開始/参照/終了/PIN/QR mode、table/KDS/review、現金設定/会計、注文承認/
-調理進捗、停止要求、調整/返金/retry、更新確認、決済参照/照合/未払い無効化、
-メニュー/catalog 管理/hold は全て未提供。将来の MOD-08 Keycloak は
-`httpapi.IdentityResolver`＋`authz.Authorizer` を実装する。現状は DenyIdentity/
-DenyAll と外側の namespace deny を使い、環境変数や fixture token で解除不可。
-`/staff`・`/kitchen`・`/catalog` の SPA は読めても操作 API は利用できない。
+`STAFF_AUTH_MODE` が未設定・空・`disabled` の場合、全メソッドの `/v1/staff`・配下、
+`/v1/admin`・配下は encoded path を含め DB アクセス前に403。`/staff/auth/*` は
+従来通り SPA fallback。有効化は `oidc` の明示設定のみ。検証済み session と毎回の
+membership 判定を使い、staff/operations と menu API を提供する。resource lookup
+前に session を確認し、unsafe method は設定済み Origin の完全一致が必要。
+escape・逆斜線・dot/重複区切り・namespace 大小文字変更で曖昧になる保護 path は403。
+resource ID の大小文字は維持。header や env 自体が identity を与えることはない。
+SPA のログイン UX は PR E、ブラウザでの実認証受入は PR F。
+
+### Staff sign-in (Keycloak) / スタッフ認証
+
+通常の stack は `STAFF_AUTH_MODE=disabled` のまま。上の英語手順と同じ変数を
+private `.env` に設定し、`STAFF_AUTH_MODE=oidc` と
+`docker compose --profile staff up -d --build --wait` で有効化する。DB・bootstrap
+admin・client に別々の secret を生成（`openssl rand -base64 48`）。2つの client
+secret 変数は同一値・32文字以上。Keycloak は固定26.8.1/digest、約700 MB、専用
+DB/role、loopback port 8081。管理 port 9000 の ready check は curl を使わず bash
+`/dev/tcp`。必須 secret は container 起動時に検証するため既定 profile は追加設定不要。
+
+初回は `KEYCLOAK_PUBLIC_URL/admin/` の bootstrap admin で入り、恒久 admin を作成して
+bootstrap を廃止。realm `tojima` に承認済み SMTP を設定し、招待 user に一時 password、
+`UPDATE_PASSWORD`・`VERIFY_EMAIL`、管理者/経理には `CONFIGURE_TOTP` を指定する。
+factor 設定後に既存 `staffadmin`（PR D）の `grant` で subject と membership を結ぶ。
+資格情報・email・factor 変更は必ず `hold` → Keycloak 変更 → `restore`。登録・自己
+password reset・account console は無効、default role は空、offline scope は staff
+client に付与しない。flow は password LoA 1＋OTP LoA 2（max age 0）、Cookie/Passkey
+代替なし。JSON import は realm が無い時のみで、既存 realm/secret は自動更新しない。
+
+local は公開 issuer `http://127.0.0.1:8081/realms/tojima` を `STAFF_OIDC_ISSUER` に設定し、
+`KC_HOSTNAME` と一致させる。内部 `http://keycloak:8080/realms/tojima` は
+`STAFF_OIDC_DISCOVERY_URL` 専用。dynamic backchannel と discovery URL context は接続先
+だけを変え、公開 issuer の完全一致検証を維持。到達可能なら override は不要。
+app origin の HTTP 例外は `http://127.0.0.1:<port>` のみ。IdP 未起動でも server は起動、
+1秒→30秒で再試行し、準備前の login/callback/step-up/back-channel は no-store 503。session 参照と
+Origin 保護付き local logout は discovery 前も使え、DB 失効・cookie 削除後 `/staff/` へ戻る。
+既存 session は DB のみで解決。
+
+既存 volume は initdb を再実行しない。backup 後、上の一回限りの SQL で専用 role/DB
+を作る。`.env` 追加後 postgres container を再作成して env を反映（volume は保持）。
+空 password 時は initdb が skip。SQL/trace で password を出力しない。上の staff smoke
+は使い捨て secret/DB を使い、ACR・scope・default role・PKCE redirect・匿名/Origin 403
+を確認し全資源を削除。HTTPS でのブラウザ認証・OTP・LoA freshness・logout 受入は PR F。
 
 ### SPA・検証・境界
 
@@ -215,7 +351,7 @@ loopback/一時ポートで health、migration 台帳、使い捨て DB に作�
 project 残存資源チェック、前後の dangling volume 一覧を実行。共有 build cache
 の掃除は orb-test に委ねる。重い検証は平日03:00–15:00 JST。終了時にローカル
 DB を削除する場合は `docker compose down -v`。TLS/ingress、本番 DB hosting/
-backup、secret 運用、staff IdP、live activation は別 gate。ADR-0002/0003 は維持。
+backup、secret 運用、staff のブラウザ認証受入、live activation は別 gate。ADR-0002/0003 は維持。
 
 ## 繁體中文
 
@@ -237,7 +373,7 @@ URL 優先，否則 pgx 使用 PG*；啟動連線檢查限10秒，pool 上限4�
 缺漏或錯誤設定會拒絕啟動，錯誤不輸出機密。Migration、商家/桌位/菜單/現金/
 merchant/identity 建置須另有授權流程；空 DB 不會自動產生可營業門店。
 
-無 DB 時須明確設定 `APP_HEALTH_ONLY=true` 才只提供 health；不能混用 DB/Stripe
+無 DB 時須明確設定 `APP_HEALTH_ONLY=true` 才只提供 health；不能混用 DB/Stripe/staff OIDC
 設定。正常模式缺 DB 不會靜默降為 health-only。`/healthz` 只表示程序存活，不是
 DB/IdP/付款 readiness。`-healthcheck` 只讀 `APP_ADDR`。SIGINT/SIGTERM 最多等待
 HTTP 10秒，等待 worker 最多15秒後關閉 pool；若 worker 未及時停止，待辦付款會在
@@ -247,7 +383,7 @@ lease 到期後由 DB 重新領取。
 
 提供既有 `/v1/guest/` 桌位/桌次加入、菜單、購物車/預覽/送單、訂單清單與
 operations 顯示、ORDER_READ 與 grant API。ORDER_READ 維持已批准24小時期限。
-現金送單需門店預先啟用現金，員工結帳目前不可用。Loopback harness 行為不變。
+現金送單需門店預先啟用現金，員工結帳須啟用下方 staff 認證與權限。Loopback harness 行為不變。
 
 Stripe 預設關閉：Stripe 送單拒絕，checkout context/status/resume 與 webhook
 未掛載，不啟動 worker。關閉時若傳入付款專屬設定會拒絕啟動。開啟須完整提供
@@ -263,13 +399,47 @@ Host/Origin 檢查、`__Host-` Secure/HttpOnly/SameSite=Strict cookie，以及 w
 endpoint ref，啟動不建立它。修改 return URL/version/金額上限會改變既有 attempt
 profile，須先排空或對帳。
 
-**所有方法的 `/v1/staff`、其子路徑及 `/v1/admin`、其子路徑在存取 DB 前回403。**
-包含桌次開啟/讀取/關閉/PIN/QR mode、table/KDS/review、現金設定/預覽/結帳、
-接單/出餐、停單、調整/退款/retry、更新確認、付款讀取/對帳/未付款作廢，以及
-全部 menu/catalog 管理與 hold。未來 MOD-08 Keycloak adapter 使用
-`httpapi.IdentityResolver`＋`authz.Authorizer`；目前固定 DenyIdentity/DenyAll 加上
-外層 namespace deny，環境變數、fixture token、role header 都不能解除。
-`/staff`、`/kitchen`、`/catalog` 可載入 SPA 外殼，但無法操作 API。
+`STAFF_AUTH_MODE` 未設定、空值或 `disabled` 時，所有方法的 `/v1/staff` 及子路徑、
+`/v1/admin` 及子路徑（含編碼變體）皆在 DB 存取前回403；`/staff/auth/*` 維持 SPA
+fallback。明確設成 `oidc` 才掛載員工/operations 與 menu API，以已驗證 session 及
+每次查詢的 membership 授權。resource lookup 前先驗證 session，unsafe method 必須
+精確符合設定的 Origin。含 escape、反斜線、dot/重複分隔符或 namespace 大小寫變化的
+歧義保護路徑回403，resource ID 大小寫保持原樣。header/env 本身不授予 identity。
+網頁登入 UX 屬 PR E；真實瀏覽器登入驗收屬 PR F。
+
+### Staff sign-in (Keycloak) / 員工登入
+
+一般 stack 維持 `STAFF_AUTH_MODE=disabled`。在 private `.env` 設定與英文步驟相同的
+變數，改為 `STAFF_AUTH_MODE=oidc`，執行
+`docker compose --profile staff up -d --build --wait`。為 DB、bootstrap admin、client
+各別產生 secret（`openssl rand -base64 48`）；兩個 client secret 變數必須相同且至少
+32字元。Keycloak 固定26.8.1/digest，約700 MB，獨立 DB/role，僅公開 loopback 8081。
+管理 port 9000 以 bash `/dev/tcp` 檢查 ready，映像不含 curl。必填機密於 container 啟動
+時驗證，因此預設 profile 不需新增設定。
+
+首次至 `KEYCLOAK_PUBLIC_URL/admin/` 使用 bootstrap admin，建立永久 admin 後停用
+bootstrap。於 realm `tojima` 設定核准的 SMTP，邀請使用者並指定 temporary password、
+`UPDATE_PASSWORD`、`VERIFY_EMAIL`；經理/管理員/財務另加 `CONFIGURE_TOTP`。先完成
+factor，再用既有 `staffadmin`（PR D）`grant` 將 Keycloak subject 對應 membership。
+修改密碼/email/factor 必須 `hold` → Keycloak 變更 → `restore`，舊 session 不復活。
+停用公開註冊、自助 password reset、account console；default role 為空，staff client
+不授予 offline scope。明確 flow 使用 password LoA 1＋OTP LoA 2（max age 0），無
+Cookie/Passkey 捷徑。JSON 僅在 realm 不存在時匯入，既有 realm/secret 不會自動更新。
+
+local 的公開 issuer `http://127.0.0.1:8081/realms/tojima` 必須設定為 `STAFF_OIDC_ISSUER`，
+與 `KC_HOSTNAME` 一致。內部 URL `http://keycloak:8080/realms/tojima` 只用於
+`STAFF_OIDC_DISCOVERY_URL`；dynamic backchannel 與 discovery URL context 僅變更連線位址，
+仍精確驗證公開 issuer。公開位址可從 server 存取時省略 override。app origin 只允許
+`http://127.0.0.1:<port>` 的 HTTP 例外。IdP 停機時 server 仍可啟動，1秒→30秒重試；
+準備前 login/callback/step-up/back-channel 回 no-store 503；session 查詢及 Origin
+保護的本地 logout 仍可使用，撤銷 DB session 並清除 cookie 後回 `/staff/`。既有 session
+僅由 Tojima DB 驗證。
+
+既有 volume 不重跑 initdb。先備份，再執行上方一次性 SQL 建立獨立 role/DB；新增 `.env`
+後須重建 postgres container 以載入 env，保留 volume。空密碼時 initdb 會 skip，不可用
+SQL echo/shell trace 輸出密碼。staff smoke 使用臨時機密及 DB，檢查 ACR、scope、空
+預設角色、PKCE redirect、匿名/Origin 403 後清理資源。HTTPS 瀏覽器登入、OTP、LoA
+freshness、logout 的完整驗收仍是 PR F。
 
 ### SPA、驗證與邊界
 
@@ -283,5 +453,5 @@ nosniff/no-referrer。
 API 讀取。trap 執行 `down -v --rmi local --remove-orphans`、專案資源殘留檢查，
 列出前後 dangling volumes；共用 build cache 由 orb-test 清理。重型驗證限平日
 03:00–15:00 JST。刪除本機資料用 `docker compose down -v`。TLS/ingress、正式 DB
-主機/備份、機密管理、staff IdP、live activation 仍是分別的 gate，ADR-0002/0003
+主機/備份、機密管理、staff 瀏覽器認證驗收、live activation 仍是分別的 gate，ADR-0002/0003
 持續有效。

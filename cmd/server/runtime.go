@@ -21,14 +21,14 @@ import (
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/operations"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/ordering"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/payments"
+	"github.com/nurockplayer/tojima-restaurant-platform/internal/staffauth"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/stripeprovider"
 	"github.com/nurockplayer/tojima-restaurant-platform/internal/tablesession"
 )
 
-// The future MOD-08 Keycloak adapter must implement httpapi.IdentityResolver
-// and authz.Authorizer (including current memberships). There is deliberately
-// no env switch or header that can enable staff access in this composition.
-func productionHandler(api, spa http.Handler) http.Handler {
+// Staff access is enabled only by STAFF_AUTH_MODE=oidc and still requires a
+// verified OIDC session and current membership. No header or env grants an identity.
+func productionHandler(api, spa http.Handler, staff *staffauth.Lazy, publicOrigin string) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/healthz", httpapi.NewHandler())
 	deny := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -37,8 +37,24 @@ func productionHandler(api, spa http.Handler) http.Handler {
 		_, _ = w.Write([]byte(`{"error":"forbidden"}`))
 	})
 	for _, prefix := range []string{"/v1/staff", "/v1/admin"} {
-		mux.Handle(prefix, deny)
-		mux.Handle(prefix+"/", deny)
+		next := http.Handler(deny)
+		if staff != nil {
+			next = staffauth.RequireOrigin(publicOrigin, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Reject anonymous requests before resource lookups in the API.
+				if _, err := staff.Resolve(r.Context(), r); err != nil {
+					deny.ServeHTTP(w, r)
+					return
+				}
+				api.ServeHTTP(w, r)
+			}))
+		}
+		mux.Handle(prefix, next)
+		mux.Handle(prefix+"/", next)
+	}
+	if staff != nil {
+		auth := http.NewServeMux()
+		staff.Mount(auth)
+		mux.Handle("/staff/auth/", auth)
 	}
 	mux.Handle("/v1", http.NotFoundHandler())
 	mux.Handle("/v1/", api)
@@ -47,7 +63,10 @@ func productionHandler(api, spa http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
-		if deniedNamespace(r) {
+		// Reject ambiguous staff paths instead of letting nested ServeMux instances
+		// interpret escapes, case or separators differently. Canonical paths route
+		// unchanged; disabled mode retains the existing namespace denial.
+		if (staff == nil && deniedNamespace(r)) || (staff != nil && ambiguousStaffPath(r)) {
 			deny.ServeHTTP(w, r)
 			return
 		}
@@ -57,7 +76,13 @@ func productionHandler(api, spa http.Handler) http.Handler {
 
 // deniedNamespace checks the decoded and the escaped path, so encoded
 // separators (%2F, %2f, %252F) cannot route staff/admin requests elsewhere.
-func deniedNamespace(r *http.Request) bool {
+func deniedNamespace(r *http.Request) bool { return protectedNamespace(r, false) }
+
+func protectedNamespace(r *http.Request, includeAuth bool) bool {
+	prefixes := []string{"/v1/staff", "/v1/admin"}
+	if includeAuth {
+		prefixes = append(prefixes, "/staff/auth")
+	}
 	for _, raw := range []string{r.URL.Path, r.URL.EscapedPath()} {
 		p := strings.ToLower(raw)
 		for i := 0; i < 3 && strings.Contains(p, "%"); i++ { // undo double encoding
@@ -68,13 +93,27 @@ func deniedNamespace(r *http.Request) bool {
 			}
 		}
 		p = path.Clean("/" + strings.ReplaceAll(p, "\\", "/"))
-		for _, prefix := range []string{"/v1/staff", "/v1/admin"} {
+		for _, prefix := range prefixes {
 			if p == prefix || strings.HasPrefix(p, prefix+"/") {
 				return true
 			}
 		}
 	}
 	return false
+}
+
+func ambiguousStaffPath(r *http.Request) bool {
+	if !protectedNamespace(r, true) {
+		return false
+	}
+	p := r.URL.Path
+	canonicalNamespace := false
+	for _, prefix := range []string{"/v1/staff", "/v1/admin", "/staff/auth"} {
+		if p == prefix || strings.HasPrefix(p, prefix+"/") {
+			canonicalNamespace = true
+		}
+	}
+	return !canonicalNamespace || r.URL.EscapedPath() != p || strings.Contains(p, "%") || strings.Contains(p, "\\") || path.Clean(p) != p
 }
 
 type providerResolver struct {
@@ -131,24 +170,28 @@ func composeRuntime(ctx context.Context, cfg config.Config) (*runtime, error) {
 	if err := pool.Ping(startup); err != nil {
 		return nil, errors.New("database unavailable; check connectivity and credentials")
 	}
-	api, worker, err := composeAPI(pool, cfg)
+	api, worker, staff, err := composeAPI(pool, cfg)
 	if err != nil {
 		return nil, err
 	}
 
+	discoveryCtx, stopDiscovery := context.WithCancel(ctx)
+	if staff != nil {
+		staff.Start(discoveryCtx)
+	}
 	success = true
-	return &runtime{handler: productionHandler(api, spa), payments: worker, close: func() { pool.Close(); closeSPA() }}, nil
+	return &runtime{handler: productionHandler(api, spa, staff, cfg.StaffAuth.PublicOrigin), payments: worker, close: func() { stopDiscovery(); pool.Close(); closeSPA() }}, nil
 }
 
 // composeAPI constructs services without migrations, seed writes or network I/O.
-func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.Service, error) {
+func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.Service, *staffauth.Lazy, error) {
 	ops, err := operations.New(pool)
 	if err != nil {
-		return nil, nil, errors.New("cannot initialize operations service")
+		return nil, nil, nil, errors.New("cannot initialize operations service")
 	}
 	menus, err := catalog.New(pool)
 	if err != nil {
-		return nil, nil, errors.New("cannot initialize catalog service")
+		return nil, nil, nil, errors.New("cannot initialize catalog service")
 	}
 	var resolver payments.ProviderResolver
 	if cfg.Stripe.Enabled {
@@ -158,7 +201,7 @@ func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.
 			SuccessURL: cfg.Stripe.SuccessURL, CancelURL: cfg.Stripe.CancelURL,
 		})
 		if err != nil {
-			return nil, nil, errors.New("cannot initialize Stripe test provider")
+			return nil, nil, nil, errors.New("cannot initialize Stripe test provider")
 		}
 		resolver = providerResolver{ref: cfg.Stripe.CredentialRef, resolved: payments.ResolvedProvider{
 			Provider: provider, Account: stripeprovider.AccountContext{Mode: stripeprovider.ModeConnectedDirectFixture, StripeAccountID: cfg.Stripe.AccountID},
@@ -167,32 +210,58 @@ func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.
 	}
 	pay, err := payments.New(pool, ops, resolver, cfg.Payments)
 	if err != nil {
-		return nil, nil, errors.New("cannot initialize payment service")
+		return nil, nil, nil, errors.New("cannot initialize payment service")
 	}
 	sessions, err := tablesession.New(pool, cfg.Sessions, pay)
 	if err != nil {
-		return nil, nil, errors.New("cannot initialize table session service")
+		return nil, nil, nil, errors.New("cannot initialize table session service")
 	}
 	orders, err := ordering.NewWithOrderPolicy(pool, sessions, menus, pay)
 	if err != nil {
-		return nil, nil, errors.New("cannot initialize ordering service")
+		return nil, nil, nil, errors.New("cannot initialize ordering service")
+	}
+	var identity httpapi.IdentityResolver = httpapi.DenyIdentity{}
+	var authorizer authz.Authorizer = authz.DenyAll{}
+	var staff *staffauth.Lazy
+	if cfg.StaffAuth.Enabled {
+		store, err := staffauth.NewStore(pool)
+		if err != nil {
+			return nil, nil, nil, errors.New("cannot initialize staff auth store")
+		}
+		staff, err = staffauth.NewLazy(store, staffauth.Config{
+			IssuerURL: cfg.StaffAuth.IssuerURL, DiscoveryURL: cfg.StaffAuth.DiscoveryURL, ClientID: cfg.StaffAuth.ClientID,
+			ClientSecret: cfg.StaffAuth.ClientSecret, PublicOrigin: cfg.StaffAuth.PublicOrigin,
+		})
+		if err != nil {
+			return nil, nil, nil, errors.New("cannot initialize staff auth configuration")
+		}
+		identity, authorizer = staff, authz.PolicyAuthorizer{Directory: store}
 	}
 	var api http.Handler = httpapi.NewGuestHandler(sessions, menus, orders, ops)
+	if staff != nil {
+		api = httpapi.NewOperationsRuntime(sessions, menus, orders, ops, identity, authorizer)
+	}
 	var worker *payments.Service
 	if cfg.Stripe.Enabled {
 		proofs, err := checkoutproof.New(checkoutproof.Config{SigningKeys: cfg.Stripe.SigningKeys, TTL: cfg.Stripe.ProofTTL})
 		if err != nil {
-			return nil, nil, errors.New("cannot initialize checkout proofs")
+			return nil, nil, nil, errors.New("cannot initialize checkout proofs")
 		}
-		api, err = httpapi.NewPaymentsRuntime(sessions, menus, orders, ops, pay, httpapi.DenyIdentity{}, authz.DenyAll{}, httpapi.PaymentsHTTPConfig{
+		api, err = httpapi.NewPaymentsRuntime(sessions, menus, orders, ops, pay, identity, authorizer, httpapi.PaymentsHTTPConfig{
 			Proofs: proofs, Origin: cfg.Stripe.Origin, WebhookSecrets: []string{cfg.Stripe.WebhookSecret},
 		})
 		if err != nil {
-			return nil, nil, errors.New("cannot initialize payments HTTP configuration")
+			return nil, nil, nil, errors.New("cannot initialize payments HTTP configuration")
 		}
 		worker = pay
 	}
-	return api, worker, nil
+	if staff != nil {
+		mux := http.NewServeMux()
+		mux.Handle("/v1/admin/", httpapi.NewMenuHandler(menus, identity, authorizer))
+		mux.Handle("/", api)
+		api = mux
+	}
+	return api, worker, staff, nil
 }
 
 // Stop cancels processing and waits for the worker for at most the shutdown deadline.

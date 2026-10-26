@@ -1,0 +1,251 @@
+{
+  "realm": "tojima",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": false,
+  "editUsernameAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "verifyEmail": true,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "permanentLockout": false,
+  "passwordPolicy": "length(12) and notUsername and notEmail and passwordHistory(3)",
+  "sslRequired": "external",
+  "revokeRefreshToken": true,
+  "refreshTokenMaxReuse": 0,
+  "offlineSessionIdleTimeout": 60,
+  "offlineSessionMaxLifespanEnabled": true,
+  "offlineSessionMaxLifespan": 60,
+  "attributes": {
+    "acr.loa.map": "{\"basic\":1,\"strong\":2}",
+    "CreateDefaultClientScopes": "true"
+  },
+  "webAuthnPolicyPasswordlessPasskeysEnabled": false,
+  "defaultRole": {
+    "name": "default-roles-tojima",
+    "composite": true
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "default-roles-tojima",
+        "composite": true,
+        "composites": {
+          "realm": [],
+          "client": {}
+        }
+      },
+      {
+        "name": "offline_access",
+        "composite": false
+      }
+    ]
+  },
+  "defaultDefaultClientScopes": [
+    "acr",
+    "basic",
+    "profile",
+    "email"
+  ],
+  "defaultOptionalClientScopes": [],
+  "browserFlow": "tojima-browser",
+  "authenticationFlows": [
+    {
+      "alias": "tojima-browser",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "flowAlias": "tojima-forms",
+          "authenticatorFlow": true,
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "tojima-forms",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "flowAlias": "tojima-loa-1",
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 10,
+          "userSetupAllowed": false
+        },
+        {
+          "flowAlias": "tojima-loa-2",
+          "authenticatorFlow": true,
+          "requirement": "CONDITIONAL",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "tojima-loa-1",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "conditional-level-of-authentication",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticatorConfig": "tojima-loa-1"
+        },
+        {
+          "authenticator": "auth-username-password-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
+    },
+    {
+      "alias": "tojima-loa-2",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "conditional-level-of-authentication",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "userSetupAllowed": false,
+          "authenticatorConfig": "tojima-loa-2"
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "authenticatorFlow": false,
+          "requirement": "REQUIRED",
+          "priority": 20,
+          "userSetupAllowed": false
+        }
+      ]
+    }
+  ],
+  "authenticatorConfig": [
+    {
+      "alias": "tojima-loa-1",
+      "config": {
+        "loa-condition-level": "1",
+        "loa-max-age": "0"
+      }
+    },
+    {
+      "alias": "tojima-loa-2",
+      "config": {
+        "loa-condition-level": "2",
+        "loa-max-age": "0"
+      }
+    }
+  ],
+  "requiredActions": [
+    {
+      "alias": "CONFIGURE_TOTP",
+      "name": "Configure OTP",
+      "providerId": "CONFIGURE_TOTP",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 0,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 1,
+      "config": {}
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 2,
+      "config": {}
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "tojima-staff",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "${TOJIMA_STAFF_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": false,
+      "fullScopeAllowed": false,
+      "redirectUris": [
+        "${APP_PUBLIC_ORIGIN}/staff/auth/callback"
+      ],
+      "webOrigins": [],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "backchannel.logout.url": "${APP_PUBLIC_ORIGIN}/staff/auth/backchannel-logout",
+        "backchannel.logout.session.required": "true",
+        "backchannel.logout.revoke.offline.tokens": "true",
+        "post.logout.redirect.uris": "${APP_PUBLIC_ORIGIN}/staff/",
+        "use.refresh.tokens": "false",
+        "client.offline.session.idle.timeout": "60",
+        "client.offline.session.max.lifespan": "60"
+      },
+      "defaultClientScopes": [
+        "acr",
+        "basic",
+        "profile",
+        "email"
+      ],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "account",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "account-console",
+      "enabled": false,
+      "protocol": "openid-connect",
+      "publicClient": true,
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "defaultClientScopes": [],
+      "optionalClientScopes": []
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "offline_access",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      }
+    }
+  ]
+}

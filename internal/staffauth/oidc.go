@@ -30,6 +30,7 @@ const (
 
 type Config struct {
 	IssuerURL    string
+	DiscoveryURL string
 	ClientID     string
 	ClientSecret string
 	PublicOrigin string
@@ -46,25 +47,28 @@ type Handler struct {
 }
 
 func NewHandler(ctx context.Context, store *Store, cfg Config) (*Handler, error) {
-	if store == nil || strings.TrimSpace(cfg.IssuerURL) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
-		return nil, errors.New("invalid staff auth configuration")
-	}
-	u, err := url.Parse(cfg.PublicOrigin)
-	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(cfg.PublicOrigin, "#") ||
-		(u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != "")) {
-		return nil, errors.New("invalid staff auth public origin")
+	if err := validateConfig(store, cfg); err != nil {
+		return nil, err
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, cfg.HTTPClient), cfg.IssuerURL)
+	discoveryURL := cfg.IssuerURL
+	discoveryCtx := oidc.ClientContext(ctx, cfg.HTTPClient)
+	if cfg.DiscoveryURL != "" {
+		discoveryURL = cfg.DiscoveryURL
+		// Only the discovery address changes; the verifier keeps the public issuer.
+		discoveryCtx = oidc.InsecureIssuerURLContext(discoveryCtx, cfg.IssuerURL)
+	}
+	provider, err := oidc.NewProvider(discoveryCtx, discoveryURL)
 	if err != nil {
 		return nil, errors.New("staff auth discovery failed")
 	}
 	var metadata struct {
+		Issuer        string `json:"issuer"`
 		EndSessionURL string `json:"end_session_endpoint"`
 	}
-	if err = provider.Claims(&metadata); err != nil {
+	if err = provider.Claims(&metadata); err != nil || metadata.Issuer != cfg.IssuerURL {
 		return nil, errors.New("invalid staff auth discovery")
 	}
 	return &Handler{
@@ -74,6 +78,30 @@ func NewHandler(ctx context.Context, store *Store, cfg Config) (*Handler, error)
 		oauth:          oauth2.Config{ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Endpoint: provider.Endpoint(), RedirectURL: cfg.PublicOrigin + CallbackPath, Scopes: []string{oidc.ScopeOpenID}},
 		endSessionURL:  metadata.EndSessionURL,
 	}, nil
+}
+
+// validateConfig is shared by eager and lazy construction and performs no I/O.
+func validateConfig(store *Store, cfg Config) error {
+	if store == nil || strings.TrimSpace(cfg.IssuerURL) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
+		return errors.New("invalid staff auth configuration")
+	}
+	u, err := url.Parse(cfg.PublicOrigin)
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(cfg.PublicOrigin, "#") ||
+		(u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != "")) {
+		return errors.New("invalid staff auth public origin")
+	}
+	issuer, err := url.Parse(cfg.IssuerURL)
+	if err != nil || issuer.Hostname() == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || strings.Contains(cfg.IssuerURL, "#") || strings.ContainsFunc(cfg.IssuerURL, unicode.IsSpace) ||
+		(issuer.Scheme != "https" && !(issuer.Scheme == "http" && (issuer.Hostname() == "keycloak" || issuer.Hostname() == "127.0.0.1" || issuer.Hostname() == "localhost"))) {
+		return errors.New("invalid staff auth issuer")
+	}
+	if cfg.DiscoveryURL != "" {
+		u, err := url.Parse(cfg.DiscoveryURL)
+		if err != nil || u.Scheme != "http" || u.Host != "keycloak:8080" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(cfg.DiscoveryURL, "#") || u.EscapedPath() != issuer.EscapedPath() {
+			return errors.New("invalid staff auth discovery address")
+		}
+	}
+	return nil
 }
 
 // Mount keeps even method and Origin rejections out of shared caches.
@@ -132,11 +160,15 @@ func authFail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cookieSession(ctx context.Context, r *http.Request) (Session, error) {
+	return cookieSession(ctx, h.store, r)
+}
+
+func cookieSession(ctx context.Context, store *Store, r *http.Request) (Session, error) {
 	cookie, err := r.Cookie(SessionCookie)
 	if err != nil || cookie.Value == "" {
 		return Session{}, ErrNoSession
 	}
-	return h.store.ResolveSession(ctx, cookie.Value)
+	return store.ResolveSession(ctx, cookie.Value)
 }
 
 func (h *Handler) begin(w http.ResponseWriter, r *http.Request, purpose string) {
@@ -388,7 +420,11 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) Resolve(ctx context.Context, r *http.Request) (authz.Actor, error) {
-	s, err := h.cookieSession(ctx, r)
+	return resolve(ctx, h.store, r)
+}
+
+func resolve(ctx context.Context, store *Store, r *http.Request) (authz.Actor, error) {
+	s, err := cookieSession(ctx, store, r)
 	if err != nil {
 		return authz.Actor{}, authz.ErrDenied
 	}

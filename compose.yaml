@@ -9,11 +9,13 @@ services:
   postgres:
     image: postgres:17
     environment:
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-}
       POSTGRES_DB: ${POSTGRES_DB:-tojima}
       POSTGRES_USER: ${POSTGRES_USER:-tojima}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
       interval: 2s
@@ -77,6 +79,11 @@ services:
       STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
       STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-}
       STRIPE_MAX_AMOUNT_JPY: ${STRIPE_MAX_AMOUNT_JPY:-}
+      STAFF_AUTH_MODE: ${STAFF_AUTH_MODE:-disabled}
+      STAFF_OIDC_ISSUER: ${STAFF_OIDC_ISSUER:-}
+      STAFF_OIDC_CLIENT_ID: ${STAFF_OIDC_CLIENT_ID:-}
+      STAFF_OIDC_CLIENT_SECRET: ${STAFF_OIDC_CLIENT_SECRET:-}
+      STAFF_OIDC_DISCOVERY_URL: ${STAFF_OIDC_DISCOVERY_URL:-}
       APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
       CHECKOUT_PROOF_TTL: ${CHECKOUT_PROOF_TTL:-}
       CHECKOUT_SIGNING_KEYS: ${CHECKOUT_SIGNING_KEYS:-}
@@ -92,6 +99,55 @@ services:
       interval: 2s
       timeout: 3s
       retries: 30
+    restart: unless-stopped
+
+  keycloak:
+    profiles: [staff]
+    image: quay.io/keycloak/keycloak:26.8.1@sha256:a78d6b79572168cb25886b80a8b5b8d4ed4390743e3eecb810538683e209dd6b
+    # Validate at container startup, not Compose interpolation: inactive profiles
+    # are still interpolated, and the default stack must need no staff secrets.
+    entrypoint:
+      - /bin/bash
+      - -ec
+      - |
+        : "$${KC_DB_PASSWORD:?set KEYCLOAK_DB_PASSWORD in .env}"
+        : "$${KC_HOSTNAME:?set KEYCLOAK_PUBLIC_URL in .env}"
+        : "$${KC_BOOTSTRAP_ADMIN_USERNAME:?set KC_BOOTSTRAP_ADMIN_USERNAME in .env}"
+        : "$${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}"
+        : "$${TOJIMA_STAFF_CLIENT_SECRET:?set TOJIMA_STAFF_CLIENT_SECRET in .env}"
+        : "$${APP_PUBLIC_ORIGIN:?set APP_PUBLIC_ORIGIN in .env}"
+        exec /opt/keycloak/bin/kc.sh "$$@"
+      - --
+    command: [start, --import-realm]
+    environment:
+      KC_DB: postgres
+      KC_DB_URL_HOST: postgres
+      KC_DB_URL_DATABASE: keycloak
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_PROXY_HEADERS: xforwarded
+      KC_HEALTH_ENABLED: "true"
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-}
+      TOJIMA_STAFF_CLIENT_SECRET: ${TOJIMA_STAFF_CLIENT_SECRET:-}
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
+    volumes:
+      - ./deploy/keycloak/realm:/opt/keycloak/data/import:ro
+    ports:
+      - "127.0.0.1:${KEYCLOAK_PORT:-8081}:8080"
+    healthcheck:
+      # Keycloak has bash but no curl; query the private management listener.
+      test: [CMD, /bin/bash, -ec, "{ printf 'HEAD /health/ready HTTP/1.0\\r\\n\\r\\n' >&0; grep 'HTTP/1.0 200'; } 0<>/dev/tcp/127.0.0.1/9000"]
+      interval: 5s
+      timeout: 3s
+      start_period: 60s
+      retries: 60
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
