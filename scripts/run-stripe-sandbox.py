@@ -206,7 +206,10 @@ def verify_platform_account(key):
 def verify_merchant_accounts(key, env):
     for tenant in "ABC":
         account_id = env["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant]
-        query = urllib.parse.urlencode([("include", "configuration.merchant"), ("include", "defaults")])
+        # Only the registered fixture IDs are accepted; metadata alone is editable.
+        if account_id != DEFAULT_MERCHANT_ACCOUNTS[tenant]:
+            raise ValueError(f"merchant {tenant} is not the approved Sandbox fixture account")
+        query = urllib.parse.urlencode([("include", "configuration.merchant"), ("include", "defaults"), ("include", "identity")])
         request = urllib.request.Request(
             f"https://api.stripe.com/v2/core/accounts/{account_id}?{query}")
         request.add_header("Authorization", "Basic " + base64.b64encode((key + ":").encode()).decode())
@@ -219,7 +222,13 @@ def verify_merchant_accounts(key, env):
         metadata = account.get("metadata") if isinstance(account, dict) else None
         defaults = account.get("defaults") if isinstance(account, dict) else None
         capabilities = (((account.get("configuration") or {}).get("merchant") or {}).get("capabilities") or {}) if isinstance(account, dict) else {}
-        if (not isinstance(metadata, dict) or metadata.get("tojima_test_fixture") !=
+        identity = (account.get("identity") or {}) if isinstance(account, dict) else {}
+        responsibilities = ((defaults or {}).get("responsibilities") or {}) if isinstance(defaults, dict) else {}
+        if (not isinstance(account, dict) or account.get("id") != account_id or
+                account.get("dashboard") != "none" or identity.get("country") != "jp" or
+                responsibilities.get("fees_collector") != "application" or
+                responsibilities.get("losses_collector") != "application" or
+                not isinstance(metadata, dict) or metadata.get("tojima_test_fixture") !=
                 f"synthetic_merchant_{tenant.lower()}_api" or
                 not isinstance(defaults, dict) or defaults.get("currency") != "jpy" or
                 (capabilities.get("card_payments") or {}).get("status") != "active"):

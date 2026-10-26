@@ -73,9 +73,10 @@ class Stripe:
                     detail = {}
             except (ValueError, TypeError):
                 detail = {}
-            message = "" if err.code in (401, 403) else redact(detail.get("message"))
-            raise SystemExit(f"Stripe {method} {path.split('?')[0]} failed: HTTP {err.code} "
-                             f"{detail.get('type')} {detail.get('code')} {detail.get('param')} {message}") from None
+            message = "" if err.code in (401, 403) else detail.get("message")
+            # Every provider-controlled field is redacted, not only the message.
+            raise SystemExit(redact(f"Stripe {method} {path.split('?')[0]} failed: HTTP {err.code} "
+                                    f"{detail.get('type')} {detail.get('code')} {detail.get('param')} {message}")) from None
 
 
 def label(tenant):
@@ -161,16 +162,20 @@ def configure_account(stripe, acct_id, tenant):
 
 
 def find_existing(stripe):
-    found, page = {}, stripe.call("GET", "/v2/core/accounts?limit=20")
+    matches, page = {}, stripe.call("GET", "/v2/core/accounts?limit=20")
     while True:
         for acct in page.get("data", []):
             for tenant in TENANTS:
                 if (acct.get("metadata") or {}).get(FIXTURE_KEY) == label(tenant):
-                    found.setdefault(tenant, acct["id"])
+                    matches.setdefault(tenant, []).append(acct["id"])
         nxt = page.get("next_page_url")
         if not nxt:
-            return found
+            break
         page = stripe.call("GET", nxt)
+    dupes = {t: ids for t, ids in matches.items() if len(ids) > 1}
+    if dupes:
+        raise SystemExit(f"duplicate fixture metadata, reconcile by hand before provisioning: {dupes}")
+    return {t: ids[0] for t, ids in matches.items()}
 
 
 def ensure_bank_account(stripe, acct_id):

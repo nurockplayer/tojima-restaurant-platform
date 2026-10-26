@@ -82,7 +82,7 @@ does not automatically load/source any file. Required settings:
 - `TOJIMA_STRIPE_MODE=CONNECTED_DIRECT_TEST_FIXTURE`
 - `TOJIMA_STRIPE_API_VERSION=2026-09-30.endive`
 - `TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY=10000` (maximum allowed ceiling; positive lower limits are allowed)
-- `TOJIMA_STRIPE_TEST_ACCOUNT_A/B/C`: actual distinct synthetic merchant IDs; defaults are A `acct_1UUXcL1Hm4VOReK9`, B `acct_1UUXd51Hm4v7xrOu`, C `acct_1UUXdU1Hm4vaUfKX`. Environment values override these defaults.
+- `TOJIMA_STRIPE_TEST_ACCOUNT_A/B/C`: actual distinct synthetic merchant IDs; defaults are A `acct_1UUXcL1Hm4VOReK9`, B `acct_1UUXd51Hm4v7xrOu`, C `acct_1UUXdU1Hm4vaUfKX`. Environment values may only repeat these registered IDs: the runner refuses any other account and checks each one live (ID, `dashboard=none`, JP identity, platform fee/loss responsibility, fixture metadata, JPY, active card payments) before starting. Re-provisioned fixtures need the registry in `scripts/run-stripe-sandbox.py` updated in a reviewed commit.
 - `TEST_DATABASE_URL`: disposable loopback PostgreSQL, never production/shared DB
 - Keychain generic-password service `tojima-stripe-sandbox` stores the test key. The wrapper reads it with macOS `security`; `--keychain-service` selects another service. `--prompt-key` explicitly uses a hidden terminal prompt instead.
 

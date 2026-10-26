@@ -104,6 +104,7 @@ class EnvironmentTests(unittest.TestCase):
             ]) as cli,
             mock.patch.object(runner, "keychain_key", return_value=self.fixture()["TOJIMA_STRIPE_TEST_SECRET_KEY"]),
             mock.patch.object(runner.OPENER, "open", side_effect=self.stripe_response),
+            mock.patch.dict(runner.DEFAULT_MERCHANT_ACCOUNTS, {t: f"acct_synthetic{t}" for t in "ABC"}),
             mock.patch.object(runner.subprocess, "Popen", side_effect=[listener, runtime]) as popen,
             mock.patch.object(runner, "ListenerOutput") if real_listener is None else nullcontext(),
             mock.patch.object(runner, "startup_check") as check,
@@ -120,8 +121,11 @@ class EnvironmentTests(unittest.TestCase):
             doc = {"id": runner.PLATFORM_ACCOUNT}
         else:
             tenant = next(t for t in "ABC" if f"acct_synthetic{t}" in request.full_url)
-            doc = {"metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
-                   "defaults": {"currency": "jpy"}, "configuration": {"merchant": {
+            doc = {"id": f"acct_synthetic{tenant}", "dashboard": "none", "identity": {"country": "jp"},
+                   "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
+                   "defaults": {"currency": "jpy", "responsibilities": {
+                       "fees_collector": "application", "losses_collector": "application"}},
+                   "configuration": {"merchant": {
                        "capabilities": {"card_payments": {"status": "active"}}}}}
         return io.BytesIO(json.dumps(doc).encode())
 
@@ -176,22 +180,64 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_verify_merchants_accepts_fixture_and_rejects_bad_fields(self):
         env = self.fixture()
-        valid = {"metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"},
-                 "defaults": {"currency": "jpy"}, "configuration": {"merchant": {"capabilities": {
-                     "card_payments": {"status": "active"}}}}}
-        def valid_response(request, timeout=15):
-            tenant = next(t for t in "ABC" if f"acct_synthetic{t}" in request.full_url)
-            doc = {**valid, "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"}}
-            return io.BytesIO(json.dumps(doc).encode())
-        with mock.patch.object(runner.OPENER, "open", side_effect=valid_response):
+        ids = runner.DEFAULT_MERCHANT_ACCOUNTS
+        for tenant in "ABC":
+            env["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant] = ids[tenant]
+        def doc(tenant, **changes):
+            base = {"id": ids[tenant], "dashboard": "none", "identity": {"country": "jp"},
+                    "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
+                    "defaults": {"currency": "jpy", "responsibilities": {
+                        "fees_collector": "application", "losses_collector": "application"}},
+                    "configuration": {"merchant": {"capabilities": {"card_payments": {"status": "active"}}}}}
+            base.update(changes)
+            return base
+        def respond(**changes):
+            def handler(request, timeout=15):
+                tenant = next(t for t in "ABC" if ids[t] in request.full_url)
+                return io.BytesIO(json.dumps(doc(tenant, **changes)).encode())
+            return handler
+        with mock.patch.object(runner.OPENER, "open", side_effect=respond()):
             runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], env)
-        for bad in (
-                {**valid, "metadata": {"tojima_test_fixture": "wrong"}},
-                {**valid, "defaults": {"currency": "usd"}},
-                {**valid, "configuration": {"merchant": {"capabilities": {"card_payments": {"status": "inactive"}}}}}):
-            with mock.patch.object(runner.OPENER, "open", return_value=io.BytesIO(json.dumps(bad).encode())):
+        for changes in (
+                {"metadata": {"tojima_test_fixture": "wrong"}},
+                {"id": "acct_other"},
+                {"dashboard": "full"},
+                {"identity": {"country": "us"}},
+                {"defaults": {"currency": "usd", "responsibilities": {
+                    "fees_collector": "application", "losses_collector": "application"}}},
+                {"defaults": {"currency": "jpy", "responsibilities": {
+                    "fees_collector": "stripe", "losses_collector": "application"}}},
+                {"defaults": {"currency": "jpy", "responsibilities": {
+                    "fees_collector": "application", "losses_collector": "stripe"}}},
+                {"configuration": {"merchant": {"capabilities": {"card_payments": {"status": "inactive"}}}}}):
+            with self.subTest(changes=changes), mock.patch.object(runner.OPENER, "open", side_effect=respond(**changes)):
                 with self.assertRaisesRegex(ValueError, "not the approved Sandbox fixture account"):
                     runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], env)
+        unregistered = {**env, "TOJIMA_STRIPE_TEST_ACCOUNT_A": "acct_syntheticA"}
+        with mock.patch.object(runner.OPENER, "open", side_effect=respond()):
+            with self.assertRaisesRegex(ValueError, "not the approved Sandbox fixture account"):
+                runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], unregistered)
+
+    def test_stripe_error_fields_are_all_redacted(self):
+        secret = "sk_test_" + "S" * 30
+        for field in ("type", "code", "param", "message"):
+            for status in (400, 401, 403):
+                err = merchants.urllib.error.HTTPError("https://api.stripe.com/v1/x", status, "x", {},
+                    io.BytesIO(json.dumps({"error": {field: secret}}).encode()))
+                with self.subTest(field=field, status=status), \
+                        mock.patch.object(merchants.OPENER, "open", side_effect=err):
+                    with self.assertRaises(SystemExit) as raised:
+                        merchants.Stripe(secret).call("GET", "/v1/x")
+                    self.assertNotIn(secret, str(raised.exception))
+                    self.assertNotIn("SSSS", str(raised.exception))
+
+    def test_duplicate_fixture_metadata_is_refused(self):
+        page = {"data": [{"id": "acct_1", "metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"}},
+                         {"id": "acct_2", "metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"}}]}
+        stripe = mock.Mock()
+        stripe.call.return_value = page
+        with self.assertRaisesRegex(SystemExit, "duplicate fixture metadata"):
+            merchants.find_existing(stripe)
 
     def test_stripe_errors_redact_and_hide_unauthorized_message(self):
         stripe = merchants.Stripe("sk_test_synthetic_secret")
