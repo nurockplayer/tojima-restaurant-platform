@@ -225,44 +225,56 @@ func (s *Store) ResolveSession(ctx context.Context, rawToken string) (Session, e
 	return session, err
 }
 
-func (s *Store) PromoteStrong(ctx context.Context, sessionID, subjectID string, authStartedAt time.Time) error {
+func (s *Store) PromoteStrong(ctx context.Context, sessionID, subjectID string, authStartedAt time.Time) (string, Session, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
-		return err
+		return "", Session{}, err
 	}
 	defer tx.Rollback(ctx)
 	var held bool
 	var epochChanged time.Time
 	err = tx.QueryRow(ctx, `SELECT hold_at IS NOT NULL,epoch_changed_at FROM staff_subjects WHERE subject_id=$1 FOR UPDATE`, subjectID).Scan(&held, &epochChanged)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return ErrNoSession
+		return "", Session{}, ErrNoSession
 	}
 	if err != nil {
-		return err
+		return "", Session{}, err
 	}
 	if held {
 		if err = writeEvent(ctx, tx, subjectID, sessionID, "login_rejected", map[string]string{"reason": "hold"}); err != nil {
-			return err
+			return "", Session{}, err
 		}
-		return commitResult(ctx, tx, ErrSubjectHeld)
+		return "", Session{}, commitResult(ctx, tx, ErrSubjectHeld)
 	}
 	if epochChanged.After(authStartedAt) {
 		if err = writeEvent(ctx, tx, subjectID, sessionID, "login_rejected", map[string]string{"reason": "stale_epoch"}); err != nil {
-			return err
+			return "", Session{}, err
 		}
-		return commitResult(ctx, tx, ErrStaleAuth)
+		return "", Session{}, commitResult(ctx, tx, ErrStaleAuth)
 	}
-	tag, err := tx.Exec(ctx, `UPDATE staff_sessions SET strong_login=true,last_strong_auth_at=now() WHERE id=$1 AND subject_id=$2 AND revoked_at IS NULL AND now()<absolute_expires_at`, sessionID, subjectID)
+	var raw [32]byte
+	if _, err = rand.Read(raw[:]); err != nil {
+		return "", Session{}, err
+	}
+	token := base64.RawURLEncoding.EncodeToString(raw[:])
+	tokenHash := sha256.Sum256([]byte(token))
+	session := Session{ID: sessionID, SubjectID: subjectID, StrongLogin: true}
+	err = tx.QueryRow(ctx, `UPDATE staff_sessions SET strong_login=true,last_strong_auth_at=now(),token_sha256=$3
+		WHERE id=$1 AND subject_id=$2 AND revoked_at IS NULL AND now()<absolute_expires_at
+		RETURNING absolute_expires_at,last_strong_auth_at`, sessionID, subjectID, tokenHash[:]).Scan(&session.AbsoluteExpires, &session.LastStrongAuth)
 	if err != nil {
-		return err
-	}
-	if tag.RowsAffected() == 0 {
-		return ErrNoSession
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", Session{}, ErrNoSession
+		}
+		return "", Session{}, err
 	}
 	if err = writeEvent(ctx, tx, subjectID, sessionID, "step_up", map[string]bool{"strong": true}); err != nil {
-		return err
+		return "", Session{}, err
 	}
-	return tx.Commit(ctx)
+	if err = tx.Commit(ctx); err != nil {
+		return "", Session{}, err
+	}
+	return token, session, nil
 }
 
 func (s *Store) RevokeSession(ctx context.Context, sessionID, reason string) error {

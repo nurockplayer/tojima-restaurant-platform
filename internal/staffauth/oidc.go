@@ -210,10 +210,11 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var claims struct {
-		Sub   string `json:"sub"`
-		SID   string `json:"sid"`
-		ACR   string `json:"acr"`
-		Nonce string `json:"nonce"`
+		Sub      string `json:"sub"`
+		SID      string `json:"sid"`
+		ACR      string `json:"acr"`
+		Nonce    string `json:"nonce"`
+		AuthTime *int64 `json:"auth_time"`
 	}
 	if err = id.Claims(&claims); err != nil || claims.Sub == "" || claims.SID == "" || subtle.ConstantTimeCompare([]byte(claims.Nonce), []byte(tx.Nonce)) != 1 {
 		authFail(w, r)
@@ -230,7 +231,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			authFail(w, r)
 			return
 		}
-		rawSession, s, err := h.store.CreateSession(ctx, claims.Sub, claims.SID, claims.ACR == "strong", tx.CreatedAt)
+		rawSession, s, err := h.store.CreateSession(ctx, claims.Sub, claims.SID, false, tx.CreatedAt)
 		if err != nil {
 			authFail(w, r)
 			return
@@ -242,14 +243,26 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		}
 		http.SetCookie(w, authCookie(SessionCookie, rawSession, maxAge, s.AbsoluteExpires))
 	case "step_up":
-		if claims.Sub != tx.SubjectID || claims.ACR != "strong" {
+		if claims.Sub != tx.SubjectID || claims.ACR != "strong" || claims.AuthTime == nil || time.Unix(*claims.AuthTime, 0).Before(tx.CreatedAt.Add(-5*time.Second)) {
 			authFail(w, r)
 			return
 		}
-		if err = h.store.PromoteStrong(ctx, tx.SessionID, claims.Sub, tx.CreatedAt); err != nil {
+		current, resolveErr := h.cookieSession(ctx, r)
+		if resolveErr != nil || current.ID != tx.SessionID {
 			authFail(w, r)
 			return
 		}
+		rawSession, s, promoteErr := h.store.PromoteStrong(ctx, tx.SessionID, claims.Sub, tx.CreatedAt)
+		if promoteErr != nil {
+			authFail(w, r)
+			return
+		}
+		maxAge := int(time.Until(s.AbsoluteExpires).Seconds())
+		if maxAge <= 0 {
+			authFail(w, r)
+			return
+		}
+		http.SetCookie(w, authCookie(SessionCookie, rawSession, maxAge, s.AbsoluteExpires))
 	default:
 		authFail(w, r)
 		return

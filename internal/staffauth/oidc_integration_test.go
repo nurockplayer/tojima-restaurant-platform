@@ -86,7 +86,8 @@ func newFakeStaffIssuer(t *testing.T) *fakeStaffIssuer {
 }
 
 func (f *fakeStaffIssuer) claims() map[string]any {
-	return map[string]any{"iss": f.server.URL, "aud": "staff-client", "exp": time.Now().Add(time.Hour).Unix(), "iat": time.Now().Unix(), "sub": "staff-a", "sid": "sid-a", "acr": "basic"}
+	now := time.Now()
+	return map[string]any{"iss": f.server.URL, "aud": "staff-client", "exp": now.Add(time.Hour).Unix(), "iat": now.Unix(), "auth_time": now.Unix(), "sub": "staff-a", "sid": "sid-a", "acr": "basic"}
 }
 
 func signStaffToken(t *testing.T, key *rsa.PrivateKey, claims map[string]any) string {
@@ -261,6 +262,7 @@ func (x *staffOIDCTest) actor(t *testing.T, cookie *http.Cookie) authz.Actor {
 
 func TestOIDCLoginAndLocalSession(t *testing.T) {
 	x := newStaffOIDCTest(t)
+	x.issuer.edit = func(claims map[string]any) { claims["acr"] = "strong" }
 	cookie := x.login(t)
 	actor := x.actor(t, cookie)
 	if actor.SubjectID != "staff-a" || actor.MFA || actor.StepUpFresh {
@@ -374,7 +376,7 @@ func TestOIDCUnsafeReturnPaths(t *testing.T) {
 }
 
 func TestOIDCStepUp(t *testing.T) {
-	for _, mode := range []string{"strong", "different subject", "basic"} {
+	for _, mode := range []string{"strong", "different subject", "basic", "old auth_time", "missing auth_time", "no session cookie", "different session cookie"} {
 		t.Run(mode, func(t *testing.T) {
 			x := newStaffOIDCTest(t)
 			cookie := x.login(t)
@@ -389,22 +391,57 @@ func TestOIDCStepUp(t *testing.T) {
 				if mode == "different subject" {
 					c["sub"] = "staff-b"
 				}
+				if mode == "old auth_time" {
+					c["auth_time"] = time.Now().Add(-time.Minute).Unix()
+				}
+				if mode == "missing auth_time" {
+					delete(c, "auth_time")
+				}
 			}
 			flow := x.begin(t, "/staff/auth/step-up", "/staff/refunds", cookie)
-			w := x.callback(t, flow, flow.binding, cookie)
-			actor := x.actor(t, cookie)
-			if mode == "strong" {
-				if w.Code != 303 || w.Header().Get("Location") != "/staff/refunds" || !actor.MFA || !actor.StepUpFresh {
-					t.Fatalf("step-up failed actor=%+v status=%d", actor, w.Code)
+			presented := cookie
+			if mode == "different session cookie" {
+				otherToken, _, createErr := x.store.CreateSession(x.ctx, before.SubjectID, "sid-other", false, dbNow(t, x.ctx, x.pool))
+				if createErr != nil {
+					t.Fatal(createErr)
 				}
-				after, err := x.store.ResolveSession(x.ctx, cookie.Value)
+				presented = &http.Cookie{Name: SessionCookie, Value: otherToken}
+			}
+			var w *httptest.ResponseRecorder
+			if mode == "no session cookie" {
+				w = x.callback(t, flow, flow.binding)
+			} else {
+				w = x.callback(t, flow, flow.binding, presented)
+			}
+			if mode == "strong" {
+				if w.Code != 303 || w.Header().Get("Location") != "/staff/refunds" {
+					t.Fatalf("step-up failed status=%d", w.Code)
+				}
+				newCookie := staffResponseCookie(t, w, SessionCookie)
+				if newCookie.Value == cookie.Value || newCookie.Expires.IsZero() || newCookie.MaxAge <= 0 {
+					t.Fatal("step-up did not set a rotated session cookie with expiry")
+				}
+				actor := x.actor(t, newCookie)
+				if !actor.MFA || !actor.StepUpFresh {
+					t.Fatalf("rotated session actor=%+v", actor)
+				}
+				if _, err := x.store.ResolveSession(x.ctx, cookie.Value); !errors.Is(err, ErrNoSession) {
+					t.Fatalf("old cookie remained live: %v", err)
+				}
+				after, err := x.store.ResolveSession(x.ctx, newCookie.Value)
 				if err != nil || !after.AbsoluteExpires.Equal(before.AbsoluteExpires) {
 					t.Fatal("step-up extended session")
 				}
 			} else {
 				assertStaffRejected(t, w)
-				if actor.MFA || actor.StepUpFresh {
-					t.Fatal("invalid step-up promoted session")
+				stillLive, resolveErr := x.store.ResolveSession(x.ctx, cookie.Value)
+				if resolveErr != nil || stillLive.StrongLogin || stillLive.StepUpFresh {
+					t.Fatalf("invalid step-up changed session: session=%+v err=%v", stillLive, resolveErr)
+				}
+				if mode == "different session cookie" {
+					if _, resolveErr = x.store.ResolveSession(x.ctx, presented.Value); resolveErr != nil {
+						t.Fatalf("unrelated presented session was changed: %v", resolveErr)
+					}
 				}
 			}
 		})
@@ -453,6 +490,24 @@ func TestOIDCReloginAndSubjectEpoch(t *testing.T) {
 				t.Fatal("old session remains live")
 			}
 		})
+	}
+}
+
+func TestOIDCLoginRejectsLoggedOutIDPSessionGenerically(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	oldCookie := x.login(t)
+	if _, err := x.store.RevokeByIDP(x.ctx, "sid-a", "staff-a"); err != nil {
+		t.Fatal(err)
+	}
+	flow := x.begin(t, "/staff/auth/login", DefaultReturn, oldCookie)
+	w := x.callback(t, flow, flow.binding, oldCookie)
+	assertStaffRejected(t, w)
+	if _, err := x.store.ResolveSession(x.ctx, oldCookie.Value); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("old session remained live after rejected login: %v", err)
+	}
+	var count int
+	if err := x.pool.QueryRow(x.ctx, "SELECT count(*) FROM staff_sessions WHERE subject_id='staff-a'").Scan(&count); err != nil || count != 1 {
+		t.Fatalf("IDP-logged-out login created a session: count=%d err=%v", count, err)
 	}
 }
 

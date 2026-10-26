@@ -312,20 +312,27 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = store.PromoteStrong(ctx, basic.ID, "wrong", dbNow(t, ctx, pool)); !errors.Is(err, ErrNoSession) {
+	if _, _, err = store.PromoteStrong(ctx, basic.ID, "wrong", dbNow(t, ctx, pool)); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("wrong subject promote err=%v", err)
 	}
-	if err = store.PromoteStrong(ctx, basic.ID, "promote-a", dbNow(t, ctx, pool)); err != nil {
+	rotated, promoted, err := store.PromoteStrong(ctx, basic.ID, "promote-a", dbNow(t, ctx, pool))
+	if err != nil {
 		t.Fatal(err)
 	}
-	strong, err := store.ResolveSession(ctx, token)
+	if rotated == token || !promoted.StrongLogin || !promoted.AbsoluteExpires.Equal(basic.AbsoluteExpires) {
+		t.Fatalf("promotion did not rotate token or changed expiry: session=%+v", promoted)
+	}
+	if _, err = store.ResolveSession(ctx, token); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("old token remained live after promotion: %v", err)
+	}
+	strong, err := store.ResolveSession(ctx, rotated)
 	if err != nil || !strong.StrongLogin || !strong.StepUpFresh || strong.LastStrongAuth == nil || !strong.AbsoluteExpires.Equal(basic.AbsoluteExpires) {
 		t.Fatalf("promoted session=%+v err=%v", strong, err)
 	}
 	if _, err = pool.Exec(ctx, "UPDATE staff_sessions SET last_strong_auth_at=now()-interval '301 seconds' WHERE id=$1", basic.ID); err != nil {
 		t.Fatal(err)
 	}
-	stale, err := store.ResolveSession(ctx, token)
+	stale, err := store.ResolveSession(ctx, rotated)
 	if err != nil || stale.StepUpFresh || !stale.StrongLogin {
 		t.Fatalf("stale strong session=%+v err=%v", stale, err)
 	}
@@ -336,7 +343,7 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 	if err = store.Restore(ctx, "promote-a", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	if err = store.PromoteStrong(ctx, basic.ID, "promote-a", oldAuth); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = store.PromoteStrong(ctx, basic.ID, "promote-a", oldAuth); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("stale promote err=%v", err)
 	}
 	if _, _, err = store.CreateSession(ctx, "promote-b", "sid-b", false, dbNow(t, ctx, pool)); err != nil {
