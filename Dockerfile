@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-# Stage 2: Go binaries (health server and one-shot migration runner).
+# Stage 2: Go binaries (application server and one-shot migration runner).
 # Go matches go.mod; CGO is off so the result runs on distroless static.
 FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
@@ -29,7 +29,7 @@ WORKDIR /app
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
 # Built SPA assets; documented at /app/web/dist in docs/ops/containers.md.
-# The current health-only server does not serve them yet.
+# cmd/server serves these assets with SPA navigation fallback.
 COPY --from=web /src/web/dist /app/web/dist
 ENV APP_ADDR=0.0.0.0:8080
 EXPOSE 8080

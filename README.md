@@ -10,7 +10,7 @@ Requirements: Go matching `go.mod`, Python 3 with standard-library `sqlite3`, an
 
 ```sh
 make test-postgres
-APP_ADDR=127.0.0.1:8080 go run ./cmd/server
+APP_HEALTH_ONLY=true APP_ADDR=127.0.0.1:8080 go run ./cmd/server
 ```
 
 In another terminal:
@@ -20,7 +20,7 @@ curl --fail http://127.0.0.1:8080/healthz
 # {"status":"ok"}
 ```
 
-`APP_ADDR` is required; see `.env.example`. A container image and a local compose stack (PostgreSQL, one-shot migrations, health server) are described in [docs/ops/containers.md](docs/ops/containers.md). The process does not automatically load `.env`. Health only reports that HTTP is serving; it makes no DB/IdP/payment-readiness claim. SIGINT/SIGTERM stops the process. This executable exposes only health. `httpapi.NewSessionHandler` and `httpapi.NewMenuHandler` supply integration-test endpoints with explicit identity/membership adapters; no fixture identity is wired into the executable. `NewGuestHandler` composes real guest entry, menus and carts without exposing staff/admin routes. The separate `cmd/guesttest` below creates disposable local acceptance data.
+`APP_ADDR` is required. Normal mode also requires PostgreSQL and explicit guest policy; see [.env.example](.env.example) and the [container runtime guide](docs/ops/containers.md) for the full configuration. `cmd/server` serves the guest API and built SPA, with optional explicit Stripe test mode and a payment worker. All staff/admin API routes return 403 pending the MOD-08 Keycloak adapter. `APP_HEALTH_ONLY=true` explicitly retains DB-free health-only operation. The process does not load `.env` itself; health reports process liveness only. SIGINT/SIGTERM shuts down HTTP and the worker. The separate `cmd/guesttest` below creates disposable local acceptance data.
 
 ## Checks and migration boundary
 

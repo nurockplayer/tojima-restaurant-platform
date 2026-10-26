@@ -1,6 +1,6 @@
-# Local single-node stack: PostgreSQL 17, one-shot migrations, health-only server.
+# Local single-node stack: PostgreSQL 17, one-shot migrations, guest API and SPA server.
 # The database password is never committed: copy .env.example to .env first.
-#   cp .env.example .env && edit POSTGRES_PASSWORD
+#   cp .env.example .env && edit POSTGRES_PASSWORD and PIN_PEPPER
 #   docker compose up -d --build --wait
 # See docs/ops/containers.md for build, smoke test and current boundaries.
 name: tojima
@@ -47,6 +47,39 @@ services:
       context: .
     environment:
       APP_ADDR: 0.0.0.0:8080
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:-tojima}
+      PGUSER: ${POSTGRES_USER:-tojima}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      PGSSLMODE: disable
+      APP_WEB_DIST: /app/web/dist
+      # Explicit guest policy. Values in .env.example are local examples only.
+      SESSION_TTL: ${SESSION_TTL:?set SESSION_TTL}
+      GRANT_TTL: ${GRANT_TTL:?set GRANT_TTL}
+      GRANT_WINDOW: ${GRANT_WINDOW:?set GRANT_WINDOW}
+      GRANT_WINDOW_MAX: ${GRANT_WINDOW_MAX:?set GRANT_WINDOW_MAX}
+      PIN_TTL: ${PIN_TTL:?set PIN_TTL}
+      PIN_LOCKOUT: ${PIN_LOCKOUT:?set PIN_LOCKOUT}
+      PIN_MAX_ATTEMPTS: ${PIN_MAX_ATTEMPTS:?set PIN_MAX_ATTEMPTS}
+      PIN_LENGTH: ${PIN_LENGTH:?set PIN_LENGTH}
+      PIN_PEPPER: ${PIN_PEPPER:?set PIN_PEPPER to a base64 secret of at least 32 bytes}
+      PAYMENT_CREATE_RETRY_WINDOW: ${PAYMENT_CREATE_RETRY_WINDOW:?set PAYMENT_CREATE_RETRY_WINDOW}
+      PAYMENT_CONTINUATION_TTL: ${PAYMENT_CONTINUATION_TTL:?set PAYMENT_CONTINUATION_TTL}
+      PAYMENT_WORK_LEASE_TTL: ${PAYMENT_WORK_LEASE_TTL:?set PAYMENT_WORK_LEASE_TTL}
+      # No Stripe mode, key, merchant mapping or proof key is enabled by default.
+      STRIPE_MODE: ${STRIPE_MODE:-disabled}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_ACCOUNT_ID: ${STRIPE_ACCOUNT_ID:-}
+      STRIPE_CREDENTIAL_REF: ${STRIPE_CREDENTIAL_REF:-}
+      STRIPE_API_VERSION: ${STRIPE_API_VERSION:-}
+      STRIPE_SUCCESS_URL: ${STRIPE_SUCCESS_URL:-}
+      STRIPE_CANCEL_URL: ${STRIPE_CANCEL_URL:-}
+      STRIPE_MAX_AMOUNT_JPY: ${STRIPE_MAX_AMOUNT_JPY:-}
+      APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
+      CHECKOUT_PROOF_TTL: ${CHECKOUT_PROOF_TTL:-}
+      CHECKOUT_SIGNING_KEYS: ${CHECKOUT_SIGNING_KEYS:-}
     depends_on:
       migrate:
         condition: service_completed_successfully
