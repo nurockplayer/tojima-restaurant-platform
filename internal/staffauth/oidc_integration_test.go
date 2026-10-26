@@ -588,7 +588,8 @@ func TestOIDCLogoutCancelsPendingBrowserLogin(t *testing.T) {
 	x := newStaffOIDCTest(t)
 	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
 	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
-	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != DefaultReturn {
+	// The fake issuer advertises end_session_endpoint, so logout continues there.
+	if w.Code != http.StatusSeeOther || !strings.Contains(w.Header().Get("Location"), "/end-session?client_id=") {
 		t.Fatalf("logout status=%d location=%q", w.Code, w.Header().Get("Location"))
 	}
 	if c := staffResponseCookie(t, w, TxCookie); c.MaxAge != -1 || c.Value != "" {
