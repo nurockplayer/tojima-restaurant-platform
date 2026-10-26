@@ -79,7 +79,7 @@ func NewCredentialSet(tenantID, storeID string) (*IdentityResolver, *MembershipD
 		}
 		credential := Credential{SubjectID: "test-" + subject, Role: item.role, MFA: item.mfa, Token: token}
 		*item.dst = credential
-		identity.tokens[sha256.Sum256([]byte(token))] = credentialIdentity{actor: authz.Actor{SubjectID: credential.SubjectID, MFA: credential.MFA}}
+		identity.tokens[sha256.Sum256([]byte(token))] = credentialIdentity{actor: authz.Actor{SubjectID: credential.SubjectID, MFA: credential.MFA, StepUpFresh: credential.MFA}}
 		directory.memberships[credential.SubjectID] = []authz.Membership{{TenantID: tenantID, StoreID: storeID, Role: item.role}}
 	}
 	return identity, directory, credentials, nil

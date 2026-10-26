@@ -23,7 +23,7 @@ func NewCatalogCredentialSet(tenantID, storeID string) (*IdentityResolver, *Memb
 		return nil, nil, CredentialSet{}, err
 	}
 	admin := &Credential{SubjectID: "test-" + subject, Role: authz.TenantAdmin, MFA: true, Token: token}
-	identity.tokens[sha256.Sum256([]byte(token))] = credentialIdentity{actor: authz.Actor{SubjectID: admin.SubjectID, MFA: true}}
+	identity.tokens[sha256.Sum256([]byte(token))] = credentialIdentity{actor: authz.Actor{SubjectID: admin.SubjectID, MFA: true, StepUpFresh: true}}
 	directory.memberships[admin.SubjectID] = []authz.Membership{{TenantID: tenantID, Role: authz.TenantAdmin}}
 	credentials.CatalogAdmin = admin
 	return identity, directory, credentials, nil

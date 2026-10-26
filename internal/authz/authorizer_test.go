@@ -140,3 +140,47 @@ func TestPolicyAuthorizerScopesRolesMFAAndCurrentMembership(t *testing.T) {
 		t.Fatalf("revoked membership remained valid: %v", err)
 	}
 }
+
+func TestPolicyAuthorizerEnforcesCentralMFARolesAndMandatoryStepUp(t *testing.T) {
+	ctx := context.Background()
+	resource := Scope{TenantID: "tenant-a", StoreID: "store-a"}
+	for _, role := range []Role{StoreManager, TenantAdmin, FinanceViewer} {
+		directory := &membershipFixture{entries: []Membership{{TenantID: "tenant-a", StoreID: "store-a", Role: role}}}
+		// The caller omits MFARequiredRoles; the role still requires MFA.
+		request := Request{Actor: Actor{SubjectID: "actor"}, Permission: "operations.read", Resource: resource, AllowedRoles: []Role{role}}
+		if err := (PolicyAuthorizer{Directory: directory}).Authorize(ctx, request); !errors.Is(err, ErrDenied) {
+			t.Fatalf("%s without MFA: got %v, want ErrDenied", role, err)
+		}
+		request.Actor.MFA = true
+		if err := (PolicyAuthorizer{Directory: directory}).Authorize(ctx, request); err != nil {
+			t.Fatalf("%s with MFA: %v", role, err)
+		}
+	}
+	cashier := &membershipFixture{entries: []Membership{{TenantID: "tenant-a", StoreID: "store-a", Role: Staff}}}
+	if err := (PolicyAuthorizer{Directory: cashier}).Authorize(ctx, Request{Actor: Actor{SubjectID: "actor"}, Permission: "operations.read", Resource: resource, AllowedRoles: []Role{Staff}}); err != nil {
+		t.Fatalf("cashier needs no MFA: %v", err)
+	}
+
+	manager := PolicyAuthorizer{Directory: &membershipFixture{entries: []Membership{{TenantID: "tenant-a", StoreID: "store-a", Role: StoreManager}}}}
+	for permission := range MandatoryStepUp {
+		// The caller omits RequiresStepUp; the permission still requires it.
+		stale := Request{Actor: Actor{SubjectID: "actor", MFA: true}, Permission: permission, Resource: resource, AllowedRoles: []Role{StoreManager}}
+		if err := manager.Authorize(ctx, stale); !errors.Is(err, ErrDenied) {
+			t.Fatalf("%s with stale step-up: got %v, want ErrDenied", permission, err)
+		}
+		fresh := stale
+		fresh.Actor.StepUpFresh = true
+		if err := manager.Authorize(ctx, fresh); err != nil {
+			t.Fatalf("%s with fresh step-up: %v", permission, err)
+		}
+		freshWithoutMFA := fresh
+		freshWithoutMFA.Actor.MFA = false
+		if err := manager.Authorize(ctx, freshWithoutMFA); !errors.Is(err, ErrDenied) {
+			t.Fatalf("%s StepUpFresh without MFA: got %v, want ErrDenied", permission, err)
+		}
+	}
+	optIn := Request{Actor: Actor{SubjectID: "actor", MFA: true}, Permission: "operations.read", Resource: resource, AllowedRoles: []Role{StoreManager}, RequiresStepUp: true}
+	if err := manager.Authorize(ctx, optIn); !errors.Is(err, ErrDenied) {
+		t.Fatalf("caller-requested step-up ignored: %v", err)
+	}
+}

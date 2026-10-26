@@ -12,7 +12,10 @@ var ErrDenied = errors.New("authorization denied")
 // Actor identifies the authenticated subject supplied by the MOD-08 adapter.
 type Actor struct {
 	SubjectID string
-	MFA       bool
+	// MFA means the session was established or promoted with strong (LoA 2)
+	// authentication; StepUpFresh means that happened within the last 300 s.
+	MFA         bool
+	StepUpFresh bool
 }
 
 // Permission names an operation requested by an actor.
@@ -32,6 +35,9 @@ type Request struct {
 	AllowedRoles     []Role
 	RequiresMFA      bool
 	MFARequiredRoles []Role
+	// RequiresStepUp lets a caller add a fresh step-up; it can never remove the
+	// step-up that MandatoryStepUp requires for a permission.
+	RequiresStepUp bool
 }
 
 // Authorizer is the adapter seam for MOD-08 identity and authorization.
@@ -61,6 +67,19 @@ type Membership struct {
 	Role     Role
 }
 
+// mfaRoles always require Actor.MFA, whatever MFARequiredRoles a caller passes
+// (ADR-0008 §5). Callers may add roles, never remove these.
+var mfaRoles = map[Role]bool{StoreManager: true, TenantAdmin: true, FinanceViewer: true}
+
+// MandatoryStepUp lists permissions that always need Actor.StepUpFresh
+// (ADR-0008 §5): refund-producing actions and staff membership changes.
+var MandatoryStepUp = map[Permission]bool{
+	"operations.order.adjust": true,
+	"operations.refund.retry": true,
+	"staff.membership.grant":  true,
+	"staff.membership.revoke": true,
+}
+
 type PolicyAuthorizer struct{ Directory Memberships }
 
 func (a PolicyAuthorizer) Authorize(ctx context.Context, request Request) error {
@@ -68,6 +87,9 @@ func (a PolicyAuthorizer) Authorize(ctx context.Context, request Request) error 
 		return ErrDenied
 	}
 	if request.RequiresMFA && !request.Actor.MFA {
+		return ErrDenied
+	}
+	if (request.RequiresStepUp || MandatoryStepUp[request.Permission]) && !(request.Actor.MFA && request.Actor.StepUpFresh) {
 		return ErrDenied
 	}
 	memberships, err := a.Directory.Current(ctx, request.Actor.SubjectID, request.Resource.TenantID)
@@ -83,7 +105,7 @@ func (a PolicyAuthorizer) Authorize(ctx context.Context, request Request) error 
 		}
 		for _, allowed := range request.AllowedRoles {
 			if member.Role == allowed {
-				mfaEligible := true
+				mfaEligible := !mfaRoles[member.Role] || request.Actor.MFA
 				for _, role := range request.MFARequiredRoles {
 					if member.Role == role && !request.Actor.MFA {
 						mfaEligible = false
