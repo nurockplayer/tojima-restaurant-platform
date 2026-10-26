@@ -22,6 +22,7 @@ var (
 	ErrSubjectHeld    = errors.New("staff subject is on hold")
 	ErrStaleAuth      = errors.New("authentication started before the latest hold/restore")
 	ErrTxInvalid      = errors.New("staff auth transaction invalid, expired or used")
+	ErrIDPLoggedOut   = errors.New("identity provider session already logged out")
 	errSubjectNotHeld = errors.New("staff subject is not on hold")
 )
 
@@ -80,9 +81,33 @@ func commitResult(ctx context.Context, tx pgx.Tx, result error) error {
 	return result
 }
 
+// epochLock serialises auth transaction creation (shared) with hold/restore
+// (exclusive). A transaction stamped after the shared lock is granted started
+// after every committed epoch change, and one stamped earlier is rejected by
+// CreateSession/PromoteStrong: transaction-start now() alone cannot order them.
+const epochLock = 771904401
+
 func (s *Store) CreateAuthTx(ctx context.Context, in AuthTxInput) error {
-	_, err := s.db.Exec(ctx, `INSERT INTO staff_auth_tx(state_sha256,binding_sha256,nonce,pkce_verifier,purpose,session_id,subject_id,return_path,expires_at)
-		VALUES($1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,''),$8,now()+interval '10 minutes')`, in.StateHash[:], in.BindingHash[:], in.Nonce, in.PKCEVerifier, in.Purpose, in.SessionID, in.SubjectID, in.ReturnPath)
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, epochLock); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_auth_tx(state_sha256,binding_sha256,nonce,pkce_verifier,purpose,session_id,subject_id,return_path,created_at,expires_at)
+		SELECT $1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,''),$8,c.t,c.t+interval '10 minutes' FROM (SELECT clock_timestamp() AS t) c`,
+		in.StateHash[:], in.BindingHash[:], in.Nonce, in.PKCEVerifier, in.Purpose, in.SessionID, in.SubjectID, in.ReturnPath); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// lockIDPSession serialises session creation with back-channel logout for one
+// IdP session, so a logout can never commit between verification and insert.
+func lockIDPSession(ctx context.Context, tx dbtx, sid string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended('tojima-staff-idp-sid:'||$1,0))`, sid)
 	return err
 }
 
@@ -138,6 +163,19 @@ func (s *Store) CreateSession(ctx context.Context, subjectID, idpSID string, str
 			return "", Session{}, err
 		}
 		return "", Session{}, commitResult(ctx, tx, ErrStaleAuth)
+	}
+	if err = lockIDPSession(ctx, tx, idpSID); err != nil {
+		return "", Session{}, err
+	}
+	var loggedOut bool
+	if err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM staff_revoked_idp_sessions WHERE idp_sid=$1)`, idpSID).Scan(&loggedOut); err != nil {
+		return "", Session{}, err
+	}
+	if loggedOut {
+		if err = writeEvent(ctx, tx, subjectID, "", "login_rejected", map[string]string{"reason": "idp_logged_out"}); err != nil {
+			return "", Session{}, err
+		}
+		return "", Session{}, commitResult(ctx, tx, ErrIDPLoggedOut)
 	}
 	var raw [32]byte
 	if _, err = rand.Read(raw[:]); err != nil {
@@ -270,6 +308,17 @@ func (s *Store) RevokeByIDP(ctx context.Context, sid, sub string) (int64, error)
 	defer tx.Rollback(ctx)
 	var tag pgconn.CommandTag
 	if sid != "" {
+		// Fence first: a login for this IdP session still in flight either
+		// committed before this lock (and is revoked below) or is refused later.
+		if err = lockIDPSession(ctx, tx, sid); err != nil {
+			return 0, err
+		}
+		if _, err = tx.Exec(ctx, `DELETE FROM staff_revoked_idp_sessions WHERE revoked_at<now()-interval '31 days'`); err != nil {
+			return 0, err
+		}
+		if _, err = tx.Exec(ctx, `INSERT INTO staff_revoked_idp_sessions(idp_sid) VALUES($1) ON CONFLICT DO NOTHING`, sid); err != nil {
+			return 0, err
+		}
 		tag, err = tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason='backchannel_logout' WHERE idp_sid=$1 AND ($2='' OR subject_id=$2) AND revoked_at IS NULL`, sid, sub)
 	} else {
 		tag, err = tx.Exec(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason='backchannel_logout' WHERE subject_id=$1 AND revoked_at IS NULL`, sub)
@@ -293,8 +342,11 @@ func (s *Store) Hold(ctx context.Context, subjectID, reason, actor string) error
 		return err
 	}
 	defer tx.Rollback(ctx)
-	_, err = tx.Exec(ctx, `INSERT INTO staff_subjects(subject_id,hold_at,hold_reason,auth_epoch,epoch_changed_at) VALUES($1,now(),$2,1,now())
-		ON CONFLICT(subject_id) DO UPDATE SET hold_at=now(),hold_reason=EXCLUDED.hold_reason,auth_epoch=staff_subjects.auth_epoch+1,epoch_changed_at=now()`, subjectID, reason)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+		return err
+	}
+	_, err = tx.Exec(ctx, `INSERT INTO staff_subjects(subject_id,hold_at,hold_reason,auth_epoch,epoch_changed_at) VALUES($1,now(),$2,1,clock_timestamp())
+		ON CONFLICT(subject_id) DO UPDATE SET hold_at=now(),hold_reason=EXCLUDED.hold_reason,auth_epoch=staff_subjects.auth_epoch+1,epoch_changed_at=clock_timestamp()`, subjectID, reason)
 	if err != nil {
 		return err
 	}
@@ -314,7 +366,10 @@ func (s *Store) Restore(ctx context.Context, subjectID, actor string) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	tag, err := tx.Exec(ctx, `UPDATE staff_subjects SET hold_at=NULL,hold_reason=NULL,restored_at=now(),auth_epoch=auth_epoch+1,epoch_changed_at=now() WHERE subject_id=$1 AND hold_at IS NOT NULL`, subjectID)
+	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+		return err
+	}
+	tag, err := tx.Exec(ctx, `UPDATE staff_subjects SET hold_at=NULL,hold_reason=NULL,restored_at=now(),auth_epoch=auth_epoch+1,epoch_changed_at=clock_timestamp() WHERE subject_id=$1 AND hold_at IS NOT NULL`, subjectID)
 	if err != nil {
 		return err
 	}

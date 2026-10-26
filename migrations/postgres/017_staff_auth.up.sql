@@ -44,6 +44,13 @@ CREATE TABLE staff_auth_tx (
         OR (purpose = 'step_up' AND session_id IS NOT NULL AND subject_id IS NOT NULL))
 );
 
+-- IdP sessions ended by back-channel logout; a delayed login callback for one
+-- of them is refused. Kept 31 days (longer than any staff session).
+CREATE TABLE staff_revoked_idp_sessions (
+    idp_sid text PRIMARY KEY CHECK (btrim(idp_sid) <> ''),
+    revoked_at timestamptz NOT NULL DEFAULT now()
+);
+
 CREATE TABLE staff_logout_jti (
     jti text PRIMARY KEY CHECK (btrim(jti) <> ''),
     seen_at timestamptz NOT NULL DEFAULT now()

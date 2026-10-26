@@ -373,3 +373,73 @@ func TestStoreMemberships(t *testing.T) {
 	requireKind(t, ctx, pool, "membership_grant")
 	requireKind(t, ctx, pool, "membership_revoke")
 }
+
+func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
+	ctx, pool, store := staffAuthTestStore(t)
+
+	// A back-channel logout that commits before the delayed callback's insert
+	// fences that IdP session: the late login is refused, not issued.
+	if _, err := store.RevokeByIDP(ctx, "idp-late", "subject-late"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := store.CreateSession(ctx, "subject-late", "idp-late", false, dbNow(t, ctx, pool)); !errors.Is(err, ErrIDPLoggedOut) {
+		t.Fatalf("login for a logged-out IdP session: got %v, want ErrIDPLoggedOut", err)
+	}
+	requireKind(t, ctx, pool, "login_rejected")
+	if _, _, err := store.CreateSession(ctx, "subject-late", "idp-fresh", false, dbNow(t, ctx, pool)); err != nil {
+		t.Fatalf("a new IdP session must still log in: %v", err)
+	}
+
+	// An in-flight hold/restore (exclusive epoch lock) blocks auth tx creation
+	// until it commits, so the tx is stamped after the epoch change.
+	if err := store.Hold(ctx, "subject-epoch", "test", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	restoring, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restoring.Rollback(ctx)
+	if _, err = restoring.Exec(ctx, `SELECT pg_advisory_xact_lock($1)`, epochLock); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = restoring.Exec(ctx, `UPDATE staff_subjects SET hold_at=NULL,hold_reason=NULL,restored_at=now(),auth_epoch=auth_epoch+1,epoch_changed_at=clock_timestamp() WHERE subject_id='subject-epoch'`); err != nil {
+		t.Fatal(err)
+	}
+	created := make(chan error, 1)
+	state := sha256.Sum256([]byte("epoch-state"))
+	binding := sha256.Sum256([]byte("epoch-binding"))
+	go func() {
+		created <- store.CreateAuthTx(ctx, AuthTxInput{StateHash: state, BindingHash: binding, Nonce: "n", PKCEVerifier: "v", Purpose: "login", ReturnPath: "/staff/"})
+	}()
+	select {
+	case err = <-created:
+		t.Fatalf("auth tx created during an uncommitted restore (err=%v)", err)
+	case <-time.After(300 * time.Millisecond):
+	}
+	if err = restoring.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err = <-created; err != nil {
+		t.Fatal(err)
+	}
+	authTx, err := store.ConsumeAuthTx(ctx, state, binding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch", false, authTx.CreatedAt); err != nil {
+		t.Fatalf("tx started after the restore committed must log in: %v", err)
+	}
+
+	// A tx stamped before a later hold/restore is stale.
+	before := dbNow(t, ctx, pool)
+	if err = store.Hold(ctx, "subject-epoch", "again", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Restore(ctx, "subject-epoch", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-2", false, before); !errors.Is(err, ErrStaleAuth) {
+		t.Fatalf("pre-restore tx: got %v, want ErrStaleAuth", err)
+	}
+}

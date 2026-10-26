@@ -5,6 +5,7 @@ DROP FUNCTION staff_auth_events_guard();
 DROP TABLE staff_auth_events;
 DROP TABLE staff_memberships;
 DROP TABLE staff_logout_jti;
+DROP TABLE staff_revoked_idp_sessions;
 DROP TABLE staff_auth_tx;
 DROP TABLE staff_sessions;
 DROP TABLE staff_subjects;
