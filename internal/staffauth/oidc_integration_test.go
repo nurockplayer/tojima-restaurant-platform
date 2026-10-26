@@ -25,12 +25,14 @@ const testOrigin = "http://127.0.0.1:43127"
 const discardedRefresh = "dummy-refresh-must-never-be-persisted"
 
 type fakeStaffIssuer struct {
-	server     *httptest.Server
-	key        *rsa.PrivateKey
-	mu         sync.Mutex
-	codes      map[string]url.Values
-	edit       func(map[string]any)
-	signingKey *rsa.PrivateKey
+	server       *httptest.Server
+	key          *rsa.PrivateKey
+	mu           sync.Mutex
+	codes        map[string]url.Values
+	edit         func(map[string]any)
+	signingKey   *rsa.PrivateKey
+	tokenEntered chan struct{}
+	tokenRelease chan struct{}
 }
 
 func newFakeStaffIssuer(t *testing.T) *fakeStaffIssuer {
@@ -72,6 +74,10 @@ func newFakeStaffIssuer(t *testing.T) *fakeStaffIssuer {
 		if !ok || !basic || client != "staff-client" || secret != "test-secret" || r.PostForm.Get("grant_type") != "authorization_code" || r.PostForm.Get("redirect_uri") != testOrigin+CallbackPath || q.Get("code_challenge_method") != "S256" || base64.RawURLEncoding.EncodeToString(hash[:]) != q.Get("code_challenge") {
 			http.Error(w, "invalid request", 400)
 			return
+		}
+		if f.tokenEntered != nil {
+			close(f.tokenEntered)
+			<-f.tokenRelease
 		}
 		claims := f.claims()
 		claims["nonce"] = q.Get("nonce")
@@ -401,7 +407,7 @@ func TestOIDCStepUp(t *testing.T) {
 			flow := x.begin(t, "/staff/auth/step-up", "/staff/refunds", cookie)
 			presented := cookie
 			if mode == "different session cookie" {
-				otherToken, _, createErr := x.store.CreateSession(x.ctx, before.SubjectID, "sid-other", false, dbNow(t, x.ctx, x.pool))
+				otherToken, _, createErr := testCreateSession(t, x.ctx, x.store, before.SubjectID, "sid-other", false, dbNow(t, x.ctx, x.pool))
 				if createErr != nil {
 					t.Fatal(createErr)
 				}
@@ -605,12 +611,81 @@ func TestOIDCLogoutCancelsPendingBrowserLogin(t *testing.T) {
 	}
 }
 
+func TestOIDCLogoutFencesConsumedUnfinishedLogin(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
+	x.issuer.tokenEntered = make(chan struct{})
+	x.issuer.tokenRelease = make(chan struct{})
+	defer func() {
+		select {
+		case <-x.issuer.tokenRelease:
+		default:
+			close(x.issuer.tokenRelease)
+		}
+	}()
+	callbackDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { callbackDone <- x.callback(t, flow, flow.binding) }()
+	<-x.issuer.tokenEntered // The handler has consumed the auth transaction.
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	if logout.Code != http.StatusSeeOther {
+		t.Fatalf("logout status=%d", logout.Code)
+	}
+	close(x.issuer.tokenRelease)
+	callback := <-callbackDone
+	assertStaffRejected(t, callback)
+	var count int
+	if err := x.pool.QueryRow(x.ctx, "SELECT count(*) FROM staff_sessions").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("cancelled in-flight callback created sessions: count=%d err=%v", count, err)
+	}
+}
+
+func TestOIDCLogoutAfterCallbackRevokesCompletedLogin(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
+	callback := x.callback(t, flow, flow.binding)
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("callback status=%d", callback.Code)
+	}
+	sessionCookie := staffResponseCookie(t, callback, SessionCookie)
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	if logout.Code != http.StatusSeeOther {
+		t.Fatalf("logout status=%d", logout.Code)
+	}
+	if _, err := x.store.ResolveSession(x.ctx, sessionCookie.Value); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("completed login survived browser logout: %v", err)
+	}
+}
+
+func TestOIDCLogoutWithPreRotationCookieRevokesRotatedSession(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	oldCookie := x.login(t)
+	flow := x.begin(t, "/staff/auth/step-up", "/staff/", oldCookie)
+	callback := x.callback(t, flow, flow.binding, oldCookie)
+	if callback.Code != http.StatusSeeOther {
+		t.Fatalf("step-up callback status=%d", callback.Code)
+	}
+	rotatedCookie := staffResponseCookie(t, callback, SessionCookie)
+	if oldCookie.Value == rotatedCookie.Value {
+		t.Fatal("step-up did not rotate the session token")
+	}
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, oldCookie)
+	if logout.Code != http.StatusSeeOther {
+		t.Fatalf("logout status=%d", logout.Code)
+	}
+	if _, err := x.store.ResolveSession(x.ctx, oldCookie.Value); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("old token authenticated after rotation: %v", err)
+	}
+	if _, err := x.store.ResolveSession(x.ctx, rotatedCookie.Value); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("pre-rotation logout left the rotated session live: %v", err)
+	}
+}
+
 func TestOIDCBackchannelLogout(t *testing.T) {
 	for _, mode := range []string{"sid", "sub only", "nonce", "events", "signature", "iat", "jti", "no identity", "aud", "iss", "exp", "long expiry", "null event", "string event", "array event", "number event", "nonempty event"} {
 		t.Run(mode, func(t *testing.T) {
 			x := newStaffOIDCTest(t)
 			cookie := x.login(t)
-			second, _, err := x.store.CreateSession(x.ctx, "staff-a", "sid-other", false, dbNow(t, x.ctx, x.pool))
+			second, _, err := testCreateSession(t, x.ctx, x.store, "staff-a", "sid-other", false, dbNow(t, x.ctx, x.pool))
 			if err != nil {
 				t.Fatal(err)
 			}

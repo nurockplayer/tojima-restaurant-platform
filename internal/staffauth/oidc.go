@@ -188,7 +188,8 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	tx, err := h.store.ConsumeAuthTx(r.Context(), sha256.Sum256([]byte(query.Get("state"))), sha256.Sum256([]byte(binding.Value)))
+	stateHash := sha256.Sum256([]byte(query.Get("state")))
+	tx, err := h.store.ConsumeAuthTx(r.Context(), stateHash, sha256.Sum256([]byte(binding.Value)))
 	if err != nil || query.Has("error") || query.Get("code") == "" {
 		authFail(w, r)
 		return
@@ -231,7 +232,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			authFail(w, r)
 			return
 		}
-		rawSession, s, err := h.store.CreateSession(ctx, claims.Sub, claims.SID, false, tx.CreatedAt)
+		rawSession, s, err := h.store.CreateSession(ctx, claims.Sub, claims.SID, false, tx.CreatedAt, stateHash)
 		if err != nil {
 			authFail(w, r)
 			return
@@ -252,7 +253,7 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 			authFail(w, r)
 			return
 		}
-		rawSession, s, promoteErr := h.store.PromoteStrong(ctx, tx.SessionID, claims.Sub, tx.CreatedAt)
+		rawSession, s, promoteErr := h.store.PromoteStrong(ctx, tx.SessionID, claims.Sub, tx.CreatedAt, stateHash)
 		if promoteErr != nil {
 			authFail(w, r)
 			return
@@ -275,17 +276,14 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		http.SetCookie(w, authCookie(TxCookie, "", -1, time.Time{}))
 		authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout_failed"})
 	}
-	if s, err := h.cookieSession(r.Context(), r); err == nil {
-		if err = h.store.RevokeSession(r.Context(), s.ID, "logout"); err != nil && !errors.Is(err, ErrNoSession) {
+	if txCookie, err := r.Cookie(TxCookie); err == nil {
+		if err = h.store.CancelAuthTx(r.Context(), sha256.Sum256([]byte(txCookie.Value))); err != nil {
 			logoutFailed()
 			return
 		}
-	} else if !errors.Is(err, ErrNoSession) {
-		logoutFailed()
-		return
 	}
-	if txCookie, err := r.Cookie(TxCookie); err == nil {
-		if err = h.store.CancelAuthTx(r.Context(), sha256.Sum256([]byte(txCookie.Value))); err != nil {
+	if sessionCookie, err := r.Cookie(SessionCookie); err == nil && sessionCookie.Value != "" {
+		if _, err = h.store.RevokeByPresentedToken(r.Context(), sessionCookie.Value, "logout"); err != nil {
 			logoutFailed()
 			return
 		}

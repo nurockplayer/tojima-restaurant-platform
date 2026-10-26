@@ -85,20 +85,48 @@ func requireKind(t *testing.T, ctx context.Context, pool *pgxpool.Pool, kind str
 	}
 }
 
+func testAuthStateHash(t *testing.T, ctx context.Context, store *Store, purpose, sessionID, subjectID string) [32]byte {
+	t.Helper()
+	var state, binding [32]byte
+	if _, err := rand.Read(state[:]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rand.Read(binding[:]); err != nil {
+		t.Fatal(err)
+	}
+	stateHash, bindingHash := sha256.Sum256(state[:]), sha256.Sum256(binding[:])
+	if err := store.CreateAuthTx(ctx, AuthTxInput{
+		StateHash: stateHash, BindingHash: bindingHash, Nonce: "test-nonce", PKCEVerifier: "test-verifier",
+		Purpose: purpose, SessionID: sessionID, SubjectID: subjectID, ReturnPath: "/staff/",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ConsumeAuthTx(ctx, stateHash, bindingHash); err != nil {
+		t.Fatal(err)
+	}
+	return stateHash
+}
+
+func testCreateSession(t *testing.T, ctx context.Context, store *Store, subjectID, idpSID string, strong bool, authStartedAt time.Time) (string, Session, error) {
+	t.Helper()
+	stateHash := testAuthStateHash(t, ctx, store, "login", "", "")
+	return store.CreateSession(ctx, subjectID, idpSID, strong, authStartedAt, stateHash)
+}
+
 func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 	ctx, pool, store := staffAuthTestStore(t)
 	if _, err := NewStore(nil); err == nil {
 		t.Fatal("nil pool accepted")
 	}
 	firstLoginStarted := dbNow(t, ctx, pool)
-	if _, _, err := store.CreateSession(ctx, "first-time-subject", "idp-first", false, firstLoginStarted); err != nil {
+	if _, _, err := testCreateSession(t, ctx, store, "first-time-subject", "idp-first", false, firstLoginStarted); err != nil {
 		t.Fatalf("first login for an unknown subject: %v", err)
 	}
 	if _, err := pool.Exec(ctx, "INSERT INTO staff_subjects(subject_id) VALUES('subject-a'),('subject-b')"); err != nil {
 		t.Fatal(err)
 	}
 	started := dbNow(t, ctx, pool)
-	token, session, err := store.CreateSession(ctx, "subject-a", "idp-a", false, started)
+	token, session, err := testCreateSession(t, ctx, store, "subject-a", "idp-a", false, started)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,11 +143,11 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 	if string(stored) != string(hash[:]) || containsRaw {
 		t.Fatal("session table does not contain only the token hash")
 	}
-	other, _, err := store.CreateSession(ctx, "subject-a", "idp-a-2", false, dbNow(t, ctx, pool))
+	other, _, err := testCreateSession(t, ctx, store, "subject-a", "idp-a-2", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjectBToken, _, err := store.CreateSession(ctx, "subject-b", "idp-b", false, dbNow(t, ctx, pool))
+	subjectBToken, _, err := testCreateSession(t, ctx, store, "subject-b", "idp-b", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +168,7 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 		t.Fatalf("revoking subject-a affected subject-b: %v", err)
 	}
 	// A direct expiry update models the passage of absolute session time.
-	expiredToken, expired, err := store.CreateSession(ctx, "subject-b", "idp-exp", false, dbNow(t, ctx, pool))
+	expiredToken, expired, err := testCreateSession(t, ctx, store, "subject-b", "idp-exp", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +179,7 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 		t.Fatalf("expired resolve err=%v", err)
 	}
 
-	liveToken, _, err := store.CreateSession(ctx, "subject-a", "idp-hold", false, dbNow(t, ctx, pool))
+	liveToken, _, err := testCreateSession(t, ctx, store, "subject-a", "idp-hold", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +196,7 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 	if err != nil || len(members) != 0 {
 		t.Fatalf("held memberships=%v err=%v", members, err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-a", "idp-held", false, dbNow(t, ctx, pool)); !errors.Is(err, ErrSubjectHeld) {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-a", "idp-held", false, dbNow(t, ctx, pool)); !errors.Is(err, ErrSubjectHeld) {
 		t.Fatalf("held create err=%v", err)
 	}
 	beforeRestore := dbNow(t, ctx, pool)
@@ -178,10 +206,10 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 	if _, err = store.ResolveSession(ctx, liveToken); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("restore resurrected old session: %v", err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-a", "idp-stale", false, beforeRestore); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-a", "idp-stale", false, beforeRestore); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("stale create err=%v", err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-a", "idp-new", false, dbNow(t, ctx, pool)); err != nil {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-a", "idp-new", false, dbNow(t, ctx, pool)); err != nil {
 		t.Fatalf("fresh create: %v", err)
 	}
 	requireKind(t, ctx, pool, "login")
@@ -308,14 +336,15 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 	if _, err := pool.Exec(ctx, "INSERT INTO staff_subjects(subject_id) VALUES('promote-a'),('promote-b')"); err != nil {
 		t.Fatal(err)
 	}
-	token, basic, err := store.CreateSession(ctx, "promote-a", "sid-a", false, dbNow(t, ctx, pool))
+	token, basic, err := testCreateSession(t, ctx, store, "promote-a", "sid-a", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.PromoteStrong(ctx, basic.ID, "wrong", dbNow(t, ctx, pool)); !errors.Is(err, ErrNoSession) {
+	stepUpState := testAuthStateHash(t, ctx, store, "step_up", basic.ID, "promote-a")
+	if _, _, err = store.PromoteStrong(ctx, basic.ID, "wrong", dbNow(t, ctx, pool), stepUpState); !errors.Is(err, ErrTxInvalid) {
 		t.Fatalf("wrong subject promote err=%v", err)
 	}
-	rotated, promoted, err := store.PromoteStrong(ctx, basic.ID, "promote-a", dbNow(t, ctx, pool))
+	rotated, promoted, err := store.PromoteStrong(ctx, basic.ID, "promote-a", dbNow(t, ctx, pool), stepUpState)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,24 +365,25 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 	if err != nil || stale.StepUpFresh || !stale.StrongLogin {
 		t.Fatalf("stale strong session=%+v err=%v", stale, err)
 	}
+	staleStepUpState := testAuthStateHash(t, ctx, store, "step_up", basic.ID, "promote-a")
+	oldAuth := dbNow(t, ctx, pool)
 	if err = store.Hold(ctx, "promote-a", "test", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	oldAuth := dbNow(t, ctx, pool)
 	if err = store.Restore(ctx, "promote-a", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.PromoteStrong(ctx, basic.ID, "promote-a", oldAuth); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = store.PromoteStrong(ctx, basic.ID, "promote-a", oldAuth, staleStepUpState); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("stale promote err=%v", err)
 	}
-	if _, _, err = store.CreateSession(ctx, "promote-b", "sid-b", false, dbNow(t, ctx, pool)); err != nil {
+	if _, _, err = testCreateSession(t, ctx, store, "promote-b", "sid-b", false, dbNow(t, ctx, pool)); err != nil {
 		t.Fatal(err)
 	}
 	count, err := store.RevokeByIDP(ctx, "sid-a", "promote-a")
 	if err != nil || count != 0 {
 		t.Fatalf("sid of held session count=%d err=%v", count, err)
 	}
-	sidB2Token, _, err := store.CreateSession(ctx, "promote-b", "sid-b2", false, dbNow(t, ctx, pool))
+	sidB2Token, _, err := testCreateSession(t, ctx, store, "promote-b", "sid-b2", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +395,7 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 	if err != nil || count != 1 {
 		t.Fatalf("sid revoke count=%d err=%v", count, err)
 	}
-	sidB2RetryToken, _, err := store.CreateSession(ctx, "promote-b", "sid-b2", false, dbNow(t, ctx, pool))
+	sidB2RetryToken, _, err := testCreateSession(t, ctx, store, "promote-b", "sid-b2", false, dbNow(t, ctx, pool))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -452,11 +482,11 @@ func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
 	if _, err := store.RevokeByIDP(ctx, "idp-late", "subject-late"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := store.CreateSession(ctx, "subject-late", "idp-late", false, dbNow(t, ctx, pool)); !errors.Is(err, ErrIDPLoggedOut) {
+	if _, _, err := testCreateSession(t, ctx, store, "subject-late", "idp-late", false, dbNow(t, ctx, pool)); !errors.Is(err, ErrIDPLoggedOut) {
 		t.Fatalf("login for a logged-out IdP session: got %v, want ErrIDPLoggedOut", err)
 	}
 	requireKind(t, ctx, pool, "login_rejected")
-	if _, _, err := store.CreateSession(ctx, "subject-late", "idp-fresh", false, dbNow(t, ctx, pool)); err != nil {
+	if _, _, err := testCreateSession(t, ctx, store, "subject-late", "idp-fresh", false, dbNow(t, ctx, pool)); err != nil {
 		t.Fatalf("a new IdP session must still log in: %v", err)
 	}
 
@@ -497,7 +527,7 @@ func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch", false, authTx.CreatedAt); err != nil {
+	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch", false, authTx.CreatedAt, state); err != nil {
 		t.Fatalf("tx started after the restore committed must log in: %v", err)
 	}
 
@@ -506,10 +536,10 @@ func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
 	if _, err = store.RevokeByIDP(ctx, "", "subject-epoch"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-pending", false, beforeLogout); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-epoch", "idp-epoch-pending", false, beforeLogout); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("login started before a sub-only logout: got %v, want ErrStaleAuth", err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-new", false, dbNow(t, ctx, pool)); err != nil {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-epoch", "idp-epoch-new", false, dbNow(t, ctx, pool)); err != nil {
 		t.Fatalf("login started after a sub-only logout: %v", err)
 	}
 
@@ -521,7 +551,7 @@ func TestStoreAuthFencesAgainstConcurrentRestoreAndIDPLogout(t *testing.T) {
 	if err = store.Restore(ctx, "subject-epoch", "operator"); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.CreateSession(ctx, "subject-epoch", "idp-epoch-2", false, before); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = testCreateSession(t, ctx, store, "subject-epoch", "idp-epoch-2", false, before); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("pre-restore tx: got %v, want ErrStaleAuth", err)
 	}
 }

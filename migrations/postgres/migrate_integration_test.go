@@ -62,7 +62,7 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 		t.Fatalf("012 pending-session-close guard trigger missing after up: exists=%v err=%v", exists, err)
 	}
 	var version int
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 17 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 18 {
 		t.Fatalf("migration version %d err %v", version, err)
 	}
 	var voidConstraint string
@@ -164,7 +164,7 @@ func TestPostgresMigrationsUpDownReapply(t *testing.T) {
 	if err = target.QueryRow(ctx, `SELECT jsonb_agg(to_jsonb(m) ORDER BY version)::text FROM schema_migrations m WHERE version<=12 OR version>=15`).Scan(&ledgerAfter); err != nil || ledgerAfter != ledgerBefore {
 		t.Fatalf("013 upgrade changed the 012 ledger: %v", err)
 	}
-	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 17 {
+	if err = target.QueryRow(ctx, `SELECT max(version) FROM schema_migrations`).Scan(&version); err != nil || version != 18 {
 		t.Fatalf("upgraded migration version %d err %v", version, err)
 	}
 	rollback014()
