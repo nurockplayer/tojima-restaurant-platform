@@ -119,6 +119,19 @@ func (s *Service) processCreate(ctx context.Context, w workItem) error {
 			}
 			return s.finishWork(ctx, w, false, 0, "SESSION_UNAVAILABLE")
 		}
+		// Reject a lease already obsolete at dispatch. A request can still
+		// outlive its lease after this check, so local void additionally requires
+		// DONE work with exactly one claim: a reclaimed request is never proof
+		// that no provider Checkout exists.
+		var leased bool
+		if err = s.db.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM stripe_payment_work
+			WHERE work_id=$1 AND order_id=$2 AND work_type='CREATE' AND status='LEASED'
+			AND lease_token=$3 AND lease_until>clock_timestamp())`, w.ID, a.order, w.Lease).Scan(&leased); err != nil {
+			return err
+		}
+		if !leased {
+			return ErrConflict
+		}
 		result, err = resolved.Provider.CreateCheckout(ctx, stripeprovider.CreateCheckoutRequest{
 			Account: resolved.Account, TenantID: a.tenant, StoreID: a.store, OrderID: a.order, AttemptID: a.attempt, IdempotencyKey: a.key, AmountJPY: a.amount, Description: "Restaurant order",
 		})

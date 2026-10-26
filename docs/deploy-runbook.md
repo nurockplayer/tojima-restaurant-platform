@@ -73,11 +73,21 @@ table an expired PIN blocks new joins only, and the fix is `ResetPIN` — note
 that this revokes the join tokens of guests still seated, who then need the new
 PIN to keep ordering.
 
-Known gap, tracked under EXT-4: an order committed seconds before session
-expiry whose asynchronous Checkout creation runs after expiry ends as a FAILED
-attempt with no provider Checkout. It cannot be voided (void needs an existing
-Checkout) and blocks table close; `TestEXT4GapOrderCommittedBeforeExpiryCreateAfter`
-pins it as a skipped test. Staff should escalate, not retry.
+If an order committed seconds before session expiry reaches its first
+asynchronous CREATE only after expiry, it ends FAILED / SESSION_UNAVAILABLE
+without a provider Checkout. A store manager with the existing void permission
+can use the same unpaid Stripe void action (current version, reason and
+idempotency key), then close the table. Recovery atomically records the normal
+void audit and cancellation, revokes continuation and permits Close; it does not
+record cash or invent a provider expiry. It requires the unique CREATE work to
+be DONE after exactly one lease, with SESSION_UNAVAILABLE and its failure event,
+and no provider bindings or payment observations. The work is locked and checked
+again during void. Leased, reclaimed or ambiguous work is refused: a missing
+Checkout ID alone does not prove that no provider request is still in flight.
+Wait for worker/webhook evidence in those cases, reconcile once provider IDs
+are bound, and escalate if they remain unknown; do not manually retry Checkout
+creation. `TestEXT4GapOrderCommittedBeforeExpiryCreateAfter`
+asserts recovery and Close, alongside an in-flight lease-reclaim refusal test.
 
 日本語：Owner 決定（2026-10-26）で MVP 試店の TTL を承認。保存・共有方針は未決のため
 本節に保存期間は書かない。session 4時間（開卓時刻から固定）、TABLE_JOIN 1時間（session 残り
@@ -87,9 +97,15 @@ ResetPIN で復旧し、その際は既存の TABLE_JOIN も失効するため�
 記録され、session 終了後なら PAID＋店長確認になる）、ORDER_READ 24時間（閉卓・session 終了
 後も有効）。1分〜7日の範囲は ORDER_READ のみ。長い会食が session を超えたら、開いている
 Stripe ページで支払い→確認承認→現金精算→提供→期限切れ session を閉卓→新しい session を開く。
-既知の gap：session 期限直前に
-確定した注文の Checkout 作成が期限後に走ると、Checkout を持たない FAILED 試行になり取消も
-閉卓もできない（skip テストで固定）。スタッフは再試行せず escalation する。
+session 期限直前に確定した注文の初回 Checkout 作成が期限後に走り、provider 呼出し前に
+FAILED／SESSION_UNAVAILABLE で終了した場合は、既存の取消権限を持つ店長が未払い Stripe
+取消（現在の version・理由・冪等キーが必要）で復旧し、閉卓できる。通常の取消監査と注文取消、
+支払継続の失効を同一トランザクションで記録し、現金精算や provider の失効記録は作らない。
+CREATE work が初回 lease のみで DONE、失敗理由とイベントが一致し、provider ID・決済観測が
+空であることをロック下で再確認する。lease 中・再取得済み・結果不明は拒否するため、先行する
+provider 呼出しが残る注文を誤って取消しない。worker／webhook の証拠を待ち、provider ID
+確定後に照合し、不明のままなら上位対応を依頼する。Checkout 作成は手動再試行しない。
+EXT-4 テストで復旧・閉卓と lease 再取得時の拒否を検証する。
 
 繁中：Owner 於 2026-10-26 核定 MVP 試店 TTL；保留／分享政策仍待決定，本節不寫保留期間。
 session 4 小時（自開桌起固定）、TABLE_JOIN 1 小時（以 session 剩餘時間為上限）、PIN 15 分鐘
@@ -98,9 +114,15 @@ TABLE_JOIN，客人須重新加入）、Checkout 憑證 30 分鐘、付款延續
 重新顯示 Stripe 私有網址；已在 Stripe 頁面完成的付款仍由 webhook 記錄一次，session 結束後
 付款記為 PAID＋店長覆核）、ORDER_READ 24 小時（關桌與 session 到期後仍有效）；1 分鐘至 7 天
 範圍僅適用 ORDER_READ。長餐超過 session 時：請客人完成已開的 Stripe 頁面→核准覆核→現金結帳
-→出餐→關閉過期 session→開新 session。已知 gap（EXT-4）：session 到期前幾秒送出的訂單若
-Checkout 建立排在到期後，會成為
-沒有 Checkout 的 FAILED 記錄，無法作廢、也無法關桌（以 skip 測試固定）；店員應上報，不要重試。
+→出餐→關閉過期 session→開新 session。session 到期前幾秒送出的訂單若首次 Checkout 建立
+排在到期後，於呼叫 provider 前以 FAILED／SESSION_UNAVAILABLE 結束，具既有作廢權限的
+店長可用原本的未付款 Stripe 作廢操作（目前 version、原因、冪等鍵），再關桌。一般作廢稽核、
+訂單取消與付款延續撤銷在同一交易記錄，不記為現金付款，也不虛構 provider 到期結果。
+作廢時鎖住並再次確認 CREATE work 只取得過一次 lease、已 DONE、失敗原因與事件一致，且無
+provider ID 或付款觀測。仍持有 lease、已重新取得 lease 或結果不明者會被拒絕，避免先前的
+provider 請求仍可能完成時誤作廢；這些情況須等待 worker／webhook 證據，provider ID 確定後
+再核對，仍不明則上報，不要手動重試建立 Checkout。EXT-4 測試驗證復原與關桌，以及 lease
+被重新取得時拒絕作廢。
 
 ## How to burst-test ingress (8h) / 入口 burst 試験 / 入口爆量測試
 

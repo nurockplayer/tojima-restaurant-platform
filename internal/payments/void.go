@@ -39,7 +39,15 @@ func readVoidAttempt(ctx context.Context, q voidReader, r VoidRequest, locked bo
 		os.payment_method='STRIPE' AND os.payment_status IN ('PENDING','UNKNOWN') AND os.fulfillment_status='WAITING'
 		AND NOT os.payment_review_required AND NOT os.operational_hold AND os.review_decision='UNRESOLVED'
 		AND a.order_id IS NOT NULL AND NOT a.payment_review_required
-		AND a.state NOT IN ('PAID','REVIEW_REQUIRED','PROCESSING') AND coalesce(a.checkout_session_id,'')<>''
+		AND a.state NOT IN ('PAID','REVIEW_REQUIRED','PROCESSING')
+		AND (coalesce(a.checkout_session_id,'')<>'' OR (
+			a.state='FAILED' AND a.checkout_session_id IS NULL AND a.payment_intent_id IS NULL
+			AND a.checkout_status IS NULL AND a.provider_payment_status IS NULL AND a.payment_intent_status IS NULL
+			AND a.provider_expires_at IS NULL AND a.last_reconciled_at IS NULL
+			AND EXISTS(SELECT 1 FROM stripe_payment_work w WHERE w.order_id=a.order_id AND w.work_type='CREATE'
+				AND w.status='DONE' AND w.attempts=1 AND w.safe_error_code='SESSION_UNAVAILABLE')
+			AND EXISTS(SELECT 1 FROM stripe_payment_attempt_events e WHERE e.order_id=a.order_id
+				AND e.event_key='WORK_STATE:FAILED:SESSION_UNAVAILABLE')))
 		AND NOT EXISTS(SELECT 1 FROM operation_kds_cards k WHERE k.order_id=os.order_id)
 		FROM operation_order_state os LEFT JOIN stripe_payment_attempts a USING(order_id)
 		WHERE os.order_id=$1 AND os.session_id=$2 AND os.tenant_id=$3 AND os.store_id=$4 AND os.table_id=$5`
@@ -72,6 +80,9 @@ func (s *Service) VoidUnpaidCheckout(ctx context.Context, r VoidRequest) (operat
 	}
 	if a.version != r.ExpectedVersion {
 		return operations.OrderState{}, operations.ErrConflict
+	}
+	if a.checkout == "" {
+		return s.commitUnpaidVoid(ctx, r, req, a, nil, nil)
 	}
 	resolved, err := s.resolve(ctx, a.credential, a.account, a.mode)
 	if err != nil || a.api != stripeprovider.APIVersion || !bytesEqual(a.profile, resolved.ProfileFingerprint[:]) {
@@ -136,6 +147,10 @@ func (s *Service) VoidUnpaidCheckout(ctx context.Context, r VoidRequest) (operat
 	if x.Status != stripeprovider.CheckoutExpired || x.PaymentStatus != stripeprovider.PaymentUnpaid {
 		return operations.OrderState{}, ErrVoidNotEligible
 	}
+	return s.commitUnpaidVoid(ctx, r, req, a, &x, pi)
+}
+
+func (s *Service) commitUnpaidVoid(ctx context.Context, r VoidRequest, req operations.StripeVoidRequest, a voidAttempt, x *stripeprovider.CheckoutResult, pi *stripeprovider.PaymentIntentResult) (operations.OrderState, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return operations.OrderState{}, err
@@ -147,6 +162,17 @@ func (s *Service) VoidUnpaidCheckout(ctx context.Context, r VoidRequest) (operat
 	var checkout, attempt, current string
 	if err = tx.QueryRow(ctx, `SELECT coalesce(checkout_session_id,''),attempt_id,state FROM stripe_payment_attempts WHERE order_id=$1 FOR UPDATE`, a.order).Scan(&checkout, &attempt, &current); err != nil {
 		return operations.OrderState{}, err
+	}
+	if a.checkout == "" {
+		// A NULL binding alone cannot exclude a lost response or a stale worker.
+		// The unique CREATE row must have finished its FIRST lease by refusing
+		// admission before any provider call. A reclaimed lease increments
+		// attempts, so an older in-flight request can never satisfy this proof.
+		// Lock it against claims while rechecking eligibility and cancelling.
+		var workID string
+		if err = tx.QueryRow(ctx, `SELECT work_id FROM stripe_payment_work WHERE order_id=$1 AND work_type='CREATE' FOR UPDATE`, a.order).Scan(&workID); err != nil {
+			return operations.OrderState{}, err
+		}
 	}
 	// Replay wins over current eligibility, including a later paid/refunded state.
 	if prior, ok, err := s.ops.ReplayStripeVoidTx(ctx, tx, req); ok || err != nil {
@@ -162,11 +188,17 @@ func (s *Service) VoidUnpaidCheckout(ctx context.Context, r VoidRequest) (operat
 	if locked.version != r.ExpectedVersion {
 		return operations.OrderState{}, operations.ErrConflict
 	}
-	var piStatus any
-	if pi != nil {
-		piStatus = pi.Status
+	if x == nil {
+		// EXPIRED + VOIDED/CANCELLED is the existing Close proof. Leave all
+		// provider observations NULL: no remote Checkout was created or expired.
+		_, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='EXPIRED',continuation_revoked_at=coalesce(continuation_revoked_at,clock_timestamp()),updated_at=clock_timestamp() WHERE order_id=$1`, a.order)
+	} else {
+		var piStatus any
+		if pi != nil {
+			piStatus = pi.Status
+		}
+		_, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='EXPIRED',checkout_status='expired',provider_payment_status='unpaid',payment_intent_id=coalesce(payment_intent_id,NULLIF($2,'')),payment_intent_status=coalesce($3,payment_intent_status),provider_expires_at=$4,last_reconciled_at=clock_timestamp(),continuation_revoked_at=coalesce(continuation_revoked_at,clock_timestamp()),updated_at=clock_timestamp() WHERE order_id=$1`, a.order, x.PaymentIntentID, piStatus, x.ExpiresAt)
 	}
-	_, err = tx.Exec(ctx, `UPDATE stripe_payment_attempts SET state='EXPIRED',checkout_status='expired',provider_payment_status='unpaid',payment_intent_id=coalesce(payment_intent_id,NULLIF($2,'')),payment_intent_status=coalesce($3,payment_intent_status),provider_expires_at=$4,last_reconciled_at=clock_timestamp(),continuation_revoked_at=coalesce(continuation_revoked_at,clock_timestamp()),updated_at=clock_timestamp() WHERE order_id=$1`, a.order, x.PaymentIntentID, piStatus, x.ExpiresAt)
 	if err != nil {
 		return operations.OrderState{}, err
 	}
