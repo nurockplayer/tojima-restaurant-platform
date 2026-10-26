@@ -1,16 +1,19 @@
 # First deployment / 初回デプロイ / 首次部署 — Owner runbook
 
-P-84 C, base `90addf6`, 2026-10-19. This lane supplies local evidence and a
-checklist; **it does not deploy or approve a pilot**. The current `cmd/server`
-serves health only. A production guest/staff/payments composition, identity
-adapter and deployment/migration entry point still need Owner acceptance.
+P-84 C, base `90addf6`, 2026-10-19 JST; composition update 2026-10-26 JST.
+This runbook does not deploy or approve a pilot. `cmd/server` now composes the
+guest API, SPA and opt-in Stripe test worker; see the [runtime guide](ops/containers.md).
+Staff APIs stay denied pending the MOD-08 Keycloak adapter. Production hosting,
+DB policy, identity integration and live payments still need Owner acceptance.
 
-初回公開は Owner の判断事項。本レーンはローカル証拠と手順書だけを提供し、
-デプロイ・試験営業の承認は行わない。現行 `cmd/server` は health のみ。
-本番用の客・店員・決済の構成、実 IdP、デプロイ／migration 起動手段は別途受入が必要。
+初回公開は Owner 判断。顧客API・SPA・明示した Stripe test worker の構成と
+migration 起動手段は [runtime guide](ops/containers.md) を参照。スタッフAPIは
+MOD-08 Keycloak 未統合のため拒否。本番 hosting・DB policy・IdP・live 決済の
+承認やデプロイ・試験営業の許可は含まない。
 
-本 lane 只提供本地證據與檢查表，**不部署、不核准試營運**。目前 `cmd/server`
-只有 health；正式客人／員工／付款組裝、真實 IdP 與部署／migration 入口仍待 Owner 驗收。
+本手冊不部署、不核准試營運。客人API、SPA、明確啟用的 Stripe test worker 與
+migration 入口見 [runtime guide](ops/containers.md)。員工API因 MOD-08 Keycloak
+尚未整合而拒絕；正式主機、DB政策、IdP與真實付款仍待 Owner 驗收。
 
 Sources / 根拠 / 依據: [README](../README.md), [P-80 scope](p80-test-scope.md),
 [Stripe adapter](p80-stripe-provider.md), [P-81 scope](p81-test-scope.md),
@@ -186,7 +189,7 @@ actually read; Go/toolchain and PostgreSQL client environment are separate.
 
 | Binary / バイナリ / 執行檔 | Inputs and behavior / 入力・動作 / 輸入與行為 | Code |
 | --- | --- | --- |
-| `go run ./cmd/server` | Required `APP_ADDR=host:port`, e.g. `127.0.0.1:8080`. Health only; no DB/migration/IdP/Stripe wiring. / 必須、healthのみ。 / 必填，只有health。 | [main](../cmd/server/main.go), [config](../internal/config/config.go), [health](../internal/httpapi/health.go) |
+| `go run ./cmd/server` | Guest API/SPA + opt-in Stripe test worker; required env and explicit health-only mode: [runtime configuration](ops/containers.md). Staff/admin deny pending MOD-08. / 顧客API・SPA、staff拒否。 / 客人API與SPA，員工拒絕。 | [main](../cmd/server/main.go), [config](../internal/config/config.go), [health](../internal/httpapi/health.go) |
 | `go run ./cmd/guesttest` | Required `TEST_DATABASE_URL` to disposable **loopback** PostgreSQL. Optional `-web web/dist`. Fixed `127.0.0.1:8081`. Automatically creates/migrates/seeds a random schema; drops owned schema at normal shutdown. / loopback試験DB、専用schemaを作成・終了時削除。 / loopback測試DB，自建並於正常結束時刪除專屬schema。 | [main](../cmd/guesttest/main.go), [fixture](../internal/testguest/fixture.go) |
 | `go run ./cmd/operationstest` | Same required `TEST_DATABASE_URL`; required `-credentials NEW_PATH` outside served web root; optional `-web-dist web/dist`, `-port 8082` (1024–65535), `-payments-fixture`, `-catalog-fixture`, `-demo-shironagasukujira`, `-guest-display-name`, `-stripe-sandbox`, `-stripe-tenant A\|B\|C`. Demo cannot combine with payments. Binds `127.0.0.1`; private 0600 credential file and random schema removed at normal shutdown. / 専用の試験IdP、公開領域外の新規credential file必須。 / 專屬測試IdP，必須新建公開目錄外的credential檔。 | [main](../cmd/operationstest/main.go), [payments fixture + worker](../cmd/operationstest/payment_fixture.go) |
 | `go run ./cmd/demogateway` | Demo entrance only. Optional `-listen 127.0.0.1:8090`, `-upstream http://127.0.0.1:8082`; required for the public demo `TOJIMA_DEMO_PUBLIC_ORIGIN` and `TOJIMA_DEMO_GATE_SECRET` (at least 32 bytes, no line breaks). Loopback listener only. / デモ入口専用、loopbackのみ。 / 僅供 DEMO 入口，只綁 loopback。 | [main](../cmd/demogateway/main.go), [gateway](../internal/demogateway/gateway.go) |

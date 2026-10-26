@@ -1,5 +1,5 @@
 #!/bin/sh
-# Container smoke test: build the compose stack, prove /healthz and that the
+# Container smoke test: build the compose stack, prove /healthz, the guest API and that the
 # migrations ran, then remove every container, volume and image it created.
 # Runs on the host (Docker engine) under `orb-test --heavy --host`.
 set -eu
@@ -19,9 +19,22 @@ POSTGRES_DB="$smoke_db"
 APP_BIND=127.0.0.1
 APP_PORT=0
 export POSTGRES_PASSWORD POSTGRES_USER POSTGRES_DB APP_BIND APP_PORT
+# Synthetic local policy only, never read payment credentials from the caller.
+SESSION_TTL=4h GRANT_TTL=1h GRANT_WINDOW=1m GRANT_WINDOW_MAX=100
+PIN_TTL=15m PIN_LOCKOUT=1m PIN_MAX_ATTEMPTS=3 PIN_LENGTH=6
+PIN_PEPPER=c21va2Utb25seS1zeW50aGV0aWMtcGVwcGVyLTMya2V5ISE=
+PAYMENT_CREATE_RETRY_WINDOW=20h PAYMENT_CONTINUATION_TTL=30m PAYMENT_WORK_LEASE_TTL=30s
+STRIPE_MODE=disabled
+export SESSION_TTL GRANT_TTL GRANT_WINDOW GRANT_WINDOW_MAX PIN_TTL PIN_LOCKOUT
+export PIN_MAX_ATTEMPTS PIN_LENGTH PIN_PEPPER PAYMENT_CREATE_RETRY_WINDOW
+export PAYMENT_CONTINUATION_TTL PAYMENT_WORK_LEASE_TTL STRIPE_MODE
+unset STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_ACCOUNT_ID STRIPE_CREDENTIAL_REF
+unset STRIPE_API_VERSION STRIPE_SUCCESS_URL STRIPE_CANCEL_URL STRIPE_MAX_AMOUNT_JPY
+unset APP_PUBLIC_ORIGIN CHECKOUT_PROOF_TTL CHECKOUT_SIGNING_KEYS
+smoke_docker_checked=false
 
 compose() {
-    docker compose --env-file /dev/null -p "$smoke_project" "$@"
+    docker compose -f "$smoke_root/compose.yaml" --env-file /dev/null -p "$smoke_project" "$@"
 }
 
 cleanup() {
@@ -40,6 +53,10 @@ cleanup() {
             smoke_status=1
         fi
     done
+    if [ "$smoke_docker_checked" = true ]; then
+        smoke_dangling_after=$(docker volume ls -qf dangling=true) || smoke_status=1
+        echo "dangling volumes after: ${smoke_dangling_after:-none}"
+    fi
     exit "$smoke_status"
 }
 trap cleanup EXIT HUP INT TERM
@@ -53,6 +70,9 @@ cd "$smoke_root"
 command -v docker >/dev/null 2>&1 || fail "docker is required"
 command -v curl >/dev/null 2>&1 || fail "curl is required"
 
+smoke_dangling_before=$(docker volume ls -qf dangling=true) || fail "cannot check dangling volumes"
+smoke_docker_checked=true
+echo "dangling volumes before: ${smoke_dangling_before:-none}"
 echo "project: $smoke_project"
 
 compose up -d --build --wait || fail "docker compose up --wait"
@@ -83,4 +103,18 @@ smoke_table=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smoke_db" -
 [ "$smoke_table" = "t" ] || fail "table_sessions was not created"
 
 echo "migrations: $smoke_applied rows, table_sessions present"
+# Seed only the disposable compose DB, through SQL rather than staff fixtures.
+# Reading this known table proves the API used the migrated DB, not a 404 stub.
+compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$smoke_user" -d "$smoke_db" >/dev/null <<'SQL' || fail "seed guest table"
+INSERT INTO tenants(tenant_id,name) VALUES ('compose-smoke-tenant','Compose smoke');
+INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode,guest_display_name)
+VALUES ('compose-smoke-tenant','compose-smoke-store','Compose smoke','DIRECT_SCAN','Compose smoke store');
+INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator)
+VALUES ('compose-smoke-tenant','compose-smoke-store','compose-smoke-table','Smoke table','compose-smoke-locator');
+SQL
+smoke_guest=$(curl --fail --silent --show-error --max-time 5 \
+    "http://$smoke_addr/v1/guest/tables/compose-smoke-locator") || fail "guest table API"
+[ "$smoke_guest" = '{"store_display_name":"Compose smoke store","mode":"DIRECT_SCAN","open":false}' ] \
+    || fail "unexpected guest table response: $smoke_guest"
+echo "guest API: migrated table read succeeded"
 echo "RESULT: PASS"

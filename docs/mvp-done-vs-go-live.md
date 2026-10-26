@@ -22,6 +22,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] Name the store owner and staff owners for outage stop/switch decisions, cash handling, KDS continuity, order/refund verification, incident reporting and restart authorization. Train each person on the procedures.
 - [ ] **[Owner / payments owner]** Complete EXT-1 Sandbox acceptance and separately authorize Stripe live charge mode, account mapping, webhook ownership, reconciliation and refund handling. Live mode is an explicit Owner decision; test-mode evidence is not authorization.
 - [ ] **[Owner]** Confirm the retention schedule with a 税理士/社労士 as applicable, approve the operational policy and deletion/hold workflow, and confirm the selected storage can meet it. See [draft retention policy](ops/retention.md); no blanket seven-year period applies.
+- [ ] Split database roles: Compose uses one PostgreSQL superuser for migrate and server; production runs the server as a separate least-privilege role (no DDL, no role management).
 - [ ] Verify ingress abuse controls, HTTPS/cookies/origin, secret storage/rotation, monitoring/alerts, security-event retention and incident contacts.
 - [ ] **[Owner]** Review known gaps and explicitly authorize the pilot start. Keep scope to one store and document stop criteria and escalation contacts.
 
@@ -47,6 +48,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] 障害時の停止・切替、現金、KDS 継続、注文／返金確認、事故報告、営業再開判断の店主・店員担当を実名で決め、手順を訓練する。
 - [ ] **[Owner／決済責任者]** EXT-1 Sandbox 受入を完了し、Stripe live charge mode、account 対応、webhook 管理、照合・返金を別途承認する。test mode の証跡は live 承認ではない。
 - [ ] **[Owner]** 税理士／社労士等に保存期間案を確認し、運用方針、削除／hold 手順を承認し、選定 storage が要件を満たすことを確認する。[保存期間案](ops/retention.md)を参照。全記録一律7年とはしない。
+- [ ] 本番は migrate と runtime の DB role を分け、runtime は最小権限（DDL・role 管理なし）にする。
 - [ ] ingress abuse controls、HTTPS/cookie/origin、secret 保存・rotation、監視・alert、安全ログ保存、incident 連絡先を確認する。
 - [ ] **[Owner]** 既知 gap を確認して試店開始を明示承認する。1店舗に限定し、中止条件と連絡先を記録する。
 
@@ -72,5 +74,6 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] 指名店主與店員負責故障停止／切換、現金處理、KDS 持續、訂單／退款核對、事件通報及恢復營業核准，並完成流程訓練。
 - [ ] **[Owner／付款負責人]** 完成 EXT-1 Sandbox 驗收，另行核准 Stripe live charge mode、account 對應、webhook 管理、對帳與退款。test mode 證據不等於 live 核准。
 - [ ] **[Owner]** 請稅理士／社勞士等確認保存期限草案，核准營運政策與刪除／hold 流程，並確認 storage 可符合要求。參閱[保存期限草案](ops/retention.md)；不可一律保存七年。
+- [ ] 正式環境須分開 migrate 與 runtime 的 DB 角色，runtime 僅最小權限（不可 DDL、不可管理角色）。
 - [ ] 確認 ingress abuse controls、HTTPS/cookie/origin、secret 儲存與輪替、監控／告警、安全日誌保存及事故聯絡人。
 - [ ] **[Owner]** 審閱已知缺口並明確核准開始試營運。範圍限一間店，記錄停止條件及升級聯絡人。
