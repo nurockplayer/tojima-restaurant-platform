@@ -82,9 +82,9 @@ does not automatically load/source any file. Required settings:
 - `TOJIMA_STRIPE_MODE=CONNECTED_DIRECT_TEST_FIXTURE`
 - `TOJIMA_STRIPE_API_VERSION=2026-09-30.endive`
 - `TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY=10000` (maximum allowed ceiling; positive lower limits are allowed)
-- `TOJIMA_STRIPE_TEST_ACCOUNT_A/B/C`: actual distinct synthetic merchant IDs
+- `TOJIMA_STRIPE_TEST_ACCOUNT_A/B/C`: actual distinct synthetic merchant IDs; defaults are A `acct_1UUXcL1Hm4VOReK9`, B `acct_1UUXd51Hm4v7xrOu`, C `acct_1UUXdU1Hm4vaUfKX`. Environment values may only repeat these registered IDs: the runner refuses any other account and checks each one live (ID, `dashboard=none`, JP identity, platform fee/loss responsibility, fixture metadata, JPY, active card payments) before starting. Re-provisioned fixtures need the registry in `scripts/run-stripe-sandbox.py` updated in a reviewed commit.
 - `TEST_DATABASE_URL`: disposable loopback PostgreSQL, never production/shared DB
-- `TOJIMA_STRIPE_TEST_SECRET_KEY`: secure environment, or use `--prompt-key`
+- Keychain generic-password service `tojima-stripe-sandbox` stores the test key. The wrapper reads it with macOS `security`; `--keychain-service` selects another service. `--prompt-key` explicitly uses a hidden terminal prompt instead.
 
 The wrapper supplies `TOJIMA_STRIPE_TEST_WEBHOOK_SECRET` directly to Go from the
 CLI's local listener secret. It is not the secret of an unrelated Dashboard
@@ -127,10 +127,10 @@ export TEST_DATABASE_URL='postgres://postgres@127.0.0.1:55444/tojima_test?sslmod
 export TOJIMA_STRIPE_MODE=CONNECTED_DIRECT_TEST_FIXTURE
 export TOJIMA_STRIPE_API_VERSION=2026-09-30.endive
 export TOJIMA_STRIPE_TEST_MAX_AMOUNT_JPY=10000
-# Replace only these NON-SECRET IDs with the three verified connected accounts.
-export TOJIMA_STRIPE_TEST_ACCOUNT_A='acct_REPLACE_A'
-export TOJIMA_STRIPE_TEST_ACCOUNT_B='acct_REPLACE_B'
-export TOJIMA_STRIPE_TEST_ACCOUNT_C='acct_REPLACE_C'
+# Optional: override only the non-secret default merchant account IDs.
+# export TOJIMA_STRIPE_TEST_ACCOUNT_A='acct_...'
+# export TOJIMA_STRIPE_TEST_ACCOUNT_B='acct_...'
+# export TOJIMA_STRIPE_TEST_ACCOUNT_C='acct_...'
 pnpm --dir web install --frozen-lockfile
 pnpm --dir web check
 pnpm --dir web build
@@ -147,16 +147,16 @@ and unsigned webhook → 400, then stops both children and removes its schema an
 local credential file:
 
 ```sh
-python3 scripts/run-stripe-sandbox.py --tenant A --port 8083 --prompt-key \
+python3 scripts/run-stripe-sandbox.py --tenant A --port 8083 \
   --runtime-binary "$STRIPE_RUN_DIR/operationstest" \
   --credentials "$STRIPE_RUN_DIR/tenant-a.json" --startup-check
 ```
 
 A startup PASS is not signed delivery, merchant capability or payment acceptance.
-Then run interactively (a new hidden prompt and disposable schema):
+Then run interactively (Keychain is read again and a disposable schema is used):
 
 ```sh
-python3 scripts/run-stripe-sandbox.py --tenant A --port 8083 --prompt-key \
+python3 scripts/run-stripe-sandbox.py --tenant A --port 8083 \
   --runtime-binary "$STRIPE_RUN_DIR/operationstest" \
   --credentials "$STRIPE_RUN_DIR/tenant-a.json"
 ```

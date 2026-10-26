@@ -2,6 +2,7 @@
 import importlib.util
 from contextlib import contextmanager, nullcontext, redirect_stdout, redirect_stderr
 import io
+import json
 from pathlib import Path
 from types import SimpleNamespace
 import re
@@ -17,6 +18,9 @@ import warnings
 SPEC = importlib.util.spec_from_file_location("stripe_sandbox_runner", Path(__file__).with_name("run-stripe-sandbox.py"))
 runner = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(runner)
+MERCHANT_SPEC = importlib.util.spec_from_file_location("stripe_sandbox_merchants", Path(__file__).with_name("stripe-sandbox-merchants.py"))
+merchants = importlib.util.module_from_spec(MERCHANT_SPEC)
+MERCHANT_SPEC.loader.exec_module(merchants)
 
 
 class EnvironmentTests(unittest.TestCase):
@@ -79,7 +83,8 @@ class EnvironmentTests(unittest.TestCase):
         runtime.poll.return_value = None
         if real_listener is None:
             listener.poll.return_value = None
-        args = SimpleNamespace(prompt_key=False, port=8083, tenant="A",
+        args = SimpleNamespace(prompt_key=False, keychain_service=runner.DEFAULT_KEYCHAIN_SERVICE,
+                               port=8083, tenant="A",
                                runtime_binary="/test/runtime", credentials="/test/credentials",
                                startup_check=True)
         real_killpg = runner.os.killpg
@@ -97,6 +102,9 @@ class EnvironmentTests(unittest.TestCase):
                 SimpleNamespace(returncode=0, stdout=b"stripe version 1.54.0\n"),
                 SimpleNamespace(returncode=0, stdout=b"whsec_synthetic123\n"),
             ]) as cli,
+            mock.patch.object(runner, "keychain_key", return_value=self.fixture()["TOJIMA_STRIPE_TEST_SECRET_KEY"]),
+            mock.patch.object(runner.OPENER, "open", side_effect=self.stripe_response),
+            mock.patch.dict(runner.DEFAULT_MERCHANT_ACCOUNTS, {t: f"acct_synthetic{t}" for t in "ABC"}),
             mock.patch.object(runner.subprocess, "Popen", side_effect=[listener, runtime]) as popen,
             mock.patch.object(runner, "ListenerOutput") if real_listener is None else nullcontext(),
             mock.patch.object(runner, "startup_check") as check,
@@ -107,6 +115,19 @@ class EnvironmentTests(unittest.TestCase):
                 runner.ListenerOutput.return_value.ended.is_set.return_value = False
             yield SimpleNamespace(args=args, source=source, listener=listener, runtime=runtime,
                                   cli=cli, popen=popen, check=check, killpg=killpg)
+
+    def stripe_response(self, request, timeout=15):
+        if "/v1/account" in request.full_url:
+            doc = {"id": runner.PLATFORM_ACCOUNT}
+        else:
+            tenant = next(t for t in "ABC" if f"acct_synthetic{t}" in request.full_url)
+            doc = {"id": f"acct_synthetic{tenant}", "dashboard": "none", "identity": {"country": "jp"},
+                   "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
+                   "defaults": {"currency": "jpy", "responsibilities": {
+                       "fees_collector": "application", "losses_collector": "application"}},
+                   "configuration": {"merchant": {
+                       "capabilities": {"card_payments": {"status": "active"}}}}}
+        return io.BytesIO(json.dumps(doc).encode())
 
     def test_child_credentials_are_scoped(self):
         with self.mocked_run() as launch:
@@ -120,6 +141,196 @@ class EnvironmentTests(unittest.TestCase):
             runtime_env = dict(base, **self.fixture(),
                                TOJIMA_STRIPE_TEST_WEBHOOK_SECRET="whsec_synthetic123")
             self.assertEqual(launch.popen.call_args_list[1].kwargs["env"], runtime_env)
+
+    def test_default_merchant_accounts_are_used_and_overrides_win(self):
+        env = self.fixture()
+        for tenant, account in runner.DEFAULT_MERCHANT_ACCOUNTS.items():
+            env.pop("TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant)
+        checked = runner.checked_environment(env)
+        for tenant, account in runner.DEFAULT_MERCHANT_ACCOUNTS.items():
+            self.assertEqual(checked["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant], account)
+        env["TOJIMA_STRIPE_TEST_ACCOUNT_A"] = "acct_customA"
+        self.assertEqual(runner.checked_environment(env)["TOJIMA_STRIPE_TEST_ACCOUNT_A"], "acct_customA")
+
+    def test_platform_account_guard_fails_before_cli_on_wrong_account(self):
+        with self.mocked_run() as launch, mock.patch.object(
+                runner.OPENER, "open",
+                return_value=io.BytesIO(b'{"id":"acct_wrong"}')):
+            with self.assertRaisesRegex(ValueError, "approved Stripe Sandbox platform account"):
+                runner.run(launch.args)
+            launch.cli.assert_not_called()
+            launch.popen.assert_not_called()
+
+    def test_keychain_timeout_account_and_shared_redaction(self):
+        with mock.patch.object(runner.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout="sk_test_" + "x" * 24 + "\n")) as security:
+            runner.keychain_key()
+            self.assertEqual(security.call_args.args[0], ["security", "find-generic-password", "-s",
+                runner.DEFAULT_KEYCHAIN_SERVICE, "-a", "sk_test", "-w"])
+            self.assertEqual(security.call_args.kwargs["timeout"], 10)
+        with mock.patch.object(runner.subprocess, "run", side_effect=subprocess.TimeoutExpired("security", 10)):
+            with self.assertRaisesRegex(ValueError, "Keychain item .* lookup timed out"):
+                runner.keychain_key()
+        self.assertNotIn("sk_test", sys.modules["stripe_sandbox_keychain"].redact("Invalid API Key provided: sk_test_51Abc****wxyz"))
+
+    def test_no_redirect_handler_refuses_redirect(self):
+        request = runner.urllib.request.Request("https://api.stripe.com/v1/account")
+        with self.assertRaises(runner.urllib.error.HTTPError):
+            sys.modules["stripe_sandbox_keychain"]._NoRedirect().redirect_request(request, None, 302, "Found", {}, "https://other.invalid/")
+
+    def test_verify_merchants_accepts_fixture_and_rejects_bad_fields(self):
+        env = self.fixture()
+        ids = runner.DEFAULT_MERCHANT_ACCOUNTS
+        for tenant in "ABC":
+            env["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant] = ids[tenant]
+        def doc(tenant, **changes):
+            base = {"id": ids[tenant], "dashboard": "none", "identity": {"country": "jp"},
+                    "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
+                    "defaults": {"currency": "jpy", "responsibilities": {
+                        "fees_collector": "application", "losses_collector": "application"}},
+                    "configuration": {"merchant": {"capabilities": {"card_payments": {"status": "active"}}}}}
+            base.update(changes)
+            return base
+        def respond(**changes):
+            def handler(request, timeout=15):
+                self.assertIn("?include%5B0%5D=configuration.merchant&include%5B1%5D=defaults"
+                              "&include%5B2%5D=identity", request.full_url)
+                tenant = next(t for t in "ABC" if ids[t] in request.full_url)
+                return io.BytesIO(json.dumps(doc(tenant, **changes)).encode())
+            return handler
+        with mock.patch.object(runner.OPENER, "open", side_effect=respond()):
+            runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], env)
+        for changes in (
+                {"metadata": {"tojima_test_fixture": "wrong"}},
+                {"id": "acct_other"},
+                {"dashboard": "full"},
+                {"identity": {"country": "us"}},
+                {"defaults": {"currency": "usd", "responsibilities": {
+                    "fees_collector": "application", "losses_collector": "application"}}},
+                {"defaults": {"currency": "jpy", "responsibilities": {
+                    "fees_collector": "stripe", "losses_collector": "application"}}},
+                {"defaults": {"currency": "jpy", "responsibilities": {
+                    "fees_collector": "application", "losses_collector": "stripe"}}},
+                {"configuration": {"merchant": {"capabilities": {"card_payments": {"status": "inactive"}}}}}):
+            with self.subTest(changes=changes), mock.patch.object(runner.OPENER, "open", side_effect=respond(**changes)):
+                with self.assertRaisesRegex(ValueError, "not the approved Sandbox fixture account"):
+                    runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], env)
+        unregistered = {**env, "TOJIMA_STRIPE_TEST_ACCOUNT_A": "acct_syntheticA"}
+        with mock.patch.object(runner.OPENER, "open", side_effect=respond()):
+            with self.assertRaisesRegex(ValueError, "not the approved Sandbox fixture account"):
+                runner.verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], unregistered)
+
+    def test_stripe_error_fields_are_all_redacted(self):
+        secret = "sk_test_" + "S" * 30
+        for field in ("type", "code", "param", "message"):
+            for status in (400, 401, 403):
+                err = merchants.urllib.error.HTTPError("https://api.stripe.com/v1/x", status, "x", {},
+                    io.BytesIO(json.dumps({"error": {field: secret}}).encode()))
+                with self.subTest(field=field, status=status), \
+                        mock.patch.object(merchants.OPENER, "open", side_effect=err):
+                    with self.assertRaises(SystemExit) as raised:
+                        merchants.Stripe(secret).call("GET", "/v1/x")
+                    self.assertNotIn(secret, str(raised.exception))
+                    self.assertNotIn("SSSS", str(raised.exception))
+
+    def test_merchant_report_uses_indexed_include(self):
+        seen = []
+        class Fake:
+            def call(self, method, path, body=None):
+                seen.append(path)
+                return {}
+        with redirect_stdout(io.StringIO()):
+            merchants.report(Fake(), "A", "acct_synthetic")
+        self.assertIn("?include%5B0%5D=configuration.merchant&include%5B1%5D=requirements"
+                      "&include%5B2%5D=identity&include%5B3%5D=defaults", seen[0])
+
+    def test_duplicate_fixture_metadata_is_refused(self):
+        page = {"data": [{"id": "acct_1", "metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"}},
+                         {"id": "acct_2", "metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"}}]}
+        stripe = mock.Mock()
+        stripe.call.return_value = page
+        with self.assertRaisesRegex(SystemExit, "duplicate fixture metadata"):
+            merchants.find_existing(stripe)
+
+    def test_stripe_errors_redact_and_hide_unauthorized_message(self):
+        stripe = merchants.Stripe("sk_test_synthetic_secret")
+        for code, message, expected in ((401, "sk_test_synthetic_secret", "HTTP 401"),
+                                        (400, "bad sk_test_synthetic_secret", "[redacted]")):
+            body = json.dumps({"error": {"message": message, "type": "invalid_request_error"}}).encode()
+            error = merchants.urllib.error.HTTPError("https://api.stripe.com/v1/account", code, "error", {}, io.BytesIO(body))
+            with mock.patch.object(merchants.OPENER, "open", side_effect=error):
+                with self.assertRaises(SystemExit) as caught:
+                    stripe.call("GET", "/v1/account")
+            self.assertIn(expected, str(caught.exception))
+            self.assertNotIn("sk_test", str(caught.exception))
+
+    def test_stripe_call_sends_idempotency_header_and_uses_opener(self):
+        stripe = merchants.Stripe("sk_test_synthetic_secret")
+        response = io.BytesIO(b'{"id":"acct_created"}')
+        with mock.patch.object(merchants.OPENER, "open", return_value=response) as opener:
+            self.assertEqual(stripe.call("POST", "/v2/core/accounts", {},
+                                         idempotency_key="tojima-fixture-synthetic_merchant_a_api-v1"),
+                             {"id": "acct_created"})
+        request = opener.call_args.args[0]
+        self.assertEqual(request.get_header("Idempotency-key"), "tojima-fixture-synthetic_merchant_a_api-v1")
+        self.assertEqual(opener.call_args.kwargs["timeout"], 30)
+
+    def test_runner_checks_merchants_before_cli(self):
+        with self.mocked_run() as launch, mock.patch.object(runner, "verify_merchant_accounts",
+                                                           side_effect=ValueError("merchant A is not the approved Sandbox fixture account")):
+            with self.assertRaisesRegex(ValueError, "merchant A"):
+                runner.run(launch.args)
+            launch.cli.assert_not_called()
+            launch.popen.assert_not_called()
+
+    def test_create_uses_idempotency_key_and_repair_reconfigures_existing(self):
+        stripe = mock.Mock()
+        stripe.call.return_value = {"id": "acct_created"}
+        with mock.patch.object(merchants, "configure_account") as configure:
+            self.assertEqual(merchants.create_account(stripe, "A"), "acct_created")
+            self.assertEqual(stripe.call.call_args.kwargs["idempotency_key"], "tojima-fixture-synthetic_merchant_a_api-v1")
+            configure.assert_called_once_with(stripe, "acct_created", "A")
+
+    def test_main_repair_reconfigures_existing_and_creates_missing(self):
+        stripe = mock.Mock()
+        stripe.call.return_value = {"id": merchants.PLATFORM_ACCOUNT}
+        env = {"A": "acct_existing"}
+        with (
+            mock.patch.object(sys, "argv", ["stripe-sandbox-merchants.py", "--repair"]),
+            mock.patch.object(merchants, "keychain_key", return_value="sk_test_synthetic"),
+            mock.patch.object(merchants, "Stripe", return_value=stripe),
+            mock.patch.object(merchants, "find_existing", return_value=env),
+            mock.patch.object(merchants, "configure_account") as configure,
+            mock.patch.object(merchants, "create_account", return_value="acct_created") as create,
+            mock.patch.object(merchants, "ensure_bank_account"),
+            mock.patch.object(merchants, "report", return_value=True),
+            mock.patch.object(merchants.time, "sleep"),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(merchants.main(), 0)
+        configure.assert_called_once_with(stripe, "acct_existing", "A")
+        create.assert_has_calls([mock.call(stripe, "B"), mock.call(stripe, "C")])
+        self.assertEqual(create.call_count, 2)
+
+    def test_keychain_failure_is_clear_and_precedes_cli(self):
+        with self.mocked_run() as launch, mock.patch.object(
+                runner, "keychain_key", side_effect=ValueError("Keychain item 'tojima-stripe-sandbox' is missing or inaccessible")):
+            with self.assertRaisesRegex(ValueError, "Keychain item .* missing or inaccessible"):
+                runner.run(launch.args)
+            launch.cli.assert_not_called()
+
+    def test_shared_keychain_reader_uses_service_and_rejects_non_test_keys(self):
+        with mock.patch.object(runner.subprocess, "run", return_value=SimpleNamespace(
+                returncode=0, stdout="sk_test_" + "x" * 24 + "\n")) as security:
+            self.assertEqual(runner.keychain_key("custom-sandbox-key"), "sk_test_" + "x" * 24)
+            self.assertEqual(security.call_args.args[0], [
+                "security", "find-generic-password", "-s", "custom-sandbox-key", "-a", "sk_test", "-w"])
+        for result, message in (
+                (SimpleNamespace(returncode=44, stdout=""), "missing or inaccessible"),
+                (SimpleNamespace(returncode=0, stdout="sk_live_" + "x" * 24), "not contain a valid sk_test_ key")):
+            with self.subTest(message=message), mock.patch.object(runner.subprocess, "run", return_value=result):
+                with self.assertRaisesRegex(ValueError, message):
+                    runner.keychain_key("custom-sandbox-key")
 
     def test_forwarded_events_match_service_and_provider_projections(self):
         root = Path(__file__).resolve().parents[1]
