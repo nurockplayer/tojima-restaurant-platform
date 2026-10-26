@@ -210,13 +210,17 @@ func (s *Store) CancelBrowser(ctx context.Context, browserHash [32]byte) error {
 		return err
 	}
 	defer tx.Rollback(ctx)
-	rows, err := tx.Query(ctx, `WITH cancelled AS (
-			UPDATE staff_auth_tx SET cancelled_at=now()
-			WHERE browser_sha256=$1 AND cancelled_at IS NULL
-			RETURNING state_sha256
-		)
-		UPDATE staff_sessions SET revoked_at=now(),revoked_reason='logout'
-		WHERE revoked_at IS NULL AND (browser_sha256=$1 OR auth_state_sha256 IN (SELECT state_sha256 FROM cancelled))
+	// Cancel first, in its own statement: it waits on any CreateSession/PromoteStrong
+	// holding the tx row. The revoke below then runs with a fresh READ COMMITTED
+	// snapshot that sees the sessions those callbacks committed meanwhile; a single
+	// data-modifying CTE would keep the pre-wait snapshot and miss them.
+	if _, err = tx.Exec(ctx, `UPDATE staff_auth_tx SET cancelled_at=now()
+		WHERE browser_sha256=$1 AND cancelled_at IS NULL`, browserHash[:]); err != nil {
+		return err
+	}
+	rows, err := tx.Query(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason='logout'
+		WHERE revoked_at IS NULL AND (browser_sha256=$1 OR auth_state_sha256 IN (
+			SELECT state_sha256 FROM staff_auth_tx WHERE browser_sha256=$1 AND cancelled_at IS NOT NULL))
 		RETURNING id::text,subject_id`, browserHash[:])
 	if err != nil {
 		return err
