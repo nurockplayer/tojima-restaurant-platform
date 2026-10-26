@@ -22,6 +22,7 @@ import (
 const (
 	SessionCookie          = "__Host-tojima_staff"
 	TxCookie               = "__Host-tojima_staff_tx"
+	BrowserCookie          = "__Host-tojima_staff_browser"
 	CallbackPath           = "/staff/auth/callback"
 	DefaultReturn          = "/staff/"
 	BackchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
@@ -148,6 +149,19 @@ func (h *Handler) begin(w http.ResponseWriter, r *http.Request, purpose string) 
 		}
 		in.SessionID, in.SubjectID = s.ID, s.SubjectID
 	}
+	browser, browserErr := r.Cookie(BrowserCookie)
+	newBrowser := browserErr != nil || browser.Value == ""
+	browserID := ""
+	if newBrowser {
+		browserID, browserErr = randomAuthValue()
+		if browserErr != nil {
+			authFail(w, r)
+			return
+		}
+	} else {
+		browserID = browser.Value
+	}
+	in.BrowserHash = sha256.Sum256([]byte(browserID))
 	state, err := randomAuthValue()
 	if err != nil {
 		authFail(w, r)
@@ -168,6 +182,10 @@ func (h *Handler) begin(w http.ResponseWriter, r *http.Request, purpose string) 
 	if err = h.store.CreateAuthTx(r.Context(), in); err != nil {
 		authFail(w, r)
 		return
+	}
+	if newBrowser {
+		expires := time.Now().Add(30 * 24 * time.Hour)
+		http.SetCookie(w, authCookie(BrowserCookie, browserID, 30*24*60*60, expires))
 	}
 	http.SetCookie(w, authCookie(TxCookie, binding, 600, time.Time{}))
 	acr := "basic"
@@ -275,6 +293,12 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	logoutFailed := func() {
 		http.SetCookie(w, authCookie(TxCookie, "", -1, time.Time{}))
 		authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout_failed"})
+	}
+	if browserCookie, err := r.Cookie(BrowserCookie); err == nil && browserCookie.Value != "" {
+		if err = h.store.CancelBrowser(r.Context(), sha256.Sum256([]byte(browserCookie.Value))); err != nil {
+			logoutFailed()
+			return
+		}
 	}
 	if txCookie, err := r.Cookie(TxCookie); err == nil {
 		if err = h.store.CancelAuthTx(r.Context(), sha256.Sum256([]byte(txCookie.Value))); err != nil {

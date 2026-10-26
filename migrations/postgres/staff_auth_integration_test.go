@@ -71,9 +71,10 @@ func Test018StaffAuthLogoutFenceUpDownUp(t *testing.T) {
 		t.Helper()
 		var present bool
 		if err := conn.QueryRow(ctx, `SELECT
-			(SELECT count(*) = 4 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name IN ('staff_auth_tx','staff_sessions') AND column_name IN ('cancelled_at','completed_at','auth_state_sha256','previous_token_sha256'))
+			(SELECT count(*) = 5 FROM information_schema.columns WHERE table_schema=current_schema() AND table_name IN ('staff_auth_tx','staff_sessions') AND column_name IN ('cancelled_at','completed_at','auth_state_sha256','browser_sha256'))
+			AND (SELECT is_nullable='NO' FROM information_schema.columns WHERE table_schema=current_schema() AND table_name='staff_auth_tx' AND column_name='browser_sha256')
 			AND EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='staff_sessions_auth_state_idx')
-			AND EXISTS(SELECT 1 FROM pg_indexes WHERE schemaname=current_schema() AND indexname='staff_sessions_previous_token_idx')`).Scan(&present); err != nil || present != want {
+			AND to_regclass('staff_session_tokens') IS NOT NULL`).Scan(&present); err != nil || present != want {
 			t.Fatalf("018 schema present=%v want=%v err=%v", present, want, err)
 		}
 	}
@@ -97,8 +98,19 @@ func Test018StaffAuthLogoutFenceUpDownUp(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertFence(false)
+	if _, err = conn.Exec(ctx, `INSERT INTO staff_subjects(subject_id) VALUES('migration-018-legacy')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = conn.Exec(ctx, `INSERT INTO staff_sessions(token_sha256,subject_id,idp_sid,strong_login,absolute_expires_at)
+		VALUES(decode(repeat('ab',32),'hex'),'migration-018-legacy','legacy-sid',false,now()+interval '1 day')`); err != nil {
+		t.Fatal(err)
+	}
 	if err = postgres.Up(ctx, conn); err != nil {
 		t.Fatalf("018 up again: %v", err)
 	}
 	assertFence(true)
+	var tokenRows int
+	if err = conn.QueryRow(ctx, `SELECT count(*) FROM staff_session_tokens WHERE session_id=(SELECT id FROM staff_sessions WHERE subject_id='migration-018-legacy')`).Scan(&tokenRows); err != nil || tokenRows != 1 {
+		t.Fatalf("legacy token hashes backfilled=%d err=%v", tokenRows, err)
+	}
 }

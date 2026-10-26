@@ -87,17 +87,20 @@ func requireKind(t *testing.T, ctx context.Context, pool *pgxpool.Pool, kind str
 
 func testAuthStateHash(t *testing.T, ctx context.Context, store *Store, purpose, sessionID, subjectID string) [32]byte {
 	t.Helper()
-	var state, binding [32]byte
+	var state, binding, browser [32]byte
 	if _, err := rand.Read(state[:]); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := rand.Read(binding[:]); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := rand.Read(browser[:]); err != nil {
+		t.Fatal(err)
+	}
 	stateHash, bindingHash := sha256.Sum256(state[:]), sha256.Sum256(binding[:])
 	if err := store.CreateAuthTx(ctx, AuthTxInput{
 		StateHash: stateHash, BindingHash: bindingHash, Nonce: "test-nonce", PKCEVerifier: "test-verifier",
-		Purpose: purpose, SessionID: sessionID, SubjectID: subjectID, ReturnPath: "/staff/",
+		BrowserHash: sha256.Sum256(browser[:]), Purpose: purpose, SessionID: sessionID, SubjectID: subjectID, ReturnPath: "/staff/",
 	}); err != nil {
 		t.Fatal(err)
 	}

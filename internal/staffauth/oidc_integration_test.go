@@ -118,12 +118,13 @@ func signStaffToken(t *testing.T, key *rsa.PrivateKey, claims map[string]any) st
 }
 
 type staffOIDCTest struct {
-	ctx    context.Context
-	pool   *pgxpool.Pool
-	store  *Store
-	issuer *fakeStaffIssuer
-	h      *Handler
-	mux    *http.ServeMux
+	ctx     context.Context
+	pool    *pgxpool.Pool
+	store   *Store
+	issuer  *fakeStaffIssuer
+	h       *Handler
+	mux     *http.ServeMux
+	browser *http.Cookie
 }
 
 func newStaffOIDCTest(t *testing.T) *staffOIDCTest {
@@ -136,7 +137,7 @@ func newStaffOIDCTest(t *testing.T) *staffOIDCTest {
 	}
 	mux := http.NewServeMux()
 	h.Mount(mux)
-	return &staffOIDCTest{ctx, pool, store, issuer, h, mux}
+	return &staffOIDCTest{ctx: ctx, pool: pool, store: store, issuer: issuer, h: h, mux: mux}
 }
 
 func (x *staffOIDCTest) request(t *testing.T, method, target, body, origin string, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -178,11 +179,21 @@ func staffResponseCookie(t *testing.T, w *httptest.ResponseRecorder, name string
 type staffFlow struct {
 	query   url.Values
 	binding *http.Cookie
+	browser *http.Cookie
 }
 
-func (x *staffOIDCTest) begin(t *testing.T, path, returnPath string, cookie *http.Cookie) staffFlow {
+func (x *staffOIDCTest) begin(t *testing.T, path, returnPath string, cookies ...*http.Cookie) staffFlow {
 	t.Helper()
-	w := x.request(t, "GET", path+"?"+url.Values{"return": {returnPath}}.Encode(), "", "", cookie)
+	hasBrowser := false
+	for _, cookie := range cookies {
+		if cookie != nil && cookie.Name == BrowserCookie {
+			hasBrowser = true
+		}
+	}
+	if !hasBrowser && x.browser != nil {
+		cookies = append(cookies, x.browser)
+	}
+	w := x.request(t, "GET", path+"?"+url.Values{"return": {returnPath}}.Encode(), "", "", cookies...)
 	if w.Code != http.StatusFound {
 		t.Fatalf("begin status %d", w.Code)
 	}
@@ -214,7 +225,20 @@ func (x *staffOIDCTest) begin(t *testing.T, path, returnPath string, cookie *htt
 	if binding.MaxAge != 600 {
 		t.Fatal("transaction cookie lifetime")
 	}
-	return staffFlow{q, binding}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == BrowserCookie {
+			x.browser = c
+		}
+	}
+	var browserRaw []byte
+	var browserDecodeErr error
+	if x.browser != nil {
+		browserRaw, browserDecodeErr = base64.RawURLEncoding.DecodeString(x.browser.Value)
+	}
+	if x.browser == nil || browserDecodeErr != nil || len(browserRaw) != 32 || x.browser.MaxAge != 30*24*60*60 || x.browser.Expires.IsZero() {
+		t.Fatal("browser cookie lifetime or value")
+	}
+	return staffFlow{query: q, binding: binding, browser: x.browser}
 }
 
 func (x *staffOIDCTest) callback(t *testing.T, flow staffFlow, cookies ...*http.Cookie) *httptest.ResponseRecorder {
@@ -240,7 +264,7 @@ func assertStaffRejected(t *testing.T, w *httptest.ResponseRecorder) {
 
 func (x *staffOIDCTest) login(t *testing.T) *http.Cookie {
 	t.Helper()
-	flow := x.begin(t, "/staff/auth/login", "/staff/orders?open=1", nil)
+	flow := x.begin(t, "/staff/auth/login", "/staff/orders?open=1")
 	w := x.callback(t, flow, flow.binding)
 	if w.Code != 303 || w.Header().Get("Location") != "/staff/orders?open=1" {
 		t.Fatalf("login status=%d location=%q", w.Code, w.Header().Get("Location"))
@@ -593,7 +617,7 @@ func TestOIDCLogoutCancellationFailureClearsOnlyTransactionCookie(t *testing.T) 
 func TestOIDCLogoutCancelsPendingBrowserLogin(t *testing.T) {
 	x := newStaffOIDCTest(t)
 	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
-	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding, flow.browser)
 	// The fake issuer advertises end_session_endpoint, so logout continues there.
 	if w.Code != http.StatusSeeOther || !strings.Contains(w.Header().Get("Location"), "/end-session?client_id=") {
 		t.Fatalf("logout status=%d location=%q", w.Code, w.Header().Get("Location"))
@@ -603,6 +627,11 @@ func TestOIDCLogoutCancelsPendingBrowserLogin(t *testing.T) {
 	}
 	if c := staffResponseCookie(t, w, SessionCookie); c.MaxAge != -1 || c.Value != "" {
 		t.Fatal("logout session cookie not cleared")
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == BrowserCookie {
+			t.Fatal("logout cleared the browser identity cookie")
+		}
 	}
 	assertStaffRejected(t, x.callback(t, flow, flow.binding))
 	var count int
@@ -639,15 +668,50 @@ func TestOIDCLogoutFencesConsumedUnfinishedLogin(t *testing.T) {
 	}
 }
 
+func TestOIDCLogoutBrowserFenceCancelsAnotherTab(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	flowA := x.begin(t, "/staff/auth/login", DefaultReturn)
+	x.issuer.tokenEntered = make(chan struct{})
+	x.issuer.tokenRelease = make(chan struct{})
+	defer func() {
+		select {
+		case <-x.issuer.tokenRelease:
+		default:
+			close(x.issuer.tokenRelease)
+		}
+	}()
+	callbackDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() { callbackDone <- x.callback(t, flowA, flowA.binding) }()
+	<-x.issuer.tokenEntered // Tab A consumed its transaction and is stalled before session creation.
+	flowB := x.begin(t, "/staff/auth/login", DefaultReturn)
+	if flowA.binding.Value == flowB.binding.Value || flowA.browser.Value != flowB.browser.Value {
+		t.Fatal("tabs did not get separate transaction bindings for one browser identity")
+	}
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flowB.binding, flowB.browser)
+	if logout.Code != http.StatusSeeOther {
+		t.Fatalf("logout status=%d", logout.Code)
+	}
+	close(x.issuer.tokenRelease)
+	assertStaffRejected(t, <-callbackDone)
+	var count int
+	if err := x.pool.QueryRow(x.ctx, "SELECT count(*) FROM staff_sessions WHERE revoked_at IS NULL").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("tab A callback survived browser logout: live sessions=%d err=%v", count, err)
+	}
+}
+
 func TestOIDCLogoutAfterCallbackRevokesCompletedLogin(t *testing.T) {
 	x := newStaffOIDCTest(t)
-	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
-	callback := x.callback(t, flow, flow.binding)
+	flowA := x.begin(t, "/staff/auth/login", DefaultReturn)
+	callback := x.callback(t, flowA, flowA.binding)
 	if callback.Code != http.StatusSeeOther {
 		t.Fatalf("callback status=%d", callback.Code)
 	}
 	sessionCookie := staffResponseCookie(t, callback, SessionCookie)
-	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	flowB := x.begin(t, "/staff/auth/login", DefaultReturn)
+	if flowA.binding.Value == flowB.binding.Value || flowA.browser.Value != flowB.browser.Value {
+		t.Fatal("tabs did not get separate transaction bindings for one browser identity")
+	}
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flowB.binding, flowB.browser)
 	if logout.Code != http.StatusSeeOther {
 		t.Fatalf("logout status=%d", logout.Code)
 	}
@@ -660,24 +724,32 @@ func TestOIDCLogoutWithPreRotationCookieRevokesRotatedSession(t *testing.T) {
 	x := newStaffOIDCTest(t)
 	oldCookie := x.login(t)
 	x.issuer.edit = func(c map[string]any) { c["acr"] = "strong" }
-	flow := x.begin(t, "/staff/auth/step-up", "/staff/", oldCookie)
-	callback := x.callback(t, flow, flow.binding, oldCookie)
-	if callback.Code != http.StatusSeeOther {
-		t.Fatalf("step-up callback status=%d", callback.Code)
+	currentCookie := oldCookie
+	for i := 0; i < 2; i++ {
+		flow := x.begin(t, "/staff/auth/step-up", "/staff/", currentCookie)
+		callback := x.callback(t, flow, flow.binding, currentCookie)
+		if callback.Code != http.StatusSeeOther {
+			t.Fatalf("step-up %d callback status=%d", i+1, callback.Code)
+		}
+		currentCookie = staffResponseCookie(t, callback, SessionCookie)
 	}
-	rotatedCookie := staffResponseCookie(t, callback, SessionCookie)
-	if oldCookie.Value == rotatedCookie.Value {
+	if oldCookie.Value == currentCookie.Value {
 		t.Fatal("step-up did not rotate the session token")
 	}
-	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, oldCookie)
+	currentHash := sha256.Sum256([]byte(currentCookie.Value))
+	var issued int
+	if err := x.pool.QueryRow(x.ctx, `SELECT count(*) FROM staff_session_tokens WHERE session_id=(SELECT session_id FROM staff_session_tokens WHERE token_sha256=$1)`, currentHash[:]).Scan(&issued); err != nil || issued != 3 {
+		t.Fatalf("session token lineage rows=%d err=%v", issued, err)
+	}
+	logout := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, oldCookie, x.browser)
 	if logout.Code != http.StatusSeeOther {
 		t.Fatalf("logout status=%d", logout.Code)
 	}
 	if _, err := x.store.ResolveSession(x.ctx, oldCookie.Value); !errors.Is(err, ErrNoSession) {
 		t.Fatalf("old token authenticated after rotation: %v", err)
 	}
-	if _, err := x.store.ResolveSession(x.ctx, rotatedCookie.Value); !errors.Is(err, ErrNoSession) {
-		t.Fatalf("pre-rotation logout left the rotated session live: %v", err)
+	if _, err := x.store.ResolveSession(x.ctx, currentCookie.Value); !errors.Is(err, ErrNoSession) {
+		t.Fatalf("logout with first token left the latest rotated session live: %v", err)
 	}
 }
 

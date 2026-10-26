@@ -55,6 +55,7 @@ type SubjectStatus struct {
 
 type AuthTxInput struct {
 	StateHash, BindingHash                   [32]byte
+	BrowserHash                              [32]byte
 	Nonce, PKCEVerifier, Purpose, ReturnPath string
 	SessionID, SubjectID                     string
 }
@@ -107,9 +108,9 @@ func (s *Store) CreateAuthTx(ctx context.Context, in AuthTxInput) error {
 	if _, err = tx.Exec(ctx, `SELECT pg_advisory_xact_lock_shared($1)`, epochLock); err != nil {
 		return err
 	}
-	if _, err = tx.Exec(ctx, `INSERT INTO staff_auth_tx(state_sha256,binding_sha256,nonce,pkce_verifier,purpose,session_id,subject_id,return_path,created_at,expires_at)
-		SELECT $1,$2,$3,$4,$5,NULLIF($6,'')::uuid,NULLIF($7,''),$8,c.t,c.t+interval '10 minutes' FROM (SELECT clock_timestamp() AS t) c`,
-		in.StateHash[:], in.BindingHash[:], in.Nonce, in.PKCEVerifier, in.Purpose, in.SessionID, in.SubjectID, in.ReturnPath); err != nil {
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_auth_tx(state_sha256,binding_sha256,browser_sha256,nonce,pkce_verifier,purpose,session_id,subject_id,return_path,created_at,expires_at)
+		SELECT $1,$2,$3,$4,$5,$6,NULLIF($7,'')::uuid,NULLIF($8,''),$9,c.t,c.t+interval '10 minutes' FROM (SELECT clock_timestamp() AS t) c`,
+		in.StateHash[:], in.BindingHash[:], in.BrowserHash[:], in.Nonce, in.PKCEVerifier, in.Purpose, in.SessionID, in.SubjectID, in.ReturnPath); err != nil {
 		return err
 	}
 	return tx.Commit(ctx)
@@ -127,7 +128,7 @@ func (s *Store) ConsumeAuthTx(ctx context.Context, stateHash, bindingHash [32]by
 	var storedBinding []byte
 	var sessionID, subjectID *string
 	err := s.db.QueryRow(ctx, `UPDATE staff_auth_tx SET used_at=now()
-		WHERE state_sha256=$1 AND used_at IS NULL AND expires_at>now()
+		WHERE state_sha256=$1 AND used_at IS NULL AND cancelled_at IS NULL AND expires_at>now()
 		RETURNING binding_sha256,nonce,pkce_verifier,purpose,return_path,session_id::text,subject_id,created_at`, stateHash[:]).Scan(
 		&storedBinding, &out.Nonce, &out.PKCEVerifier, &out.Purpose, &out.ReturnPath, &sessionID, &subjectID, &out.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -203,31 +204,72 @@ func (s *Store) CancelAuthTx(ctx context.Context, bindingHash [32]byte) error {
 	return tx.Commit(ctx)
 }
 
+func (s *Store) CancelBrowser(ctx context.Context, browserHash [32]byte) error {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	rows, err := tx.Query(ctx, `WITH cancelled AS (
+			UPDATE staff_auth_tx SET cancelled_at=now()
+			WHERE browser_sha256=$1 AND cancelled_at IS NULL
+			RETURNING state_sha256
+		)
+		UPDATE staff_sessions SET revoked_at=now(),revoked_reason='logout'
+		WHERE revoked_at IS NULL AND (browser_sha256=$1 OR auth_state_sha256 IN (SELECT state_sha256 FROM cancelled))
+		RETURNING id::text,subject_id`, browserHash[:])
+	if err != nil {
+		return err
+	}
+	type revokedSession struct{ id, subjectID string }
+	var revoked []revokedSession
+	for rows.Next() {
+		var session revokedSession
+		if err = rows.Scan(&session.id, &session.subjectID); err != nil {
+			rows.Close()
+			return err
+		}
+		revoked = append(revoked, session)
+	}
+	if err = rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	for _, session := range revoked {
+		if err = writeEvent(ctx, tx, session.subjectID, session.id, "logout", map[string]string{"reason": "logout"}); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
 // lockPendingAuthTx serializes finishing a consumed callback against browser
 // logout. Callers hold this row lock until their session mutation commits.
-func lockPendingAuthTx(ctx context.Context, tx pgx.Tx, stateHash [32]byte, purpose, sessionID, subjectID string) (bool, error) {
+func lockPendingAuthTx(ctx context.Context, tx pgx.Tx, stateHash [32]byte, purpose, sessionID, subjectID string) (bool, []byte, error) {
 	var storedPurpose string
 	var storedSessionID, storedSubjectID *string
+	var browserHash []byte
 	var cancelled, completed bool
-	err := tx.QueryRow(ctx, `SELECT purpose,session_id::text,subject_id,cancelled_at IS NOT NULL,completed_at IS NOT NULL
+	err := tx.QueryRow(ctx, `SELECT purpose,session_id::text,subject_id,browser_sha256,cancelled_at IS NOT NULL,completed_at IS NOT NULL
 		FROM staff_auth_tx WHERE state_sha256=$1 FOR UPDATE`, stateHash[:]).Scan(
-		&storedPurpose, &storedSessionID, &storedSubjectID, &cancelled, &completed)
+		&storedPurpose, &storedSessionID, &storedSubjectID, &browserHash, &cancelled, &completed)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return true, nil
+		return true, nil, nil
 	}
 	if err != nil {
-		return false, err
+		return false, nil, err
 	}
-	if cancelled || completed || storedPurpose != purpose {
-		return true, nil
+	if cancelled || completed || storedPurpose != purpose || len(browserHash) != 32 {
+		return true, nil, nil
 	}
 	if purpose == "login" && (storedSessionID != nil || storedSubjectID != nil) {
-		return true, nil
+		return true, nil, nil
 	}
 	if purpose == "step_up" && (storedSessionID == nil || storedSubjectID == nil || *storedSessionID != sessionID || *storedSubjectID != subjectID) {
-		return true, nil
+		return true, nil, nil
 	}
-	return false, nil
+	return false, browserHash, nil
 }
 
 func completeAuthTx(ctx context.Context, tx pgx.Tx, stateHash [32]byte) error {
@@ -247,7 +289,7 @@ func (s *Store) CreateSession(ctx context.Context, subjectID, idpSID string, str
 		return "", Session{}, err
 	}
 	defer tx.Rollback(ctx)
-	invalid, err := lockPendingAuthTx(ctx, tx, stateHash, "login", "", "")
+	invalid, browserHash, err := lockPendingAuthTx(ctx, tx, stateHash, "login", "", "")
 	if err != nil {
 		return "", Session{}, err
 	}
@@ -302,10 +344,13 @@ func (s *Store) CreateSession(ctx context.Context, subjectID, idpSID string, str
 	}
 	var session Session
 	session.SubjectID, session.StrongLogin = subjectID, strong
-	err = tx.QueryRow(ctx, `INSERT INTO staff_sessions(token_sha256,subject_id,idp_sid,strong_login,absolute_expires_at,last_strong_auth_at,auth_state_sha256)
-		VALUES($1,$2,$3,$4,now()+interval '30 days',CASE WHEN $4 THEN now() ELSE NULL END,$5)
-		RETURNING id::text,absolute_expires_at,last_strong_auth_at`, tokenHash[:], subjectID, idpSID, strong, stateHash[:]).Scan(&session.ID, &session.AbsoluteExpires, &session.LastStrongAuth)
+	err = tx.QueryRow(ctx, `INSERT INTO staff_sessions(token_sha256,subject_id,idp_sid,strong_login,absolute_expires_at,last_strong_auth_at,auth_state_sha256,browser_sha256)
+		VALUES($1,$2,$3,$4,now()+interval '30 days',CASE WHEN $4 THEN now() ELSE NULL END,$5,$6)
+		RETURNING id::text,absolute_expires_at,last_strong_auth_at`, tokenHash[:], subjectID, idpSID, strong, stateHash[:], browserHash).Scan(&session.ID, &session.AbsoluteExpires, &session.LastStrongAuth)
 	if err != nil {
+		return "", Session{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_session_tokens(token_sha256,session_id) VALUES($1,$2)`, tokenHash[:], session.ID); err != nil {
 		return "", Session{}, err
 	}
 	if err = writeEvent(ctx, tx, subjectID, session.ID, "login", map[string]bool{"strong": strong}); err != nil {
@@ -337,7 +382,7 @@ func (s *Store) PromoteStrong(ctx context.Context, sessionID, subjectID string, 
 		return "", Session{}, err
 	}
 	defer tx.Rollback(ctx)
-	invalid, err := lockPendingAuthTx(ctx, tx, stateHash, "step_up", sessionID, subjectID)
+	invalid, browserHash, err := lockPendingAuthTx(ctx, tx, stateHash, "step_up", sessionID, subjectID)
 	if err != nil {
 		return "", Session{}, err
 	}
@@ -378,14 +423,17 @@ func (s *Store) PromoteStrong(ctx context.Context, sessionID, subjectID string, 
 	token := base64.RawURLEncoding.EncodeToString(raw[:])
 	tokenHash := sha256.Sum256([]byte(token))
 	session := Session{ID: sessionID, SubjectID: subjectID, StrongLogin: true}
-	err = tx.QueryRow(ctx, `UPDATE staff_sessions SET strong_login=true,last_strong_auth_at=now(),previous_token_sha256=token_sha256,
-		token_sha256=$3,auth_state_sha256=$4
+	err = tx.QueryRow(ctx, `UPDATE staff_sessions SET strong_login=true,last_strong_auth_at=now(),
+		token_sha256=$3,auth_state_sha256=$4,browser_sha256=$5
 		WHERE id=$1 AND subject_id=$2 AND revoked_at IS NULL AND now()<absolute_expires_at
-		RETURNING absolute_expires_at,last_strong_auth_at`, sessionID, subjectID, tokenHash[:], stateHash[:]).Scan(&session.AbsoluteExpires, &session.LastStrongAuth)
+		RETURNING absolute_expires_at,last_strong_auth_at`, sessionID, subjectID, tokenHash[:], stateHash[:], browserHash).Scan(&session.AbsoluteExpires, &session.LastStrongAuth)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", Session{}, ErrNoSession
 		}
+		return "", Session{}, err
+	}
+	if _, err = tx.Exec(ctx, `INSERT INTO staff_session_tokens(token_sha256,session_id) VALUES($1,$2)`, tokenHash[:], sessionID); err != nil {
 		return "", Session{}, err
 	}
 	if err = writeEvent(ctx, tx, subjectID, sessionID, "step_up", map[string]bool{"strong": true}); err != nil {
@@ -430,7 +478,7 @@ func (s *Store) RevokeByPresentedToken(ctx context.Context, rawToken, reason str
 	defer tx.Rollback(ctx)
 	var sessionID, subjectID string
 	err = tx.QueryRow(ctx, `UPDATE staff_sessions SET revoked_at=now(),revoked_reason=$2
-		WHERE revoked_at IS NULL AND (token_sha256=$1 OR previous_token_sha256=$1)
+		WHERE revoked_at IS NULL AND id=(SELECT session_id FROM staff_session_tokens WHERE token_sha256=$1)
 		RETURNING id::text,subject_id`, hash[:], reason).Scan(&sessionID, &subjectID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		if err = tx.Commit(ctx); err != nil {
