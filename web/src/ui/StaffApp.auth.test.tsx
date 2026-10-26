@@ -10,7 +10,6 @@ import { StaffApp } from './StaffApp';
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
 const ctx = { tenantID: 'tenant-1', storeID: 'store-1' };
-const base = '/v1/staff/tenants/tenant-1/stores/store-1';
 const signedIn: StaffAuthState = { kind: 'signed-in', subjectID: 'staff-1', mfa: true, stepUpFresh: true, expiresAt: '2026-10-27T00:00:00Z' };
 
 beforeEach(() => {
