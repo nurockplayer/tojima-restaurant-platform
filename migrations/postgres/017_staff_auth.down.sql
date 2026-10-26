@@ -1,0 +1,10 @@
+DROP TRIGGER staff_auth_events_truncate_guard ON staff_auth_events;
+DROP FUNCTION staff_auth_events_truncate_guard();
+DROP TRIGGER staff_auth_events_guard ON staff_auth_events;
+DROP FUNCTION staff_auth_events_guard();
+DROP TABLE staff_auth_events;
+DROP TABLE staff_memberships;
+DROP TABLE staff_logout_jti;
+DROP TABLE staff_auth_tx;
+DROP TABLE staff_sessions;
+DROP TABLE staff_subjects;
