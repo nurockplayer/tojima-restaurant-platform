@@ -1,0 +1,67 @@
+# ADR-0008 — Staff sign-in / スタッフ認証 / 員工登入
+
+Date: 2026-10-27 JST. Status: **Accepted by tojima-director** under the Owner's
+2026-10-26 JST delegation (D16/D17). Reviewed by oracle-ego in three rounds
+(2026-10-27 03:22, 03:30, 05:36 JST); every P1 is folded in below. Real-Keycloak
+acceptance (F) is a pilot go-live gate. Builds on
+[ADR-0003](0003-identity-ui-and-external-gates.md).
+
+## 要約（日本語）
+
+Keycloak 26.8.1 を自前運用し、パスワード・OTP・Passkey などの認証処理はすべて
+Keycloak に任せる（自作しない）。Go は BFF としてスタッフ session を
+PostgreSQL に保持し、各リクエストは Keycloak を呼ばずに Tojima DB で検証する
+（D17: IdP 障害時も既存 session は継続、新規ログインと step-up は停止）。
+店長・管理者・経理は password+OTP の strong 認証が必須。停止・復帰・撤権は
+Tojima DB に同期 commit する。
+
+## 摘要（繁體中文）
+
+自架 Keycloak 26.8.1，密碼、OTP、Passkey 等驗證全部交給 Keycloak（不自行開發）。
+Go 作為 BFF，員工 session 存於 PostgreSQL，每個請求只查 Tojima DB、不呼叫
+Keycloak（D17：IdP 故障時既有 session 照常，新登入與 step-up 失敗關閉）。
+店長、管理者、財務須 password+OTP 強認證。停權、復權、撤銷皆同步提交 Tojima DB。
+
+
+## Context
+- `internal/authz` already defines the seam: `Actor{SubjectID, MFA}`, `Authorizer`, `Memberships.Current(ctx, subject, tenant)` (must read current data every call), `PolicyAuthorizer`, roles STAFF_CASHIER / STORE_MANAGER / KITCHEN / TENANT_ADMIN / FINANCE_VIEWER. `internal/httpapi.IdentityResolver.Resolve(ctx, *http.Request) (authz.Actor, error)` is the port; production currently uses DenyIdentity/DenyMemberships.
+- Requirements (P-17/P-58, R01–R13): email+password, optional Passkey (Web; Flutter via system browser), invitation-only, fixed roles, MFA for manager/finance, single-use recovery codes, immediate revocation + current membership per request, 30-day absolute session, 300 s fixed step-up, safe email/factor change, 90-day security log, platform-only account disable/restore, no resurrection of old sessions/tokens after restore.
+- D17: during an IdP outage, established sessions keep working against Tojima PostgreSQL; new login and expired step-up fail closed; revocation is a synchronous Tojima DB commit.
+- Keycloak 26.x self-hosted is the preferred IdP (PoC 12/13). Never hand-roll password/Passkey/MFA.
+
+## Decision
+1. **Keycloak does all credential work** (password, Passkey/WebAuthn, OTP, recovery codes, brute-force lockout, email/factor change with re-authentication, required actions). Image pinned to an exact version + real digest in the compose file (`quay.io/keycloak/keycloak:26.8.1@sha256:<digest resolved in PR C>`); a placeholder is not a pin. Realm `tojima` is code (realm JSON import, secrets injected via env). One confidential client `tojima-staff`: standard flow only, PKCE S256, no implicit/direct grant, **offline_access disabled** (effective client scopes verified in acceptance); the token endpoint may still return an online refresh token, which Go discards and never persists or logs; back-channel logout URL set with "session required" on.
+2. **Strong authentication contract = one verified ACR.** Realm ACR-to-LoA map `{"basic":1,"strong":2}`. Browser flow uses Conditional-Level-of-Authentication: LoA 1 = password or Passkey; LoA 2 = password plus OTP (recovery codes as fallback), **LoA 2 max age = 0** (every LoA 2 request performs a fresh ceremony), and access denied when no second factor is configured. For the pilot, Passkey is a LoA 1 first factor only: a Passkey-only login never yields `acr=strong` (Keycloak's default browser flow skips conditional 2FA after Passkey, so the realm flow is explicit and imported, never the default). Acceptance F tests password-only, Passkey-only, password+OTP and missing-second-factor against real Keycloak. The BFF trusts only `acr == "strong"` on a transaction that requested it; `amr` is not parsed.
+3. **Go is a BFF and owns the staff session.** Login/step-up use one-time OIDC transactions stored in PostgreSQL (`staff_auth_tx`: SHA-256 of state, nonce, PKCE verifier, purpose `login|step_up`, bound session id + subject for step-up, allow-listed relative return path, expires in 10 min, single use) and bound to the browser by a `__Host-tojima_staff_tx` cookie holding a random per-transaction binding value whose SHA-256 is stored on the row and compared in constant time at callback; consumption is one atomic `UPDATE … SET used_at = now() WHERE … AND used_at IS NULL AND expires_at > now() RETURNING`. The ID token is verified for signature/alg, `iss`, `aud`, `exp` and `nonce` (equal to the stored nonce), and its `sid` is required and persisted as `idp_sid` before a session is issued (absent `sid` → login fails closed). Libraries `github.com/coreos/go-oidc/v3` + `golang.org/x/oauth2`. Every login sends `prompt=login` (shared devices: no silent SSO re-entry). Initial login always issues a fresh random 256-bit cookie `__Host-tojima_staff` (Secure, HttpOnly, SameSite=Lax, Path=/, no Domain) and revokes any session the browser presented before; DB stores only SHA-256. Return paths must be app-relative (`/…`, not `//…`, no scheme).
+4. **Per-request resolution never calls Keycloak** (D17). `IdentityResolver` requires: session row by cookie hash, `revoked_at IS NULL`, `now() < absolute_expires_at` (= login completion + 30 days, never extended), and the subject has no platform hold (`staff_subjects.hold_at IS NULL`). Memberships are read from `staff_memberships` on every authorization.
+5. **Two MFA notions.** `Actor.MFA` = the session was established with `acr=strong`. `Actor.StepUpFresh` = `0 ≤ now − last_strong_auth_at ≤ 300 s`, where `last_strong_auth_at` is set to the BFF's own completion time only after a verified `acr=strong` callback on that same session (login or step-up); passive SSO never sets it. A verified session-bound strong step-up atomically sets `strong_login = true` and `last_strong_auth_at`; `strong_login` then stays true for that session (so a basic login can be promoted), freshness still lapses after 300 s. Step-up binds to the current session and subject; a different `sub` in the callback is rejected (no silent account switch); step-up never extends the 30-day expiry. `PolicyAuthorizer` centrally requires `Actor.MFA` for STORE_MANAGER, TENANT_ADMIN and FINANCE_VIEWER regardless of caller flags (callers may add, never remove); Step-up is enforced centrally: `PolicyAuthorizer` requires `Actor.StepUpFresh` when `Request.RequiresStepUp || mandatoryStepUp[Request.Permission]`, so callers may add step-up but never drop it; the authoritative `mandatoryStepUp` list lives in `internal/authz` next to the permission constants (initially: membership grant/revoke and refund — later steps may add more). A2 (central MFA roles in `PolicyAuthorizer`) is a hard gate before the production `IdentityResolver` is wired.
+6. **Platform hold, revocation and restore are Tojima DB state.** `staffadmin hold <subject>` atomically sets `staff_subjects.hold_at` and revokes all the subject's sessions in one transaction; `restore` clears the hold but never un-revokes a session (fresh full login + current membership required). Hold and restore each increment `staff_subjects.auth_epoch`; login and step-up transactions record the epoch they started under (subject known only at callback for login, so the callback compares the tx `created_at` with `staff_subjects.epoch_changed_at`), and session creation rejects any transaction older than the latest epoch change in the same DB transaction. Membership revoke and session revoke are synchronous commits. Keycloak disable / back-channel logout are supplementary feeds into the same tables. Security notification goes to the account owner only; mail failure never undoes a hold.
+7. **Back-channel logout** (`POST /staff/auth/backchannel-logout`, exempt from the Origin rule; the signed token is the credential): validate signature/alg against JWKS, `iss`, `aud`, `iat`, `exp`, `jti` (unique in `staff_logout_jti`, kept 24 h), `events` contains the back-channel-logout event, no `nonce`; require `sid` or `sub`; `sid` → revoke sessions with that `idp_sid` (check `sub` consistency if both); `sub` only → revoke all of that subject's sessions.
+8. **Logout** = revoke the Go session and clear the cookie first (authoritative; works with Keycloak down), then best-effort Keycloak RP-initiated logout with `client_id` + `post_logout_redirect_uri` (Go stores no ID token, so Keycloak may show a confirmation page; abandoning it leaves only the IdP session, which `prompt=login` neutralises). Combined with `prompt=login` on every login, a shared device never re-enters silently.
+9. **CSRF.** One shared middleware on every cookie-authenticated unsafe staff route (including logout): exact match of `Origin` to the configured HTTPS public origin; missing or mismatched Origin → 403. No credentialed CORS. Guest APIs never read the staff cookie.
+10. **Credential changes.** Go does not rely on Keycloak credential changes producing back-channel logout. For the pilot, self-service credential/email changes in the Keycloak account console are disabled; credential reset, factor change and recovery go through a fail-closed operator flow: `staffadmin hold <subject>` (atomically holds, revokes all sessions and advances the auth epoch), then the Keycloak change, then `staffadmin restore <subject>` (advances the epoch again). Any OIDC transaction started before either epoch change is rejected, so neither an in-flight callback nor a login during the change window yields a session. Acceptance covers both races. Update-email verification and re-authentication for required actions are set explicitly in the realm. Self-service changes are re-enabled only after an authenticated Keycloak event → Go revocation path exists (post-pilot).
+11. **Provisioning for the pilot** is a CLI (`cmd/staffadmin grant|revoke|revoke-sessions|hold|restore|list`) by Keycloak subject; users are invited by Keycloak admin with required actions. No admin UI before the pilot.
+12. **Audit.** Login, logout, step-up, back-channel revoke, hold/restore, membership grant/revoke → append-only `staff_auth_events` (≥ 90 days; docs/ops/retention.md).
+
+## Schema (migration 017; 016 is the payment dispatch fence in PR #54)
+- `staff_subjects(subject_id text pk, created_at, hold_at timestamptz, hold_reason text, restored_at timestamptz, auth_epoch bigint not null default 0, epoch_changed_at timestamptz not null default now())`.
+- `staff_sessions(id uuid pk, token_sha256 bytea unique not null, subject_id text not null references staff_subjects, idp_sid text not null, strong_login bool not null, created_at, absolute_expires_at timestamptz not null, last_strong_auth_at timestamptz, revoked_at timestamptz, revoked_reason text)`; indexes (subject_id), (idp_sid).
+- `staff_auth_tx(state_sha256 bytea pk, binding_sha256 bytea not null, nonce text not null, pkce_verifier text, purpose text check in ('login','step_up'), session_id uuid null, subject_id text null, return_path text not null, created_at, expires_at, used_at)`.
+- `staff_logout_jti(jti text pk, seen_at timestamptz not null)`.
+- `staff_memberships(id uuid pk, subject_id text not null, tenant_id text not null, store_id text null, role text not null check in roles, granted_at, granted_by text not null, revoked_at)`; partial unique (subject_id, tenant_id, coalesce(store_id,''), role) where revoked_at is null; check store_id null only for TENANT_ADMIN.
+- `staff_auth_events(id bigserial pk, at timestamptz not null default now(), subject_id text, session_id uuid, kind text not null, detail jsonb not null default '{}')`.
+
+## Consequences
+- An IdP outage stops new logins and step-up only. Accepted per D17.
+- The documented immediate path for disable is `staffadmin hold` (Tojima DB); Keycloak disable alone is supplementary.
+- No offline tokens and no persisted refresh tokens; R13 (no resurrection after restore) rests on Go's independently revocable sessions plus the auth epoch.
+- Keycloak runs in the same Compose stack, with its own database in the same PostgreSQL instance (separate DB and role).
+
+## Delivery (PR series)
+A. migration 017 + `internal/staffauth/store` (sessions, memberships implementing `authz.Memberships`, events) + DB tests.
+A2. `internal/authz`: `Actor.StepUpFresh`, `Request.RequiresStepUp`, central MFA-role rule and permission-derived mandatory step-up + tests (refund / membership grant/revoke denied with stale auth even when the caller omits `RequiresStepUp`).
+B. `internal/staffauth` OIDC BFF handlers (tx, login, callback, step-up, logout, back-channel) + IdentityResolver, tested with an in-process fake OIDC issuer (httptest + JWKS signing).
+F. Real-Keycloak acceptance (password, OTP, Passkey, LoA 2 freshness, back-channel, hold/restore, offline tokens) — go-live gate, run in the heavy window.
+C. `cmd/server` wiring (config: issuer URL, client id/secret from env, public origin), mount staff routes only when configured; Keycloak service + realm JSON in compose; smoke covers login redirect.
+D. `cmd/staffadmin` CLI (grant, revoke, revoke-sessions, hold, restore, list).
+E. Web StaffApp: 401 → redirect to `/staff/auth/login?return=…`; step-up prompt on 403 `step_up_required`.
