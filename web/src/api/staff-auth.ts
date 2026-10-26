@@ -31,8 +31,10 @@ async function readStaffSession(fetchImpl: typeof fetch, signal: AbortSignal): P
   if (response.status === 404) return { kind: 'unsupported' };
   if (response.status === 401) return { kind: 'signed-out' };
   if (response.status < 200 || response.status >= 300) return { kind: 'unavailable' };
+  let text: string;
+  try { text = await response.text(); } catch { return { kind: 'unavailable' }; }
   let body: unknown;
-  try { body = await response.json(); } catch { return signal.aborted ? { kind: 'unavailable' } : { kind: 'unsupported' }; }
+  try { body = JSON.parse(text); } catch { return { kind: 'unsupported' }; }
   if (!isSessionBody(body)) return { kind: 'unsupported' };
   return {
     kind: 'signed-in', subjectID: body.subject_id, mfa: body.mfa,

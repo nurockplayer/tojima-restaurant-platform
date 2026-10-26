@@ -30,6 +30,12 @@ describe('staff cookie auth helpers', () => {
     await expect(probeStaffAuth(vi.fn().mockResolvedValue(jsonResponse({ error: 'unavailable' }, status)))).resolves.toEqual({ kind: 'unavailable' });
   });
 
+  it('returns unavailable when the session body fails mid-stream', async () => {
+    const body = new ReadableStream<Uint8Array>({ pull(controller) { controller.error(new TypeError('network')); } });
+    const response = new Response(body, { status: 200, headers: { 'content-type': 'application/json' } });
+    await expect(probeStaffAuth(vi.fn().mockResolvedValue(response))).resolves.toEqual({ kind: 'unavailable' });
+  });
+
   it('returns unavailable for network errors and bounded timeouts', async () => {
     expect(await probeStaffAuth(vi.fn().mockRejectedValue(new Error('offline')))).toEqual({ kind: 'unavailable' });
     vi.useFakeTimers();
@@ -39,7 +45,7 @@ describe('staff cookie auth helpers', () => {
     const stalledBody = {
       status: 200,
       headers: new Headers({ 'content-type': 'application/json' }),
-      json: () => new Promise<unknown>(() => undefined),
+      text: () => new Promise<string>(() => undefined),
     } as Response;
     const pendingBody = probeStaffAuth(() => Promise.resolve(stalledBody));
     await vi.advanceTimersByTimeAsync(5000);
