@@ -202,6 +202,55 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 	requireKind(t, ctx, pool, "login")
 }
 
+func TestStoreStatus(t *testing.T) {
+	ctx, _, store := staffAuthTestStore(t)
+	token, _, err := store.CreateSession(ctx, "status-subject", "status-idp", false, time.Now())
+	if err != nil || token == "" {
+		t.Fatalf("create status session: token present=%v err=%v", token != "", err)
+	}
+	if err = store.Grant(ctx, "status-subject", "tenant-a", "", authz.TenantAdmin, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Grant(ctx, "status-subject", "tenant-a", "store-a", authz.StoreManager, "operator"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Hold(ctx, "status-subject", "credential reset", "operator"); err != nil {
+		t.Fatal(err)
+	}
+	status, err := store.Status(ctx, "status-subject")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Exists || status.HoldAt == nil || status.HoldReason != "credential reset" || status.AuthEpoch != 1 || status.LiveSessions != 0 {
+		t.Fatalf("unexpected held status: %+v", status)
+	}
+	if len(status.Memberships) != 2 || status.Memberships[0] != (authz.Membership{TenantID: "tenant-a", Role: authz.TenantAdmin}) || status.Memberships[1] != (authz.Membership{TenantID: "tenant-a", StoreID: "store-a", Role: authz.StoreManager}) {
+		t.Fatalf("unexpected memberships: %+v", status.Memberships)
+	}
+	unknown, err := store.Status(ctx, "unknown-subject")
+	if err != nil || unknown.Exists || unknown.SubjectID != "unknown-subject" {
+		t.Fatalf("unknown status=%+v err=%v", unknown, err)
+	}
+}
+
+func TestStoreRevokeSubjectSessionsRecordsOperator(t *testing.T) {
+	ctx, pool, store := staffAuthTestStore(t)
+	if _, _, err := store.CreateSession(ctx, "revoke-actor-subject", "revoke-actor-idp", false, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	count, err := store.RevokeSubjectSessions(ctx, "revoke-actor-subject", "operator", "Jane Doe")
+	if err != nil || count != 1 {
+		t.Fatalf("revoke count=%d err=%v", count, err)
+	}
+	var actor string
+	if err = pool.QueryRow(ctx, "SELECT detail->>'actor' FROM staff_auth_events WHERE kind='session_revoked' AND subject_id=$1", "revoke-actor-subject").Scan(&actor); err != nil {
+		t.Fatal(err)
+	}
+	if actor != "Jane Doe" {
+		t.Fatalf("audit actor=%q, want %q", actor, "Jane Doe")
+	}
+}
+
 func TestStoreAuthTransactionsAndReturnPathConstraint(t *testing.T) {
 	ctx, pool, store := staffAuthTestStore(t)
 	state := sha256.Sum256([]byte("state value"))
