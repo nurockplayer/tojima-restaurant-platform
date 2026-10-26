@@ -190,7 +190,8 @@ def ensure_bank_account(stripe, acct_id):
 
 
 def report(stripe, tenant, acct_id):
-    query = urllib.parse.urlencode([("include", i) for i in INCLUDE])
+    # API v2 query arrays must be indexed: include[0]=…&include[1]=…
+    query = urllib.parse.urlencode([(f"include[{n}]", i) for n, i in enumerate(INCLUDE)])
     acct = stripe.call("GET", f"/v2/core/accounts/{acct_id}?{query}")
     caps = (((acct.get("configuration") or {}).get("merchant") or {}).get("capabilities") or {})
     card = (caps.get("card_payments") or {}).get("status")

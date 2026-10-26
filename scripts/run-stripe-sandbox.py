@@ -209,7 +209,8 @@ def verify_merchant_accounts(key, env):
         # Only the registered fixture IDs are accepted; metadata alone is editable.
         if account_id != DEFAULT_MERCHANT_ACCOUNTS[tenant]:
             raise ValueError(f"merchant {tenant} is not the approved Sandbox fixture account")
-        query = urllib.parse.urlencode([("include", "configuration.merchant"), ("include", "defaults"), ("include", "identity")])
+        # API v2 query arrays must be indexed: include[0]=…&include[1]=…
+        query = urllib.parse.urlencode([(f"include[{n}]", v) for n, v in enumerate(("configuration.merchant", "defaults", "identity"))])
         request = urllib.request.Request(
             f"https://api.stripe.com/v2/core/accounts/{account_id}?{query}")
         request.add_header("Authorization", "Basic " + base64.b64encode((key + ":").encode()).decode())

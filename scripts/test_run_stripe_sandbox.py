@@ -193,6 +193,8 @@ class EnvironmentTests(unittest.TestCase):
             return base
         def respond(**changes):
             def handler(request, timeout=15):
+                self.assertIn("?include%5B0%5D=configuration.merchant&include%5B1%5D=defaults"
+                              "&include%5B2%5D=identity", request.full_url)
                 tenant = next(t for t in "ABC" if ids[t] in request.full_url)
                 return io.BytesIO(json.dumps(doc(tenant, **changes)).encode())
             return handler
@@ -230,6 +232,17 @@ class EnvironmentTests(unittest.TestCase):
                         merchants.Stripe(secret).call("GET", "/v1/x")
                     self.assertNotIn(secret, str(raised.exception))
                     self.assertNotIn("SSSS", str(raised.exception))
+
+    def test_merchant_report_uses_indexed_include(self):
+        seen = []
+        class Fake:
+            def call(self, method, path, body=None):
+                seen.append(path)
+                return {}
+        with redirect_stdout(io.StringIO()):
+            merchants.report(Fake(), "A", "acct_synthetic")
+        self.assertIn("?include%5B0%5D=configuration.merchant&include%5B1%5D=requirements"
+                      "&include%5B2%5D=identity&include%5B3%5D=defaults", seen[0])
 
     def test_duplicate_fixture_metadata_is_refused(self):
         page = {"data": [{"id": "acct_1", "metadata": {"tojima_test_fixture": "synthetic_merchant_a_api"}},
