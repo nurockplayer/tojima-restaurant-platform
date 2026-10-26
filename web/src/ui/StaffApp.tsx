@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ApiError, amountJPY, newOperationKey } from '../api/client';
-import { operationsClient } from '../api/operations';
+import { operationsClient, setCookieSessionUnauthorizedHandler } from '../api/operations';
 import type { AdjustmentPreview, AdjustmentRequest, Capabilities, CashPreview, CashSettings, OpenedSession, Receipt, SessionOperations, StaffContext, StaffOrder, StaffTable } from '../api/operations';
+import { probeStaffAuth, staffLoginURL, staffStepUpURL, submitStaffLogout } from '../api/staff-auth';
+import type { StaffAuthState } from '../api/staff-auth';
 import { checkoutClient } from '../api/checkout';
 import type { CheckoutState, CheckoutStatus } from '../api/checkout';
 import { createReplayOperation } from './cart-state';
@@ -19,7 +21,7 @@ const KDS_POLL_TIMEOUT_MS = 10000;
 
 const copy = {
   ja: {
-    brand: '東島', subtitle: 'STAFF OPERATIONS', tenant: '企業ID', store: '店舗ID', token: 'スタッフアクセストークン', connect: '接続', disconnect: '切断',
+    brand: '東島', subtitle: 'STAFF OPERATIONS', tenant: '企業ID', store: '店舗ID', token: 'スタッフアクセストークン', connect: '接続', disconnect: '切断', login: 'ログイン', logout: 'ログアウト', loginIntro: '店舗アカウントでログインしてください。', stepUpNotice: 'この操作には再認証が必要です。', stepUp: '再認証',
     tables: 'テーブル', kds: '厨房看板', refresh: '最新状態に更新', loading: '確認中…', noAccess: 'この店舗で利用できる操作がありません。',
     idle: '空席', open: '利用中', closed: '終了', openTable: '開卓', enter: '詳細', unpaid: '未収現金', count: '注文',
     noTables: 'テーブルがありません。', detail: 'テーブル詳細', back: '一覧に戻る', orders: '注文', receipts: '現金領収', noOrders: '注文はありません。',
@@ -38,11 +40,11 @@ const copy = {
     kdsStale: '厨房看板の接続が切れています。表示が最新ではない可能性があります。自動で再接続しています。', kdsLastSync: '最終同期',
     stateCreatePending: '注文を確認しています', stateCreating: 'お支払い画面を準備しています', stateOpen: 'お支払い手続きができます', stateProcessing: 'お支払いを確認しています', stateUnknown: 'お支払い状況を確認しています', statePaid: 'お支払い済み', stateExpired: 'お支払い期限が切れました', stateFailed: 'お支払いを完了できませんでした', stateReview: 'お支払い状況を店舗で確認しています',
     retry: '同じ操作を確認して再試行', network: '処理結果を確認できません。再試行は同じ操作を照合します。', stale: '最新情報を読み直しました。内容を確認してから操作してください。',
-    error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。',
+    error: '処理できませんでした。入力内容と権限を確認してください。', accessError: 'スタッフ権限を確認できません。企業・店舗IDとアクセストークンを確認してください。', authUnavailable: 'ログイン状態を確認できません。しばらくしてから再試行してください。', retryAuth: '再試行',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: 'キャンセル', session: '卓セッション', updated: '同期済み', demoCash: '現金（デモ・テスト専用）', demoCashTitle: '現金精算（デモ・テスト専用）', demoReceipt: 'テスト用領収書 · 実際の入金ではありません', demoClose: 'デモ環境のテーブルを閉じる',
   },
   zh: {
-    brand: '東島', subtitle: '店員作業台', tenant: '企業 ID', store: '分店 ID', token: '店員存取權杖', connect: '連線', disconnect: '登出',
+    brand: '東島', subtitle: '店員作業台', tenant: '企業 ID', store: '分店 ID', token: '店員存取權杖', connect: '連線', disconnect: '登出', login: '登入', logout: '登出', loginIntro: '請使用店舗帳號登入。', stepUpNotice: '此操作需要重新驗證。', stepUp: '重新驗證',
     tables: '桌次', kds: '廚房看板', refresh: '更新最新狀態', loading: '確認中…', noAccess: '此分店目前沒有可用的操作權限。',
     idle: '空桌', open: '用餐中', closed: '已結束', openTable: '開桌', enter: '查看', unpaid: '待收現金', count: '筆訂單',
     noTables: '目前沒有桌次。', detail: '桌次內容', back: '返回桌次', orders: '訂單', receipts: '現金收據', noOrders: '目前沒有訂單。',
@@ -61,7 +63,7 @@ const copy = {
     kdsStale: '廚房看板連線中斷，畫面可能不是最新狀態，系統正在自動重新連線。', kdsLastSync: '最後同步',
     stateCreatePending: '正在確認訂單', stateCreating: '正在準備付款畫面', stateOpen: '可以繼續付款', stateProcessing: '正在確認付款', stateUnknown: '正在確認付款狀態', statePaid: '已付款', stateExpired: '付款期限已過', stateFailed: '付款未完成', stateReview: '門店正在確認付款狀態',
     retry: '以相同操作確認並重試', network: '目前無法確認操作結果。重試會比對同一筆操作。', stale: '已更新最新狀態，請確認內容後再操作。',
-    error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。',
+    error: '無法完成操作，請確認資料與權限。', accessError: '無法確認店員權限，請檢查企業／分店 ID 與存取權杖。', authUnavailable: '無法確認登入狀態，請稍後再試。', retryAuth: '重試',
     ja: '日本語', zh: '繁體中文', mode: '現金方式', closeDialog: '取消', session: '桌次工作階段', updated: '已同步', demoCash: '現金（展示測試專用）', demoCashTitle: '現金結帳（展示測試專用）', demoReceipt: '測試收據 · 非實際收款', demoClose: '關閉展示測試桌次',
   },
 } as const;
@@ -69,7 +71,10 @@ const copy = {
 interface PendingWrite { key: string; epoch: number; run: () => Promise<unknown>; success: (value: unknown) => Promise<void> | void; conflict: () => Promise<void>; unavailableCopy?: () => string }
 interface ActiveStaffContext { epoch: number; context: StaffContext; bearer: string; ready: boolean }
 
-export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfaceProps) {
+export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { kind: 'unsupported' } }: DemoSurfaceProps) {
+  const [authState, setAuthState] = useState<StaffAuthState>(staffAuth);
+  const cookieMode = !demo && authState.kind !== 'unsupported';
+  const [authPrompt, setAuthPrompt] = useState<'login' | 'step-up' | null>(null);
   const [locale, setLocale] = useState<Locale>('ja');
   const t = copy[locale];
   const [context, setContext] = useState<StaffContext>({ tenantID: '', storeID: '' });
@@ -159,6 +164,44 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const clearPaymentView = () => {
     paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
   };
+  const clearLocalSession = useCallback((preserveContext: boolean) => {
+    epoch.current += 1;
+    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
+    active.current = null;
+    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1; reviewRequest.current += 1;
+    if (!preserveContext) sessionStorage.removeItem(CONTEXT_KEY);
+    sessionStorage.removeItem(TOKEN_KEY);
+    openerRef.current = null; kdsPoll.current = null;
+    adjustPreviewRequest.current++; setAdjustPreviewBusy(false);
+    setConnected(false); setCapabilities(null); setToken('');
+    if (!preserveContext) setContext({ tenantID: '', storeID: '' });
+    setTables([]); setKdsOrders([]); setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError('');
+    setApproveOrder(null); setApproveReason(''); setVoidOrder(null); setVoidReason(''); setAdjustOrder(null); setStopOrder(null); setStopMode(null); setStopRequestID('');
+    setAdjustReason(''); setCancelQty([]); setAdjustPreview(null); setCashHandback(false); setDeliveryConfirmed(false); setKdsStale(false); setKdsSyncedAt(null);
+    setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice('');
+    setLoading(false); setBusy(false); pendingWrite.current = null; writeInitiated.current = false; setUncertain(false); setAuthPrompt(null);
+  }, []);
+  const expireCookieSession = useCallback(() => {
+    clearLocalSession(true);
+    setAuthState({ kind: 'signed-out' });
+    setAuthPrompt('login');
+  }, [clearLocalSession]);
+  const refreshAuthPrompt = useCallback(async () => {
+    const next = await probeStaffAuth();
+    setAuthState(next);
+    if (next.kind === 'signed-out') expireCookieSession();
+    else if (next.kind === 'signed-in' && !next.stepUpFresh) setAuthPrompt('step-up');
+    else setAuthPrompt(null);
+  }, [expireCookieSession]);
+  const retryAuthProbe = useCallback(async () => {
+    setLoading(true);
+    try { await refreshAuthPrompt(); }
+    finally { setLoading(false); }
+  }, [refreshAuthPrompt]);
+  useEffect(() => {
+    if (!cookieMode) return;
+    return setCookieSessionUnauthorizedHandler(expireCookieSession);
+  }, [cookieMode, expireCookieSession]);
   useEffect(() => { clearPaymentView(); }, [connected, selectedTableID, table?.session_id]);
 
   const loadTables = useCallback(async (ctx: StaffContext, bearer: string) => {
@@ -271,13 +314,14 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   }, [capabilities?.can_cash, capabilities?.can_serve, context, currentEpoch, isCurrent, t.paymentError, table, token]);
 
   const connect = useCallback(async (ctx: StaffContext, bearer: string) => {
-    if (!ctx.tenantID.trim() || !ctx.storeID.trim() || !bearer.trim()) return;
+    if (!ctx.tenantID.trim() || !ctx.storeID.trim() || (!cookieMode && !bearer.trim())) return;
     const cleanContext = { tenantID: ctx.tenantID.trim(), storeID: ctx.storeID.trim() };
     const cleanBearer = bearer.trim();
     const requestEpoch = ++epoch.current;
     active.current = { epoch: requestEpoch, context: cleanContext, bearer: cleanBearer, ready: false };
     sessionStorage.setItem(CONTEXT_KEY, JSON.stringify(cleanContext));
-    sessionStorage.setItem(TOKEN_KEY, cleanBearer);
+    if (cookieMode) sessionStorage.removeItem(TOKEN_KEY);
+    else sessionStorage.setItem(TOKEN_KEY, cleanBearer);
     setContext(cleanContext);
     setToken(cleanBearer);
     setStopOrder(null); setStopMode(null); setStopRequestID(''); setAdjustReason(''); setDeliveryConfirmed(false); setCashHandback(false); setDialog(null);
@@ -301,21 +345,29 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
       if (results.some((result) => result.status === 'rejected')) setError(t.error);
       if (current.can_kitchen && (initialView === 'kds' || (!current.can_serve && !current.can_cash && !current.can_manage))) setView('kds');
     } catch (cause) {
-      if (active.current?.epoch === requestEpoch) { active.current = null; setConnected(false); setCapabilities(null); sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY); setError(cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? t.accessError : explain(cause, locale)); }
+      if (active.current?.epoch === requestEpoch) {
+        active.current = null; setConnected(false); setCapabilities(null);
+        if (!cookieMode) { sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY); }
+        setError(cause instanceof ApiError && (cause.status === 401 || cause.status === 403) ? t.accessError : explain(cause, locale));
+        if (cookieMode && cause instanceof ApiError && (cause.status === 401 || cause.status === 403)) void refreshAuthPrompt();
+      }
     } finally { if (epoch.current === requestEpoch) setLoading(false); }
-  }, [guardedKds, initialView, isCurrent, loadSettings, loadTables, locale, t.accessError, t.error]);
+  }, [cookieMode, guardedKds, initialView, isCurrent, loadSettings, loadTables, locale, refreshAuthPrompt, t.accessError, t.error]);
 
   useEffect(() => {
     if (restored.current) return;
-    restored.current = true;
     const storedContext = sessionStorage.getItem(CONTEXT_KEY);
-    const storedToken = sessionStorage.getItem(TOKEN_KEY);
-    if (!storedContext || !storedToken) return;
+    const storedToken = cookieMode ? null : sessionStorage.getItem(TOKEN_KEY);
+    if (cookieMode) sessionStorage.removeItem(TOKEN_KEY);
+    if (cookieMode && authState.kind !== 'signed-in') return;
+    restored.current = true;
+    if (!cookieMode && !storedToken) return;
+    if (!storedContext) return;
     try {
       const saved = JSON.parse(storedContext) as StaffContext;
-      if (saved.tenantID && saved.storeID) void connect(saved, storedToken);
+      if (saved.tenantID && saved.storeID) void connect(saved, cookieMode ? '' : storedToken!);
     } catch { sessionStorage.removeItem(CONTEXT_KEY); }
-  }, [connect]);
+  }, [authState.kind, connect, cookieMode]);
 
   const refreshDashboard = useCallback(async () => {
     const requestEpoch = currentEpoch(context, token);
@@ -390,9 +442,10 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
         setUncertain(true); setError(operation.unavailableCopy?.() ?? t.network);
       } else {
         pendingWrite.current = null; setUncertain(false); setError(explain(cause, locale));
+        if (cookieMode && cause instanceof ApiError && (cause.status === 401 || cause.status === 403)) void refreshAuthPrompt();
       }
     } finally { writeInitiated.current = false; if (epoch.current === requestEpoch) setBusy(false); }
-  }, [locale, t.companyHoldActive, t.network, t.reviewNotReady, t.reviewStale, t.stale, t.voidIneligible]);
+  }, [cookieMode, locale, refreshAuthPrompt, t.companyHoldActive, t.network, t.reviewNotReady, t.reviewStale, t.stale, t.voidIneligible]);
 
   const startWrite = <P, R>(payload: P, execute: (payload: P, key: string) => Promise<R>, success: (result: R) => Promise<void> | void, conflict: () => Promise<void>, key = newOperationKey(), unavailableCopy?: () => string) => {
     if (busy || uncertain || writeInitiated.current) return;
@@ -579,15 +632,9 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   };
 
   const disconnect = () => {
-    epoch.current += 1;
-    paymentRequest.current++; setOrderPayment(null); setPaymentBusyOrderID(''); setPaymentError(''); setPaymentErrorOrderID('');
-    active.current = null;
-    tableRequest.current += 1; kdsRequest.current += 1; settingsRequest.current += 1; detailRequest.current += 1; reviewRequest.current += 1;
-    sessionStorage.removeItem(CONTEXT_KEY); sessionStorage.removeItem(TOKEN_KEY);
-    openerRef.current = null; kdsPoll.current = null;
-    adjustPreviewRequest.current++; setAdjustPreviewBusy(false);
-    setConnected(false); setCapabilities(null); setToken(''); setContext({ tenantID: '', storeID: '' }); setTables([]); setKdsOrders([]); setReviewOrders([]); setReviewLoaded(false); setReviewLoading(false); setReviewStale(false); setReviewError(''); setApproveOrder(null); setApproveReason(''); setAdjustOrder(null); setStopOrder(null); setStopMode(null); setStopRequestID(''); setAdjustReason(''); setCancelQty([]); setAdjustPreview(null); setCashHandback(false); setDeliveryConfirmed(false); setKdsStale(false); setKdsSyncedAt(null); setDetail(null); setSelectedTableID(''); setSettings(null); setCashPreview(null); setReceipt(null); setDialog(null); setError(''); setNotice(''); setLoading(false); setBusy(false); pendingWrite.current = null; writeInitiated.current = false; setUncertain(false);
+    clearLocalSession(false);
   };
+  const logout = () => { disconnect(); submitStaffLogout(); };
 
   const canReadReviews = !!capabilities && (capabilities.can_cash || capabilities.can_serve || capabilities.can_manage || capabilities.can_kitchen || capabilities.can_approve_fulfillment === true);
   const noOperations = !!capabilities && !hasTables && !capabilities.can_kitchen && !canReadReviews;
@@ -595,21 +642,32 @@ export function StaffApp({ demo = false, initialView = 'tables' }: DemoSurfacePr
   const blockers = detail?.close_blockers ?? [];
 
   if (!connected) return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
-    <form className="entry-card staff-entry" onSubmit={(event) => { event.preventDefault(); void connect(context, token); }}>
+    {cookieMode && authState.kind === 'unavailable' ? <section className="entry-card staff-entry">
       <div className="eyebrow">{t.subtitle}</div><h1>{t.connect}</h1>
-      <p>{locale === 'ja' ? '既存のスタッフ認証トークンで店舗に接続します。' : '使用既有店員權杖連線至分店。'}</p>
+      <p className="error" role="alert">{t.authUnavailable}</p>
+      <button className="button primary wide" type="button" disabled={loading} onClick={() => void retryAuthProbe()}>{loading ? t.loading : t.retryAuth}</button>
+    </section> : cookieMode && authState.kind === 'signed-out' ? <section className="entry-card staff-entry">
+      <div className="eyebrow">{t.subtitle}</div><h1>{t.login}</h1><p>{t.loginIntro}</p>
+      <a className="button primary wide" href={staffLoginURL(window.location.pathname + window.location.search)}>{t.login}</a>
+      {error && <p className="error" role="alert">{error}</p>}
+    </section> : <form className="entry-card staff-entry" onSubmit={(event) => { event.preventDefault(); void connect(context, cookieMode ? '' : token); }}>
+      <div className="eyebrow">{t.subtitle}</div><h1>{t.connect}</h1>
+      <p>{cookieMode ? t.loginIntro : locale === 'ja' ? '既存のスタッフ認証トークンで店舗に接続します。' : '使用既有店員權杖連線至分店。'}</p>
+      {cookieMode && authPrompt === 'step-up' && <p className="notice" role="status">{t.stepUpNotice} <a className="button quiet small" href={staffStepUpURL(window.location.pathname + window.location.search)}>{t.stepUp}</a></p>}
       <label className="field">{t.tenant}<input autoComplete="organization" value={context.tenantID} onChange={(event) => setContext((current) => ({ ...current, tenantID: event.target.value }))} required /></label>
       <label className="field">{t.store}<input autoComplete="off" value={context.storeID} onChange={(event) => setContext((current) => ({ ...current, storeID: event.target.value }))} required /></label>
-      <label className="field">{t.token}<input type="password" autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} required /></label>
+      {!cookieMode && <label className="field">{t.token}<input type="password" autoComplete="current-password" value={token} onChange={(event) => setToken(event.target.value)} required /></label>}
       <button className="button primary wide" disabled={loading}>{loading ? t.loading : t.connect}</button>
       {error && <p className="error" role="alert">{error}</p>}
-    </form>
+    </form>}
   </StaffShell>;
 
   const stopCashHandbackRequired = stopNeedsCashHandback(stopOrder, stopRequestID);
   return <StaffShell demo={demo} locale={locale} setLocale={setLocale} t={t}>
     <div className="workspace staff-workspace">
-      <header className="welcome"><div><div className="eyebrow">{t.subtitle}</div><h1>{context.storeID}</h1><p>{context.tenantID}</p></div><button className="text-button" onClick={disconnect}>{t.disconnect}</button></header>
+      <header className="welcome"><div><div className="eyebrow">{t.subtitle}</div><h1>{context.storeID}</h1><p>{context.tenantID}</p></div><button className="text-button" onClick={cookieMode ? logout : disconnect}>{cookieMode ? t.logout : t.disconnect}</button></header>
+      {cookieMode && authPrompt === 'step-up' && <p className="notice" role="status">{t.stepUpNotice} <a className="button quiet small" href={staffStepUpURL(window.location.pathname + window.location.search)}>{t.stepUp}</a></p>}
+      {cookieMode && authPrompt === 'login' && <p className="notice" role="status">{t.loginIntro} <a className="button primary small" href={staffLoginURL(window.location.pathname + window.location.search)}>{t.login}</a></p>}
       {noOperations ? <p className="notice">{t.noAccess}</p> : <>
         <nav className="tabs staff-tabs" aria-label={locale === 'ja' ? 'スタッフ操作' : '店員操作'}>
           {hasTables && <button className={view === 'tables' ? 'tab active' : 'tab'} disabled={busy || uncertain} onClick={() => { clearPaymentView(); setView('tables'); setSelectedTableID(''); setDetail(null); }}>{t.tables}</button>}

@@ -1,10 +1,12 @@
 import styles from './DemoBanner.module.css';
+import type { StaffAuthState } from '../api/staff-auth';
 
 export const demoStoreName = '博多餃子酒場 シロナガスクジラ';
 
 export interface DemoSurfaceProps {
   demo?: boolean;
   initialView?: 'tables' | 'kds';
+  staffAuth?: StaffAuthState;
 }
 
 export function DemoBanner({ demo = false, locale }: { demo?: boolean; locale: 'ja' | 'zh' }) {

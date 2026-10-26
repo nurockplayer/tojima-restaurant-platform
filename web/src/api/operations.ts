@@ -1,4 +1,4 @@
-import { bearerHeaders, request as httpRequest } from '../shared/http';
+import { ApiError, bearerHeaders, request as httpRequest } from '../shared/http';
 
 export interface StaffContext { tenantID: string; storeID: string }
 export interface Capabilities { can_cash: boolean; can_serve: boolean; can_kitchen: boolean; can_manage: boolean; can_approve_fulfillment?: boolean }
@@ -31,8 +31,26 @@ export interface OpenedSession { session: { id: string; status: string; mode: st
 export interface GuestOrderStatus { id: string; display_state: string; payment_status: StaffOrder['payment_status']; fulfillment_status: StaffOrder['fulfillment_status']; requires_staff_acceptance: boolean; staff_accepted: boolean; total_gross_jpy: string; effective_total_gross_jpy: string; effective_lines: Array<{ product_name: string; quantity: number; line_total_jpy: string; option_names: string[] }>; adjusted: boolean; refunds: Array<{ status: string; amount_jpy: string; method: 'CASH' | 'STRIPE' }>; refunded_total_jpy: string; cash_mode?: 'PREPAID' | 'PAY_LATER' }
 export interface GuestOperations { orders: GuestOrderStatus[]; cash_enabled: boolean }
 
+let cookieSessionUnauthorized: (() => void) | undefined;
+
+export function setCookieSessionUnauthorizedHandler(handler: (() => void) | undefined): () => void {
+  cookieSessionUnauthorized = handler;
+  return () => {
+    if (cookieSessionUnauthorized === handler) cookieSessionUnauthorized = undefined;
+  };
+}
+
+export function notifyCookieSessionUnauthorized(): void {
+  cookieSessionUnauthorized?.();
+}
+
 async function request<T>(path: string, token: string, init: RequestInit = {}): Promise<T> {
-  return httpRequest<T>(path, { ...init, headers: { ...bearerHeaders(token), ...init.headers } });
+  try {
+    return await httpRequest<T>(path, { ...init, ...(token ? {} : { credentials: 'same-origin' as const }), headers: { ...bearerHeaders(token), ...init.headers } });
+  } catch (cause) {
+    if (!token && cause instanceof ApiError && cause.status === 401) notifyCookieSessionUnauthorized();
+    throw cause;
+  }
 }
 
 const json = (body: unknown, key?: string): RequestInit => ({

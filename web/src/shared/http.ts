@@ -17,7 +17,8 @@ export class ApiError extends Error {
 export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`${apiBase()}${path}`, {
+    const url = init.credentials === 'same-origin' ? path : `${apiBase()}${path}`;
+    response = await fetch(url, {
       ...init,
       headers: { accept: 'application/json', ...init.headers },
     });
@@ -32,7 +33,7 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
 
 export function bearerHeaders(token: string, key?: string): HeadersInit {
   return {
-    authorization: `Bearer ${token}`,
+    ...(token ? { authorization: `Bearer ${token}` } : {}),
     ...(key ? { 'Idempotency-Key': key } : {}),
   };
 }
