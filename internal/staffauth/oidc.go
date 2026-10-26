@@ -271,16 +271,27 @@ func (h *Handler) callback(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
-	http.SetCookie(w, authCookie(SessionCookie, "", -1, time.Time{}))
+	logoutFailed := func() {
+		http.SetCookie(w, authCookie(TxCookie, "", -1, time.Time{}))
+		authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout_failed"})
+	}
 	if s, err := h.cookieSession(r.Context(), r); err == nil {
 		if err = h.store.RevokeSession(r.Context(), s.ID, "logout"); err != nil && !errors.Is(err, ErrNoSession) {
-			authFail(w, r)
+			logoutFailed()
 			return
 		}
 	} else if !errors.Is(err, ErrNoSession) {
-		authFail(w, r)
+		logoutFailed()
 		return
 	}
+	if txCookie, err := r.Cookie(TxCookie); err == nil {
+		if err = h.store.CancelAuthTx(r.Context(), sha256.Sum256([]byte(txCookie.Value))); err != nil {
+			logoutFailed()
+			return
+		}
+	}
+	http.SetCookie(w, authCookie(SessionCookie, "", -1, time.Time{}))
+	http.SetCookie(w, authCookie(TxCookie, "", -1, time.Time{}))
 	target := DefaultReturn
 	if h.endSessionURL != "" {
 		u, err := url.Parse(h.endSessionURL)

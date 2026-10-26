@@ -532,6 +532,9 @@ func TestOIDCLogout(t *testing.T) {
 	if c := staffResponseCookie(t, w, SessionCookie); c.MaxAge != -1 || c.Value != "" {
 		t.Fatal("logout cookie not cleared")
 	}
+	if c := staffResponseCookie(t, w, TxCookie); c.MaxAge != -1 || c.Value != "" {
+		t.Fatal("logout transaction cookie not cleared")
+	}
 	u, err := url.Parse(w.Header().Get("Location"))
 	if err != nil || u.Scheme+"://"+u.Host+u.Path != x.issuer.server.URL+"/end-session" || u.Query().Get("client_id") != "staff-client" || u.Query().Get("post_logout_redirect_uri") != testOrigin+DefaultReturn {
 		t.Fatal("wrong IdP logout redirect")
@@ -542,6 +545,62 @@ func TestOIDCLogout(t *testing.T) {
 	x.h.endSessionURL = ""
 	if w = x.request(t, "POST", "/staff/auth/logout", "", testOrigin); w.Code != 303 || w.Header().Get("Location") != DefaultReturn {
 		t.Fatal("local logout failed")
+	}
+}
+
+func TestOIDCLogoutDatabaseFailurePreservesCookies(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	cookie := x.login(t)
+	x.pool.Close()
+	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, cookie)
+	if w.Code != http.StatusServiceUnavailable || strings.TrimSpace(w.Body.String()) != `{"error":"logout_failed"}` {
+		t.Fatalf("logout DB failure response status=%d body=%q", w.Code, w.Body.String())
+	}
+	if c := staffResponseCookie(t, w, TxCookie); c.MaxAge != -1 || c.Value != "" {
+		t.Fatal("logout DB failure did not clear the transaction cookie")
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == SessionCookie {
+			t.Fatalf("logout DB failure cleared the session cookie: %+v", c)
+		}
+	}
+}
+
+func TestOIDCLogoutCancellationFailureClearsOnlyTransactionCookie(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
+	x.pool.Close()
+	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	if w.Code != http.StatusServiceUnavailable || strings.TrimSpace(w.Body.String()) != `{"error":"logout_failed"}` {
+		t.Fatalf("cancel DB failure response status=%d body=%q", w.Code, w.Body.String())
+	}
+	if c := staffResponseCookie(t, w, TxCookie); c.MaxAge != -1 || c.Value != "" {
+		t.Fatal("cancel DB failure did not clear the transaction cookie")
+	}
+	for _, c := range w.Result().Cookies() {
+		if c.Name == SessionCookie {
+			t.Fatalf("cancel DB failure set a session cookie: %+v", c)
+		}
+	}
+}
+
+func TestOIDCLogoutCancelsPendingBrowserLogin(t *testing.T) {
+	x := newStaffOIDCTest(t)
+	flow := x.begin(t, "/staff/auth/login", DefaultReturn, nil)
+	w := x.request(t, "POST", "/staff/auth/logout", "", testOrigin, flow.binding)
+	if w.Code != http.StatusSeeOther || w.Header().Get("Location") != DefaultReturn {
+		t.Fatalf("logout status=%d location=%q", w.Code, w.Header().Get("Location"))
+	}
+	if c := staffResponseCookie(t, w, TxCookie); c.MaxAge != -1 || c.Value != "" {
+		t.Fatal("logout transaction cookie not cleared")
+	}
+	if c := staffResponseCookie(t, w, SessionCookie); c.MaxAge != -1 || c.Value != "" {
+		t.Fatal("logout session cookie not cleared")
+	}
+	assertStaffRejected(t, x.callback(t, flow, flow.binding))
+	var count int
+	if err := x.pool.QueryRow(x.ctx, "SELECT count(*) FROM staff_sessions").Scan(&count); err != nil || count != 0 {
+		t.Fatalf("cancelled login created sessions: count=%d err=%v", count, err)
 	}
 }
 

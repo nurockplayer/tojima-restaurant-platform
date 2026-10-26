@@ -148,6 +148,11 @@ func (s *Store) ConsumeAuthTx(ctx context.Context, stateHash, bindingHash [32]by
 	return out, nil
 }
 
+func (s *Store) CancelAuthTx(ctx context.Context, bindingHash [32]byte) error {
+	_, err := s.db.Exec(ctx, `UPDATE staff_auth_tx SET used_at=now() WHERE binding_sha256=$1 AND used_at IS NULL`, bindingHash[:])
+	return err
+}
+
 func (s *Store) CreateSession(ctx context.Context, subjectID, idpSID string, strong bool, authStartedAt time.Time) (string, Session, error) {
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
