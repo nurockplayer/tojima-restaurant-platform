@@ -1,5 +1,25 @@
 # DS-2 device checklist / DS-2 実機チェック / DS-2 實機檢查
 
+## Run this on a phone / スマートフォンでの実施 / 使用手機執行
+
+Open the demo URL on the phone: <https://tojima-mobile-order-demo.pages.dev>. Enter the demo passcode provided privately by the Owner; do not record the passcode. Use the current demo build and note any restart/reset before testing.
+
+- **iPhone:** Open Settings → Accessibility → VoiceOver and turn it on. Turn it off from the same screen, ask Siri to “Turn off VoiceOver,” or use the Accessibility Shortcut if configured.
+- **Android:** Open Settings → Accessibility → TalkBack and turn it on. Turn it off from the same screen or use the configured accessibility shortcut (often holding both volume keys). Shortcut behavior varies by device.
+- Record screenshots or a screen recording for each finding, plus device model, OS version, browser version, and date/time with zone (for example, `2026-10-26 14:30 JST`). Avoid capturing passcodes, personal data or unrelated notifications. Add the evidence location and result under Notes / evidence below.
+
+スマートフォンで demo URL（<https://tojima-mobile-order-demo.pages.dev>）を開き、Owner から個別に受け取った passcode を入力する。passcode は記録しない。現在の demo build を使い、テスト前に再起動／リセットがあれば記録する。
+
+- **iPhone:** 設定 → アクセシビリティ → VoiceOver で有効にする。終了時は同じ画面、Siri の「VoiceOverをオフ」、または設定済みショートカットを使う。
+- **Android:** 設定 → ユーザー補助 → TalkBack で有効にする。終了時は同じ画面または設定済みショートカット（多くの機種は音量キー両方の長押し）を使う。ショートカットは機種により異なる。
+- 各結果のスクリーンショットまたは画面収録に加えて、端末名、OS／browser バージョン、zone付き日時（例：`2026-10-26 14:30 JST`）を記録する。passcode、個人情報、無関係な通知は撮影しない。証跡の保存先と結果を下の Notes / evidence に記入する。
+
+請在手機開啟 demo URL（<https://tojima-mobile-order-demo.pages.dev>），輸入 Owner 私下提供的 passcode；不要記錄 passcode。使用目前 demo build，並註明測試前是否重新啟動／重置。
+
+- **iPhone：**前往「設定」→「輔助使用」→「VoiceOver」並開啟。完成後可從同一畫面關閉、請 Siri 關閉 VoiceOver，或使用已設定的輔助使用快速鍵。
+- **Android：**前往「設定」→「無障礙」→「TalkBack」並開啟。完成後從同一畫面關閉，或使用已設定的快速鍵（許多裝置可同時長按兩個音量鍵）；各機型方式可能不同。
+- 每項結果記錄螢幕截圖或錄影，以及裝置型號、OS／browser 版本和含時區日期時間（例如 `2026-10-26 14:30 JST`）。避免錄入 passcode、個人資料或無關通知，並在下方 Notes / evidence 填寫證據位置與結果。
+
 This checklist implements P-89 §5.7 for P-84 7g physical-device acceptance. It is **not a DS-2 merge gate**. Completing it is required before a remote demo or pilot store. DS-2 does not mark P-84 7f or 7g PASS; record findings against the existing human acceptance gate.
 
 ## iPhone Safari
