@@ -13,6 +13,7 @@ the approved Sandbox platform account.
 
 Output: account IDs (not secrets) as TOJIMA_STRIPE_TEST_ACCOUNT_{A,B,C} lines,
 plus each account's card_payments status and remaining requirements.
+If a run fails midway, rerun with --repair to re-apply configuration.
 """
 
 import argparse
@@ -26,7 +27,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from stripe_sandbox_keychain import keychain_key
+from stripe_sandbox_keychain import OPENER, keychain_key, redact
 
 PLATFORM_ACCOUNT = "acct_1URlHu1Hm4CZe205"
 API_VERSION = "2026-09-30.endive"
@@ -50,23 +51,31 @@ class Stripe:
     def __init__(self, key):
         self.auth = "Basic " + base64.b64encode(f"{key}:".encode()).decode()
 
-    def call(self, method, path, data=None):
+    def call(self, method, path, data=None, idempotency_key=None):
         req = urllib.request.Request("https://api.stripe.com" + path, method=method)
         req.add_header("Authorization", self.auth)
         req.add_header("Stripe-Version", API_VERSION)
+        if idempotency_key is not None:
+            req.add_header("Idempotency-Key", idempotency_key)
         if data is not None and path.startswith("/v2/"):
             req.data = json.dumps(data, ensure_ascii=False).encode()
             req.add_header("Content-Type", "application/json")
         elif data is not None:
             req.data = urllib.parse.urlencode(form(data)).encode()
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with OPENER.open(req, timeout=30) as resp:
                 return json.load(resp)
         except urllib.error.HTTPError as err:
-            detail = json.load(err).get("error", {})
-            raise SystemExit(f"Stripe {method} {path.split('?')[0]} failed: "
-                             f"{detail.get('type')} {detail.get('code')} {detail.get('param')} "
-                             f"{detail.get('message')}") from None
+            try:
+                payload = json.load(err)
+                detail = payload.get("error", {}) if isinstance(payload, dict) else {}
+                if not isinstance(detail, dict):
+                    detail = {}
+            except (ValueError, TypeError):
+                detail = {}
+            message = "" if err.code in (401, 403) else redact(detail.get("message"))
+            raise SystemExit(f"Stripe {method} {path.split('?')[0]} failed: HTTP {err.code} "
+                             f"{detail.get('type')} {detail.get('code')} {detail.get('param')} {message}") from None
 
 
 def label(tenant):
@@ -123,12 +132,19 @@ def create_account(stripe, tenant):
     # Stripe returns a 500 when the full body is sent in one create (seen
     # 2026-10-26 JST), so create the minimal account and apply the rest in parts.
     full = account_body(tenant)
-    ind = full["identity"]["individual"]
     minimal = {k: full[k] for k in ("contact_email", "display_name", "dashboard", "metadata", "include")}
     minimal["identity"] = {"country": "jp", "entity_type": "individual"}
     minimal["defaults"] = {"currency": "jpy", "responsibilities": full["defaults"]["responsibilities"]}
     minimal["configuration"] = {"merchant": {"capabilities": {"card_payments": {"requested": True}}}}
-    acct_id = stripe.call("POST", "/v2/core/accounts", minimal)["id"]
+    acct_id = stripe.call("POST", "/v2/core/accounts", minimal,
+                          idempotency_key=f"tojima-fixture-{label(tenant)}-v1")["id"]
+    configure_account(stripe, acct_id, tenant)
+    return acct_id
+
+
+def configure_account(stripe, acct_id, tenant):
+    full = account_body(tenant)
+    ind = full["identity"]["individual"]
     merchant = {k: v for k, v in full["configuration"]["merchant"].items() if k != "capabilities"}
     for part in (
         {"defaults": {"profile": full["defaults"]["profile"]}},
@@ -142,7 +158,6 @@ def create_account(stripe, tenant):
             "type": "front_back", "front_back": {"front": "file_identity_document_success"}}}}}},
     ):
         stripe.call("POST", f"/v2/core/accounts/{acct_id}", part)
-    return acct_id
 
 
 def find_existing(stripe):
@@ -185,6 +200,7 @@ def report(stripe, tenant, acct_id):
 def main():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--status", action="store_true", help="only report existing accounts")
+    parser.add_argument("--repair", action="store_true", help="re-apply configuration to existing fixture accounts")
     args = parser.parse_args()
     try:
         key = keychain_key()
@@ -199,6 +215,8 @@ def main():
             continue
         if tenant not in accounts:
             accounts[tenant] = create_account(stripe, tenant)
+        elif args.repair:
+            configure_account(stripe, accounts[tenant], tenant)
         ensure_bank_account(stripe, accounts[tenant])
     if not args.status:
         time.sleep(5)

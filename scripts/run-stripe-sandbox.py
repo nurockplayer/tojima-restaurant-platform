@@ -11,6 +11,7 @@ import base64
 import json
 import socket
 import urllib.error
+import urllib.parse
 import urllib.request
 import os
 from pathlib import Path
@@ -24,7 +25,7 @@ import threading
 import time
 import warnings
 
-from stripe_sandbox_keychain import DEFAULT_KEYCHAIN_SERVICE, keychain_key
+from stripe_sandbox_keychain import DEFAULT_KEYCHAIN_SERVICE, OPENER, keychain_key
 
 
 EVENTS = ",".join((
@@ -194,12 +195,35 @@ def verify_platform_account(key):
     request.add_header("Authorization", "Basic " + base64.b64encode((key + ":").encode()).decode())
     request.add_header("Stripe-Version", API_VERSION)
     try:
-        with urllib.request.urlopen(request, timeout=15) as response:
+        with OPENER.open(request, timeout=15) as response:
             account = json.load(response)
     except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
         raise ValueError("could not verify Stripe Sandbox platform account") from None
     if not isinstance(account, dict) or account.get("id") != PLATFORM_ACCOUNT:
         raise ValueError("key does not belong to the approved Stripe Sandbox platform account")
+
+
+def verify_merchant_accounts(key, env):
+    for tenant in "ABC":
+        account_id = env["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant]
+        query = urllib.parse.urlencode([("include", "configuration.merchant"), ("include", "defaults")])
+        request = urllib.request.Request(
+            f"https://api.stripe.com/v2/core/accounts/{account_id}?{query}")
+        request.add_header("Authorization", "Basic " + base64.b64encode((key + ":").encode()).decode())
+        request.add_header("Stripe-Version", API_VERSION)
+        try:
+            with OPENER.open(request, timeout=15) as response:
+                account = json.load(response)
+        except (OSError, urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError):
+            raise ValueError(f"could not verify Sandbox merchant {tenant}") from None
+        metadata = account.get("metadata") if isinstance(account, dict) else None
+        defaults = account.get("defaults") if isinstance(account, dict) else None
+        capabilities = (((account.get("configuration") or {}).get("merchant") or {}).get("capabilities") or {}) if isinstance(account, dict) else {}
+        if (not isinstance(metadata, dict) or metadata.get("tojima_test_fixture") !=
+                f"synthetic_merchant_{tenant.lower()}_api" or
+                not isinstance(defaults, dict) or defaults.get("currency") != "jpy" or
+                (capabilities.get("card_payments") or {}).get("status") != "active"):
+            raise ValueError(f"merchant {tenant} is not the approved Sandbox fixture account")
 
 
 def run(args):
@@ -212,6 +236,7 @@ def run(args):
         source["TOJIMA_STRIPE_TEST_SECRET_KEY"] = keychain_key(args.keychain_service)
     env = checked_environment(source)
     verify_platform_account(env["TOJIMA_STRIPE_TEST_SECRET_KEY"])
+    verify_merchant_accounts(env["TOJIMA_STRIPE_TEST_SECRET_KEY"], env)
     root = Path(__file__).resolve().parents[1]
     cli = shutil.which("stripe")
     if cli is None or not (root / "web/dist/index.html").is_file():
