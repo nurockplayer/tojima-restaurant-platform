@@ -259,6 +259,10 @@ merchant configuration stores account IDs/references, not secret values.
    **008 must run with all writers stopped. No rolling upgrade across 008.**
    Keep pre-008 binaries stopped afterwards. Its backfill captures already-held
    Checkouts; old concurrent writers cannot maintain that invariant.
+   **The same applies to 016: no rolling upgrade across 016.** Every pre-016
+   payment worker must have exited before 016 runs and must never be restarted:
+   it calls Stripe without setting `dispatched_at`, so a later worker could
+   record SESSION_UNAVAILABLE and let staff void an order whose Checkout exists.
 3. Run `postgres.Up` once on the explicitly selected schema; it takes advisory
    transaction lock `771904283`, creates the ledger and applies every missing
    version in one transaction. Any failure rolls back the entire pending set,
@@ -270,7 +274,7 @@ merchant configuration stores account IDs/references, not secret values.
 日本語：①SHA・DB/schema/search_path・ledger・backupと復元手順・停止担当を記録し、
 **実行前にbackupを取得・検証**。復元した使い捨て環境で候補を予行する。
 ②API・webhook・決済／返金／期限切れworker・管理処理を含む**全writerを停止**。
-**008を跨ぐrolling upgrade禁止**。以後も旧バイナリを再開しない。
+**008・016を跨ぐrolling upgrade禁止**。以後も旧バイナリを再開しない（016前の決済workerは `dispatched_at` を記録しない）。
 ③選択schemaに `postgres.Up` を実行。advisory lockと全未適用版を一つのtransactionで扱う。
 失敗時は全未適用版とledgerがrollbackされる。原因を確認・解消して同候補を再実行し、
 適用済み扱いに書き換えない。④ledger・object・backfill／work・整合性を確認後、互換の
@@ -278,7 +282,7 @@ merchant configuration stores account IDs/references, not secret values.
 
 繁中：①記錄SHA、DB/schema/search_path、ledger、備份位置／還原程序與停機負責人；
 **migration前備份並驗證**，先在還原出的拋棄環境演練。②停止API、webhook、付款／退款／
-到期worker及管理自動化等**所有writer**；**禁止跨008滾動升級**，之後也不得重啟舊版。
+到期worker及管理自動化等**所有writer**；**禁止跨008、016滾動升級**，之後也不得重啟舊版（016前的付款worker不會記錄 `dispatched_at`）。
 ③對指定schema呼叫 `postgres.Up`，同一transaction以advisory lock套用全部缺少版本；
 失敗會回滾全部未提交版本及ledger。查明衝突並排除後重跑同候選版，不可手動標記已套用。
 ④核對ledger、物件、backfill／work及完整性後才啟動相容且驗收過的runtime，執行smoke並留去機密紀錄。
@@ -308,6 +312,7 @@ PostgreSQL migration: it is the legacy disposable SQLite check.
 | [013 stop_request_state_lock](../migrations/postgres/013_stop_request_state_lock.up.sql) | Locks operation state before accepting direct stop inserts; upgrades existing 012 databases / 停止申請の行ロック / 停止申請列鎖 | Restores the 012 request guard and reopens the direct-insert/fulfillment race; no history is removed / 競合が再発 / 重新引入競態。 |
 | [014 stripe_unpaid_void](../migrations/postgres/014_stripe_unpaid_void.up.sql) | D9 manager void: `VOIDED` payment status, `STRIPE_VOID` action/idempotency and late-payment refund events / 未払いStripe注文の取消 / 未付款 Stripe 訂單作廢 | Explicitly refuses while any `VOIDED` state, `STRIPE_UNPAID_VOIDED`/`STRIPE_LATE_PAYMENT_REFUND` event or `STRIPE_VOID` action exists; restores pre-D9 constraints / void履歴があると拒否 / 有作廢歷史即拒絕。 |
 | [015 store_guest_display_name](../migrations/postgres/015_store_guest_display_name.up.sql) | Optional public `stores.guest_display_name` (NULL omits the guest topbar name) / 店舗表示名 / 店家顯示名稱 | Drops the column; export non-NULL values first. Migration 015 must be deployed before the app; see [guest store display name](ops/store-guest-display-name.md) / 値の先出しが必要 / 須先匯出非空值。 |
+| [016 payment_work_dispatch_fence](../migrations/postgres/016_payment_work_dispatch_fence.up.sql) | `stripe_payment_work.dispatched_at` fence; conservative backfill marks claimed CREATE work dispatched / 決済送信fence / 付款送出fence | Drops the column; pre-016 binaries must stay stopped (no rolling upgrade across 016) / 016前のworkerを再開しない / 不得重啟016前的worker |
 
 Read the paired downs before any rollback. A failed `Down` rolls back the entire
 transaction. Do not delete audit/history rows or disable guards to force it.
@@ -378,8 +383,8 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT current_database(), current_schema();
 SELECT version, applied_at FROM schema_migrations ORDER BY version;
--- Exactly versions 1..15, not merely max(version)=15.
-SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15] AS ledger_complete
+-- Exactly versions 1..16, not merely max(version)=16.
+SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] AS ledger_complete
 FROM schema_migrations;
 SELECT to_regclass('order_read_grants'), to_regclass('order_adjustments'),
        to_regclass('operation_refunds'), to_regclass('cancellation_requests'),
@@ -429,7 +434,7 @@ PGOPTIONS='-c search_path=p84c_rehearsal' pg_restore --dbname="$restore_url" \
 psql "$restore_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT * FROM restore_probe; -- p84c-disposable-only, exactly one row
-SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..15
+SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..16
 SELECT to_regclass('cancellation_requests');
 SQL
 # Confirm Up is idempotent on the restored schema.
