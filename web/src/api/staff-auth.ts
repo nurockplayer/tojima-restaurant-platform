@@ -7,30 +7,37 @@ export type StaffAuthState =
 export async function probeStaffAuth(fetchImpl: typeof fetch = fetch): Promise<StaffAuthState> {
   const controller = new AbortController();
   let timeout: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
+  // The timeout bounds the whole probe, body included: a stalled body must not leave the staff surface blank.
+  const timedOut = new Promise<StaffAuthState>((resolve) => {
+    timeout = setTimeout(() => { controller.abort(); resolve({ kind: 'unavailable' }); }, 5000);
+  });
   try {
-    const response = await Promise.race([
-      fetchImpl('/staff/auth/session', {
-        method: 'GET', cache: 'no-store', credentials: 'same-origin', signal: controller.signal,
-        headers: { accept: 'application/json' },
-      }),
-      new Promise<Response>((_, reject) => { timeout = setTimeout(() => { timedOut = true; controller.abort(); reject(new Error('timeout')); }, 5000); }),
-    ]);
-    if (response.status === 404) return { kind: 'unsupported' };
-    if (response.status === 401) return { kind: 'signed-out' };
-    if (response.status < 200 || response.status >= 300) return { kind: 'unavailable' };
-    let body: unknown;
-    try { body = await response.json(); } catch { return timedOut ? { kind: 'unavailable' } : { kind: 'unsupported' }; }
-    if (!isSessionBody(body)) return { kind: 'unsupported' };
-    return {
-      kind: 'signed-in', subjectID: body.subject_id, mfa: body.mfa,
-      stepUpFresh: body.step_up_fresh, expiresAt: body.expires_at,
-    };
-  } catch {
-    return { kind: 'unavailable' };
+    return await Promise.race([readStaffSession(fetchImpl, controller.signal), timedOut]);
   } finally {
     if (timeout !== undefined) clearTimeout(timeout);
   }
+}
+
+async function readStaffSession(fetchImpl: typeof fetch, signal: AbortSignal): Promise<StaffAuthState> {
+  let response: Response;
+  try {
+    response = await fetchImpl('/staff/auth/session', {
+      method: 'GET', cache: 'no-store', credentials: 'same-origin', signal,
+      headers: { accept: 'application/json' },
+    });
+  } catch {
+    return { kind: 'unavailable' };
+  }
+  if (response.status === 404) return { kind: 'unsupported' };
+  if (response.status === 401) return { kind: 'signed-out' };
+  if (response.status < 200 || response.status >= 300) return { kind: 'unavailable' };
+  let body: unknown;
+  try { body = await response.json(); } catch { return signal.aborted ? { kind: 'unavailable' } : { kind: 'unsupported' }; }
+  if (!isSessionBody(body)) return { kind: 'unsupported' };
+  return {
+    kind: 'signed-in', subjectID: body.subject_id, mfa: body.mfa,
+    stepUpFresh: body.step_up_fresh, expiresAt: body.expires_at,
+  };
 }
 
 export function staffLoginURL(returnPath: string): string {
