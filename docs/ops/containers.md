@@ -31,6 +31,9 @@ or create identities. Use separately authorized provisioning; an empty migrated
 DB has no usable restaurant. Existing `cmd/guesttest`, `cmd/operationstest` and
 `cmd/demogateway` remain unchanged loopback test harnesses.
 
+- Compose uses one PostgreSQL superuser for migrate and server; production must
+  use a separate least-privilege runtime role (no DDL, no role management).
+
 The HTTP bind inside the image is `APP_ADDR=0.0.0.0:8080`; compose publishes
 `${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}`. TLS/ingress, backups, secret management
 and production hosting remain separate deployment work. Compose's
@@ -60,7 +63,8 @@ ORDER_READ retains the existing Owner-approved 24h default. Health is process
 liveness, not DB/IdP/Stripe readiness. `/server -healthcheck` reads only
 `APP_ADDR` and requests `/healthz`, so the distroless compose probe still works.
 SIGINT/SIGTERM cancels the worker and stops accepting HTTP, allows up to 10s
-for requests, joins the worker, then closes the DB pool. Pending payment work remains durable.
+for requests, waits up to 15s for the worker, then closes the DB pool. If the
+worker misses its deadline, durable work will be reclaimed after its lease.
 
 ### Guest and payment surface
 
@@ -151,6 +155,8 @@ distroless/nonroot で実行。Compose は PostgreSQL 17 → `/migrate` 成功 �
 `POSTGRES_PASSWORD` と `PIN_PEPPER`（`openssl rand -base64 32`）を置換する。
 例示 TTL はローカル用で、本番ポリシーの承認ではない。
 
+- 本番は migrate と runtime の DB role を分け、runtime は最小権限にする。
+
 上の環境変数表が共通仕様。通常起動には `APP_ADDR`、`DATABASE_URL` または
 `PGHOST`/`PGDATABASE`/`PGUSER`、全 SESSION/GRANT/PIN 設定、全 PAYMENT 期間が
 必須。URL 優先、それ以外は pgx の PG* 設定を使う。接続確認は10秒、pool は
@@ -163,7 +169,8 @@ DB なしで health のみ使う場合は `APP_HEALTH_ONLY=true` を明示する
 DB/Stripe 設定との併用は拒否。通常起動が DB 不足で health のみに退行することは
 ない。`/healthz` はプロセス生存のみで、DB/IdP/決済 readiness を示さない。
 `-healthcheck` は `APP_ADDR` だけで動く。SIGINT/SIGTERM は HTTP を最大10秒
-待ち、worker をキャンセル・join してから pool を閉じる。未処理決済は DB に残る。
+待ち、worker 終了を最大15秒待ってから pool を閉じる。期限内に終了しない場合も
+未処理決済は lease の期限後に DB から再取得される。
 
 ### 決済・未提供機能
 
@@ -221,6 +228,8 @@ backup、secret 運用、staff IdP、live activation は別 gate。ADR-0002/0003
 `POSTGRES_PASSWORD` 與 `PIN_PEPPER`（`openssl rand -base64 32`）。TTL 範例只供
 本機使用，不代表正式政策獲准。
 
+- 正式環境須分開 migrate 與 runtime 的 DB 角色，runtime 僅最小權限。
+
 上方環境變數表是共同契約。正常啟動必須有 `APP_ADDR`、`DATABASE_URL` 或
 `PGHOST`/`PGDATABASE`/`PGUSER`、完整 SESSION/GRANT/PIN 設定及 PAYMENT 時長。
 URL 優先，否則 pgx 使用 PG*；啟動連線檢查限10秒，pool 上限4條。PIN pepper
@@ -231,7 +240,8 @@ merchant/identity 建置須另有授權流程；空 DB 不會自動產生可營�
 無 DB 時須明確設定 `APP_HEALTH_ONLY=true` 才只提供 health；不能混用 DB/Stripe
 設定。正常模式缺 DB 不會靜默降為 health-only。`/healthz` 只表示程序存活，不是
 DB/IdP/付款 readiness。`-healthcheck` 只讀 `APP_ADDR`。SIGINT/SIGTERM 最多等待
-HTTP 10秒，取消並等待 worker 結束，再關閉 pool；待辦付款持久保留於 DB。
+HTTP 10秒，等待 worker 最多15秒後關閉 pool；若 worker 未及時停止，待辦付款會在
+lease 到期後由 DB 重新領取。
 
 ### 付款與未開放功能
 

@@ -57,6 +57,30 @@ func TestProductionNamespacesDenyBeforeDispatch(t *testing.T) {
 		}
 	}
 }
+
+func TestProductionDeniesEncodedAndNormalizedNamespaces(t *testing.T) {
+	paths := []string{
+		"/v1/staff%2Forders", "/v1/staff%2forders", "/v1/staff%252Forders", "/v1/STAFF/x",
+		"/v1/admin%2F", "/v1/./staff/x", "/v1//staff/x", `/v1/staff\x`,
+	}
+	methods := []string{"GET", "POST", "PUT", "DELETE"}
+	for _, method := range methods {
+		for _, path := range paths {
+			t.Run(method+" "+path, func(t *testing.T) {
+				called := false
+				api := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+				handler := productionHandler(api, http.NotFoundHandler())
+				got := request(handler, method, path)
+				if got.Code != http.StatusForbidden {
+					t.Errorf("status = %d, want 403", got.Code)
+				}
+				if called {
+					t.Fatal("denied request reached API")
+				}
+			})
+		}
+	}
+}
 func TestProductionDispatchKeepsAPIOutOfSPAFallback(t *testing.T) {
 	spa, closeSPA, err := newSPAHandler(builtSPA(t))
 	if err != nil {
@@ -195,6 +219,34 @@ func TestPaymentWorkerStopsInFlightBeforeReturn(t *testing.T) {
 	default:
 		t.Fatal("stop returned before worker completed")
 	}
+}
+
+func TestPaymentWorkerStopHasBoundedWait(t *testing.T) {
+	previousTimeout := workerStopTimeout
+	workerStopTimeout = 50 * time.Millisecond
+	defer func() { workerStopTimeout = previousTimeout }()
+
+	started, release := make(chan struct{}), make(chan struct{})
+	stop := startPaymentWorker(context.Background(), func(context.Context) (bool, error) {
+		close(started)
+		<-release
+		return false, nil
+	})
+	select {
+	case <-started:
+	case <-time.After(3 * time.Second):
+		close(release)
+		t.Fatal("worker never started")
+	}
+	stopped := make(chan struct{})
+	go func() { stop(); close(stopped) }()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("stop exceeded one second")
+	}
+	close(release)
 }
 
 func TestComposedAPIPaymentMountsAndSecurity(t *testing.T) {

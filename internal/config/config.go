@@ -79,7 +79,12 @@ func LoadFromEnv(lookup func(string) (string, bool)) (Config, error) {
 	}
 	c.DatabaseURL = get("DATABASE_URL")
 	if c.HealthOnly {
-		if c.DatabaseURL != "" || get("PGHOST") != "" || (get("STRIPE_MODE") != "" && get("STRIPE_MODE") != "disabled") {
+		for _, key := range []string{"DATABASE_URL", "PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGPASSFILE", "PGSERVICE", "PGSSLMODE"} {
+			if get(key) != "" {
+				return Config{}, fmt.Errorf("APP_HEALTH_ONLY cannot be combined with DB or Stripe configuration")
+			}
+		}
+		if get("STRIPE_MODE") != "" && get("STRIPE_MODE") != "disabled" {
 			return Config{}, fmt.Errorf("APP_HEALTH_ONLY cannot be combined with DB or Stripe configuration")
 		}
 		for _, key := range stripeEnvKeys {
@@ -115,6 +120,19 @@ func LoadFromEnv(lookup func(string) (string, bool)) (Config, error) {
 		*v.dst, err = time.ParseDuration(get(v.key))
 		if err != nil || *v.dst < time.Millisecond {
 			return Config{}, fmt.Errorf("%s must be a positive duration of at least 1ms", v.key)
+		}
+	}
+	for _, v := range []struct {
+		key      string
+		got, max time.Duration
+	}{
+		{"SESSION_TTL", c.Sessions.SessionTTL, 4 * time.Hour},
+		{"GRANT_TTL", c.Sessions.GrantTTL, time.Hour},
+		{"PIN_TTL", c.Sessions.PINTTL, 15 * time.Minute},
+		{"PAYMENT_CONTINUATION_TTL", c.Payments.ContinuationTTL, 30 * time.Minute},
+	} {
+		if v.got > v.max {
+			return Config{}, fmt.Errorf("%s exceeds the approved maximum %s (Owner decision D12)", v.key, v.max)
 		}
 	}
 	if c.Payments.CreateRetryWindow >= 24*time.Hour {
@@ -186,6 +204,9 @@ func LoadFromEnv(lookup func(string) (string, bool)) (Config, error) {
 	c.Stripe.ProofTTL, err = time.ParseDuration(get("CHECKOUT_PROOF_TTL"))
 	if err != nil || c.Stripe.ProofTTL < time.Millisecond {
 		return Config{}, fmt.Errorf("CHECKOUT_PROOF_TTL must be a positive duration of at least 1ms")
+	}
+	if c.Stripe.ProofTTL > 30*time.Minute {
+		return Config{}, fmt.Errorf("CHECKOUT_PROOF_TTL exceeds the approved maximum 30m (Owner decision D12)")
 	}
 	for _, raw := range strings.Split(get("CHECKOUT_SIGNING_KEYS"), ",") {
 		key, err := decodeKey(raw)

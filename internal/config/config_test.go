@@ -106,16 +106,45 @@ func TestExplicitHealthOnly(t *testing.T) {
 	if err != nil || !c.HealthOnly {
 		t.Fatalf("health-only rejected: %v", err)
 	}
-	for _, key := range []string{"DATABASE_URL", "PGHOST", "STRIPE_MODE", "STRIPE_SECRET_KEY"} {
-		values[key] = "misconfigured"
-		if _, err := LoadFromEnv(env(values)); err == nil {
-			t.Errorf("health-only accepted %s", key)
-		}
-		delete(values, key)
+	for _, key := range []string{"DATABASE_URL", "PGHOST", "PGHOSTADDR", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGPASSFILE", "PGSERVICE", "PGSSLMODE", "STRIPE_MODE", "STRIPE_SECRET_KEY"} {
+		t.Run(key, func(t *testing.T) {
+			withConfig := map[string]string{"APP_ADDR": "127.0.0.1:8080", "APP_HEALTH_ONLY": "true", key: "misconfigured"}
+			if _, err := LoadFromEnv(env(withConfig)); err == nil {
+				t.Errorf("health-only accepted %s", key)
+			}
+		})
 	}
 	values["APP_HEALTH_ONLY"] = "yes"
 	if _, err := LoadFromEnv(env(values)); err == nil {
 		t.Fatal("invalid mode accepted")
+	}
+}
+
+func TestApprovedTTLCeilings(t *testing.T) {
+	for _, test := range []struct {
+		key, maximum string
+		stripe       bool
+	}{
+		{"SESSION_TTL", "4h", false},
+		{"GRANT_TTL", "1h", false},
+		{"PIN_TTL", "15m", false},
+		{"PAYMENT_CONTINUATION_TTL", "30m", false},
+		{"CHECKOUT_PROOF_TTL", "30m", true},
+	} {
+		t.Run(test.key, func(t *testing.T) {
+			values := guestEnv()
+			if test.stripe {
+				values = stripeEnv()
+			}
+			values[test.key] = test.maximum
+			if _, err := LoadFromEnv(env(values)); err != nil {
+				t.Fatalf("maximum %s rejected: %v", test.maximum, err)
+			}
+			values[test.key] = test.maximum + "1s"
+			if _, err := LoadFromEnv(env(values)); err == nil {
+				t.Fatalf("maximum plus one second accepted")
+			}
+		})
 	}
 }
 func TestInvalidGuestPolicy(t *testing.T) {

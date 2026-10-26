@@ -6,7 +6,10 @@ import (
 	"errors"
 	"log"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -44,8 +47,34 @@ func productionHandler(api, spa http.Handler) http.Handler {
 		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
+		if deniedNamespace(r) {
+			deny.ServeHTTP(w, r)
+			return
+		}
 		mux.ServeHTTP(w, r)
 	})
+}
+
+// deniedNamespace checks the decoded and the escaped path, so encoded
+// separators (%2F, %2f, %252F) cannot route staff/admin requests elsewhere.
+func deniedNamespace(r *http.Request) bool {
+	for _, raw := range []string{r.URL.Path, r.URL.EscapedPath()} {
+		p := strings.ToLower(raw)
+		for i := 0; i < 3 && strings.Contains(p, "%"); i++ { // undo double encoding
+			if u, err := url.PathUnescape(p); err == nil {
+				p = strings.ToLower(u)
+			} else {
+				break
+			}
+		}
+		p = path.Clean("/" + strings.ReplaceAll(p, "\\", "/"))
+		for _, prefix := range []string{"/v1/staff", "/v1/admin"} {
+			if p == prefix || strings.HasPrefix(p, prefix+"/") {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 type providerResolver struct {
@@ -166,8 +195,9 @@ func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.
 	return api, worker, nil
 }
 
-// Stop returns only after the current ProcessNext has observed cancellation.
-// The caller joins this worker before closing its database pool.
+// Stop cancels processing and waits for the worker for at most the shutdown deadline.
+var workerStopTimeout = 15 * time.Second
+
 func startPaymentWorker(parent context.Context, process func(context.Context) (bool, error)) func() {
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
@@ -190,5 +220,12 @@ func startPaymentWorker(parent context.Context, process func(context.Context) (b
 			}
 		}
 	}()
-	return func() { cancel(); <-done }
+	return func() {
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(workerStopTimeout):
+			log.Print("payment worker did not stop within the shutdown deadline; durable work will be reclaimed after its lease")
+		}
+	}
 }
