@@ -232,7 +232,7 @@ func TestStoreSessionLifecycleHoldAndRestore(t *testing.T) {
 
 func TestStoreStatus(t *testing.T) {
 	ctx, _, store := staffAuthTestStore(t)
-	token, _, err := store.CreateSession(ctx, "status-subject", "status-idp", false, time.Now())
+	token, _, err := testCreateSession(t, ctx, store, "status-subject", "status-idp", false, time.Now())
 	if err != nil || token == "" {
 		t.Fatalf("create status session: token present=%v err=%v", token != "", err)
 	}
@@ -263,7 +263,7 @@ func TestStoreStatus(t *testing.T) {
 
 func TestStoreRevokeSubjectSessionsRecordsOperator(t *testing.T) {
 	ctx, pool, store := staffAuthTestStore(t)
-	if _, _, err := store.CreateSession(ctx, "revoke-actor-subject", "revoke-actor-idp", false, time.Now()); err != nil {
+	if _, _, err := testCreateSession(t, ctx, store, "revoke-actor-subject", "revoke-actor-idp", false, time.Now()); err != nil {
 		t.Fatal(err)
 	}
 	before := dbNow(t, ctx, pool)
@@ -271,10 +271,10 @@ func TestStoreRevokeSubjectSessionsRecordsOperator(t *testing.T) {
 	if err != nil || count != 1 {
 		t.Fatalf("revoke count=%d err=%v", count, err)
 	}
-	if _, _, err = store.CreateSession(ctx, "revoke-actor-subject", "stale-idp", false, before); !errors.Is(err, ErrStaleAuth) {
+	if _, _, err = testCreateSession(t, ctx, store, "revoke-actor-subject", "stale-idp", false, before); !errors.Is(err, ErrStaleAuth) {
 		t.Fatalf("pre-revocation login err=%v, want ErrStaleAuth", err)
 	}
-	if _, _, err = store.CreateSession(ctx, "revoke-actor-subject", "fresh-idp", false, dbNow(t, ctx, pool)); err != nil {
+	if _, _, err = testCreateSession(t, ctx, store, "revoke-actor-subject", "fresh-idp", false, dbNow(t, ctx, pool)); err != nil {
 		t.Fatalf("post-revocation login: %v", err)
 	}
 	var actor string
