@@ -38,6 +38,7 @@ func NewStore(db *pgxpool.Pool) (*Store, error) {
 type Session struct {
 	ID, SubjectID   string
 	StrongLogin     bool
+	StepUpFresh     bool
 	LastStrongAuth  *time.Time
 	AbsoluteExpires time.Time
 }
@@ -213,10 +214,11 @@ func (s *Store) CreateSession(ctx context.Context, subjectID, idpSID string, str
 func (s *Store) ResolveSession(ctx context.Context, rawToken string) (Session, error) {
 	hash := sha256.Sum256([]byte(rawToken))
 	var session Session
-	err := s.db.QueryRow(ctx, `SELECT ss.id::text,ss.subject_id,ss.strong_login,ss.last_strong_auth_at,ss.absolute_expires_at
+	err := s.db.QueryRow(ctx, `SELECT ss.id::text,ss.subject_id,ss.strong_login,ss.last_strong_auth_at,ss.absolute_expires_at,
+		ss.last_strong_auth_at IS NOT NULL AND ss.last_strong_auth_at <= now() AND now() - ss.last_strong_auth_at <= interval '300 seconds'
 		FROM staff_sessions ss JOIN staff_subjects su USING(subject_id)
 		WHERE ss.token_sha256=$1 AND ss.revoked_at IS NULL AND now()<ss.absolute_expires_at AND su.hold_at IS NULL`, hash[:]).Scan(
-		&session.ID, &session.SubjectID, &session.StrongLogin, &session.LastStrongAuth, &session.AbsoluteExpires)
+		&session.ID, &session.SubjectID, &session.StrongLogin, &session.LastStrongAuth, &session.AbsoluteExpires, &session.StepUpFresh)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Session{}, ErrNoSession
 	}
@@ -319,15 +321,27 @@ func (s *Store) RevokeSubjectSessions(ctx context.Context, subjectID, reason str
 }
 
 func (s *Store) RevokeByIDP(ctx context.Context, sid, sub string) (int64, error) {
-	if sid == "" && sub == "" {
-		return 0, errors.New("idp sid or subject is required")
-	}
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback(ctx)
+	n, err := revokeByIDP(ctx, tx, sid, sub)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func revokeByIDP(ctx context.Context, tx dbtx, sid, sub string) (int64, error) {
+	if sid == "" && sub == "" {
+		return 0, errors.New("idp sid or subject is required")
+	}
 	var tag pgconn.CommandTag
+	var err error
 	if sid != "" {
 		// Fence first: a login for this IdP session still in flight either
 		// committed before this lock (and is revoked below) or is refused later.
@@ -358,9 +372,6 @@ func (s *Store) RevokeByIDP(ctx context.Context, sid, sub string) (int64, error)
 	}
 	n := tag.RowsAffected()
 	if err = writeEvent(ctx, tx, sub, "", "backchannel_revoke", map[string]any{"count": n, "sid_present": sid != ""}); err != nil {
-		return 0, err
-	}
-	if err = tx.Commit(ctx); err != nil {
 		return 0, err
 	}
 	return n, nil
@@ -418,17 +429,46 @@ func (s *Store) SeeLogoutJTI(ctx context.Context, jti string) (bool, error) {
 		return false, err
 	}
 	defer tx.Rollback(ctx)
-	if _, err = tx.Exec(ctx, `DELETE FROM staff_logout_jti WHERE seen_at<now()-interval '24 hours'`); err != nil {
-		return false, err
-	}
-	tag, err := tx.Exec(ctx, `INSERT INTO staff_logout_jti(jti) VALUES($1) ON CONFLICT DO NOTHING`, jti)
+	fresh, err := seeLogoutJTI(ctx, tx, jti)
 	if err != nil {
 		return false, err
 	}
 	if err = tx.Commit(ctx); err != nil {
 		return false, err
 	}
+	return fresh, nil
+}
+
+func seeLogoutJTI(ctx context.Context, tx dbtx, jti string) (bool, error) {
+	if _, err := tx.Exec(ctx, `DELETE FROM staff_logout_jti WHERE seen_at<now()-interval '24 hours'`); err != nil {
+		return false, err
+	}
+	tag, err := tx.Exec(ctx, `INSERT INTO staff_logout_jti(jti) VALUES($1) ON CONFLICT DO NOTHING`, jti)
+	if err != nil {
+		return false, err
+	}
 	return tag.RowsAffected() == 1, nil
+}
+
+// ApplyIDPLogout records replay protection and revokes sessions in one commit.
+// A failed revocation leaves the JTI available for a delivery retry.
+func (s *Store) ApplyIDPLogout(ctx context.Context, jti, sid, sub string) (bool, error) {
+	tx, err := s.db.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer tx.Rollback(ctx)
+	fresh, err := seeLogoutJTI(ctx, tx, jti)
+	if err != nil || !fresh {
+		return false, err
+	}
+	if _, err = revokeByIDP(ctx, tx, sid, sub); err != nil {
+		return false, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *Store) Current(ctx context.Context, subjectID, tenantID string) ([]authz.Membership, error) {

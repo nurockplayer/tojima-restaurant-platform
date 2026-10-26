@@ -319,8 +319,15 @@ func TestStorePromoteStrongAndBackchannel(t *testing.T) {
 		t.Fatal(err)
 	}
 	strong, err := store.ResolveSession(ctx, token)
-	if err != nil || !strong.StrongLogin || strong.LastStrongAuth == nil || !strong.AbsoluteExpires.Equal(basic.AbsoluteExpires) {
+	if err != nil || !strong.StrongLogin || !strong.StepUpFresh || strong.LastStrongAuth == nil || !strong.AbsoluteExpires.Equal(basic.AbsoluteExpires) {
 		t.Fatalf("promoted session=%+v err=%v", strong, err)
+	}
+	if _, err = pool.Exec(ctx, "UPDATE staff_sessions SET last_strong_auth_at=now()-interval '301 seconds' WHERE id=$1", basic.ID); err != nil {
+		t.Fatal(err)
+	}
+	stale, err := store.ResolveSession(ctx, token)
+	if err != nil || stale.StepUpFresh || !stale.StrongLogin {
+		t.Fatalf("stale strong session=%+v err=%v", stale, err)
 	}
 	if err = store.Hold(ctx, "promote-a", "test", "operator"); err != nil {
 		t.Fatal(err)
