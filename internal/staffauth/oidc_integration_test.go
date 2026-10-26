@@ -659,6 +659,7 @@ func TestOIDCLogoutAfterCallbackRevokesCompletedLogin(t *testing.T) {
 func TestOIDCLogoutWithPreRotationCookieRevokesRotatedSession(t *testing.T) {
 	x := newStaffOIDCTest(t)
 	oldCookie := x.login(t)
+	x.issuer.edit = func(c map[string]any) { c["acr"] = "strong" }
 	flow := x.begin(t, "/staff/auth/step-up", "/staff/", oldCookie)
 	callback := x.callback(t, flow, flow.binding, oldCookie)
 	if callback.Code != http.StatusSeeOther {
