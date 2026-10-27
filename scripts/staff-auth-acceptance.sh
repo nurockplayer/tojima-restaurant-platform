@@ -116,6 +116,9 @@ INSERT INTO tenants(tenant_id,name) VALUES ('t-accept','Staff acceptance');
 INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode,guest_display_name)
 VALUES ('t-accept','s-accept','Staff acceptance','DIRECT_SCAN','Staff acceptance');
 SQL
+# Read-only ingress contract against the real local stack (loopback tolerances
+# are WARN, as in the deployed https run).
+sh "$smoke_root/scripts/ingress-check.sh" --allow-loopback-http "http://127.0.0.1:$smoke_app_port" || fail 'ingress-check'
 python3 - "$smoke_root" "$smoke_tmp/.env" "$smoke_project" <<'PY' || fail 'acceptance driver'
 """Only disposable loopback HTTP: intentionally resend Secure cookies manually.
 
