@@ -268,3 +268,28 @@ func TestApplyCreatesConvergesAndRotates(t *testing.T) {
 		t.Fatalf("missing table code=%d stderr=%q", code, stderr)
 	}
 }
+
+// A plan computed while the store was still absent must not lose to a
+// concurrent first apply that created it with another mode and table name.
+func TestApplyConvergesAfterConcurrentFirstApply(t *testing.T) {
+	pool, store := newIntegrationStore(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO tenants(tenant_id,name) VALUES('tojima','東島');
+		INSERT INTO stores(tenant_id,store_id,name,qr_entry_mode) VALUES('tojima','main','本店','DIRECT_SCAN');
+		INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES('tojima','main','t01','Terrace','other-operator-locator')`); err != nil {
+		t.Fatal(err)
+	}
+	stale := plan{Tenant: named{ID: "tojima", Name: "東島"}, StoreID: "main", StoreName: "本店",
+		Mode: tablesession.StaffOpen, ModeChanged: false,
+		NewTables: []tableRow{{ID: "t01", Name: "Indoor", Locator: "stale-plan-locator"}}}
+	if err := store.Apply(ctx, "tojima", stale); err != nil {
+		t.Fatal(err)
+	}
+	var mode, name, locator string
+	if err := pool.QueryRow(ctx, `SELECT s.qr_entry_mode,d.name,d.public_locator FROM stores s JOIN dining_tables d USING(tenant_id,store_id) WHERE d.table_id='t01'`).Scan(&mode, &name, &locator); err != nil {
+		t.Fatal(err)
+	}
+	if mode != string(tablesession.StaffOpen) || name != "Indoor" || locator != "other-operator-locator" {
+		t.Fatalf("want STAFF_OPEN/Indoor/kept locator, got %s/%s/%s", mode, name, locator)
+	}
+}

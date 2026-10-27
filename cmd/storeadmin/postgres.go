@@ -127,7 +127,7 @@ func (p *postgresStore) Apply(ctx context.Context, tenantID string, write plan) 
 	}
 	for _, table := range write.NewTables {
 		if _, err := tx.Exec(ctx, `INSERT INTO dining_tables(tenant_id,store_id,table_id,name,public_locator) VALUES($1,$2,$3,$4,$5)
-			ON CONFLICT (tenant_id,store_id,table_id) DO NOTHING`,
+			ON CONFLICT (tenant_id,store_id,table_id) DO UPDATE SET name=EXCLUDED.name`,
 			tenantID, write.StoreID, table.ID, table.Name, table.Locator); err != nil {
 			return err
 		}
@@ -142,7 +142,13 @@ func (p *postgresStore) Apply(ctx context.Context, tenantID string, write plan) 
 		return err
 	}
 
-	if write.ModeChanged {
+	// Re-read instead of trusting the pre-read plan: a concurrent first apply
+	// may have created the store with another mode between our read and insert.
+	var current string
+	if err := p.pool.QueryRow(ctx, `SELECT qr_entry_mode FROM stores WHERE tenant_id=$1 AND store_id=$2`, tenantID, write.StoreID).Scan(&current); err != nil {
+		return err
+	}
+	if tablesession.Mode(current) != write.Mode {
 		if err := p.sessions.SetStoreMode(ctx, tenantID, write.StoreID, write.Mode); err != nil {
 			return err
 		}
