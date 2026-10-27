@@ -151,6 +151,7 @@ func run() error {
 	runtime := httpapi.NewOperationsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
 		identity, authz.PolicyAuthorizer{Directory: directory})
 	if *withPayments || *stripeSandbox {
+		fixture.Operations.EnableCardPayments()
 		runtime, err = httpapi.NewPaymentsRuntime(fixture.Sessions, fixture.Menus, fixture.Orders, fixture.Operations,
 			paymentService, identity, authz.PolicyAuthorizer{Directory: directory}, httpapi.PaymentsHTTPConfig{
 				Proofs: proofs, Origin: doc.BaseURL, AllowLoopbackHTTP: true, WebhookSecrets: []string{webhookSecret},

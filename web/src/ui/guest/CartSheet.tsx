@@ -14,6 +14,7 @@ const ja = {
   total: '税込合計', tax: '内消費税', method: '今回のお支払い方法', stripe: 'クレジットカード', cash: '店頭で現金',
   demoCash: '現金（デモ・テスト専用）', stripeNote: '注文を確定しても、お支払いは完了しません。', cashNote: '現金のお支払いはスタッフが確認します。',
   confirm: 'この内容で注文を確定', working: '送信中…', loading: '確認しています…', back: 'カートへ戻る',
+  paymentUnavailable: 'この店舗では現在ご注文を確定できません。スタッフにお声がけください。',
   amountError: '金額を安全に表示できません。注文を続けられません。', retry: '前回の操作を照合して再試行',
   stale: 'カートまたは価格が更新されました。最新内容で金額を確認し直してください。',
 };
@@ -24,6 +25,7 @@ const copy: Record<'ja' | 'zh', Record<keyof typeof ja, string>> = { ja, zh: {
   preview: '確認金額', previewHint: '送出前請確認最新品項和金額。', total: '含稅總額', tax: '其中消費稅', method: '本次付款方式',
   stripe: '信用卡', cash: '店內現金', demoCash: '現金（展示測試專用）', stripeNote: '確認訂單後，付款仍未完成。', cashNote: '現金付款由服務人員確認收款。',
   confirm: '確認並送出訂單', working: '送出中…', loading: '正在確認…', back: '返回購物車', amountError: '無法安全顯示金額，暫時不能繼續送單。',
+  paymentUnavailable: '本店目前無法確認訂單，請洽店員。',
   retry: '查核並重試上一項操作', stale: '購物車或價格已更新，請重新確認最新內容與金額。',
 } };
 
@@ -41,6 +43,7 @@ export interface CartSheetProps {
   degraded?: boolean;
   payment: 'CASH' | 'STRIPE';
   cashEnabled: boolean;
+  cardEnabled: boolean;
   onPayment: (payment: 'CASH' | 'STRIPE') => void;
   busy: boolean;
   uncertain: boolean;
@@ -65,7 +68,7 @@ function safeAmount(amount: string | number | undefined): string {
 }
 
 export function CartSheet(props: CartSheetProps) {
-  const { isOpen, onOpenChange, cart, preview, products, locale, demo, demoNotice, syncNotice, syncReasonID, degraded = false, payment, cashEnabled, onPayment, busy, uncertain, unavailable,
+  const { isOpen, onOpenChange, cart, preview, products, locale, demo, demoNotice, syncNotice, syncReasonID, degraded = false, payment, cashEnabled, cardEnabled, onPayment, busy, uncertain, unavailable,
     previewMatchesCart, previewAmountsSafe, error, notice, onPreview, onClearPreview, onInvalidated, onConfirm, onRefresh, onRetry, onRemove, onSetLine, fallbackFocus } = props;
   const t = copy[locale];
   const heading = useRef<HTMLHeadingElement>(null);
@@ -106,12 +109,14 @@ export function CartSheet(props: CartSheetProps) {
         <div className={styles.total}><span>{t.total}</span><strong>{safeAmount(preview.quote.tax.total_gross_jpy)}</strong></div>
         <div className={styles.total}><span>{t.tax}</span><span>{safeAmount(preview.quote.tax.total_tax_jpy)}</span></div>
         <fieldset className={styles.payment}><legend>{t.method}</legend>
-          {!demo && <label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => onPayment('STRIPE')} />{t.stripe}</label>}
+          {cardEnabled && <label><input type="radio" name="payment" checked={payment === 'STRIPE'} onChange={() => onPayment('STRIPE')} />{t.stripe}</label>}
           {cashEnabled && <label><input type="radio" name="payment" checked={payment === 'CASH'} onChange={() => onPayment('CASH')} />{demo ? t.demoCash : t.cash}</label>}
         </fieldset>
-        <p>{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>
+        {!cardEnabled && !cashEnabled
+          ? <p role="status" data-payment-unavailable>{t.paymentUnavailable}</p>
+          : <p>{payment === 'STRIPE' ? t.stripeNote : demo ? t.demoCash : t.cashNote}</p>}
         {!previewAmountsSafe && <p className={styles.error} role="alert">{t.amountError}</p>}
-        {previewMatchesCart && <button className={styles.primary} aria-describedby={degraded ? syncReasonID : undefined} disabled={busy || unavailable || uncertain || !previewAmountsSafe || degraded} onClick={onConfirm}>{busy ? t.working : t.confirm}</button>}
+        {previewMatchesCart && <button className={styles.primary} aria-describedby={degraded ? syncReasonID : undefined} disabled={busy || unavailable || uncertain || !previewAmountsSafe || degraded || (!cardEnabled && !cashEnabled)} onClick={onConfirm}>{busy ? t.working : t.confirm}</button>}
         <button className={styles.control} disabled={busy} onClick={() => { returning.current = true; onClearPreview(); }}>{t.back}</button>
       </> : <>
         <button className={styles.control} aria-label={t.refresh} disabled={busy} onClick={onRefresh}>↻</button>

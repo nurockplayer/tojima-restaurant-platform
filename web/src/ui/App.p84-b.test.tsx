@@ -34,7 +34,7 @@ it('P84 B keeps two mounted carts at 2.5s independently of 30s ORDER_READ and st
     }
     if (path === '/v1/guest/sessions/p84-session/cart') { cartReads++; return json(cart()); }
     if (path.endsWith('/orders')) return json({ orders: [] });
-    if (path.endsWith('/operations')) return json({ orders: [], cash_enabled: true });
+    if (path.endsWith('/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
     if (path === `/v1/guest/orders/${'a'.repeat(32)}/status`) {
       statusReads++;
       return json({ display_state: 'STANDARD', version: 1, payment_status: 'UNPAID', fulfillment_status: 'WAITING', total_gross_jpy: '660', effective_total_gross_jpy: '660', effective_lines: [], adjusted: false, refunds: [], refunded_total_jpy: '0', currency: 'JPY', is_terminal: false });

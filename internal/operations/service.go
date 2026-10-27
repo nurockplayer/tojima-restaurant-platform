@@ -31,7 +31,10 @@ func cashInvoiceDate(now time.Time) time.Time { return now.In(japanLocation) }
 
 // Service contains P-79 operational state. It receives actors from a verified
 // MOD-08 adapter; it does not authenticate identities or manufacture roles.
-type Service struct{ db *pgxpool.Pool }
+type Service struct {
+	db           *pgxpool.Pool
+	cardPayments bool
+}
 
 func New(db *pgxpool.Pool) (*Service, error) {
 	if db == nil {
@@ -39,6 +42,10 @@ func New(db *pgxpool.Pool) (*Service, error) {
 	}
 	return &Service{db: db}, nil
 }
+
+// EnableCardPayments marks this process as able to take Stripe card payments;
+// guests then see card only for stores with an enabled merchant mapping.
+func (s *Service) EnableCardPayments() { s.cardPayments = true }
 
 func validMode(m CashMode) bool { return m == Prepaid || m == PayLater }
 func validActor(s string) bool  { return strings.TrimSpace(s) != "" && len(s) <= 200 }
@@ -521,6 +528,16 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 	} else if err != nil {
 		return GuestOperations{}, err
 	}
+	var card bool
+	if s.cardPayments {
+		err = tx.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM store_stripe_merchants m
+    JOIN stores st USING(tenant_id,store_id) JOIN tenants t USING(tenant_id)
+    WHERE m.tenant_id=$1 AND m.store_id=$2 AND m.enabled AND st.enabled AND st.operating AND t.enabled)`,
+			scope.TenantID, scope.StoreID).Scan(&card)
+		if err != nil {
+			return GuestOperations{}, err
+		}
+	}
 	rows, err := tx.Query(ctx, `SELECT o.order_id,st.payment_status,st.fulfillment_status,
     o.requires_staff_acceptance,st.staff_accepted,coalesce(st.cash_mode,''),
     st.payment_review_required,EXISTS(SELECT 1 FROM operation_kds_cards kc WHERE kc.order_id=o.order_id),
@@ -532,7 +549,7 @@ func (s *Service) ReadGuestOperations(ctx context.Context, sessionID, grant stri
 		return GuestOperations{}, err
 	}
 	defer rows.Close()
-	out := GuestOperations{Orders: []GuestOrderState{}, CashEnabled: enabled}
+	out := GuestOperations{Orders: []GuestOrderState{}, CashEnabled: enabled, CardEnabled: card}
 	for rows.Next() {
 		var o GuestOrderState
 		var review, card bool

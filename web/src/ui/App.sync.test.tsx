@@ -64,7 +64,7 @@ function installFetch(options: {
     if (url.includes('/v1/guest/sessions/session-sync/cart/lines/') && init.method === 'DELETE') return options.remove ? options.remove(url, init) : json(emptyCart);
     if (url.endsWith('/v1/guest/sessions/session-sync/cart')) return options.cart ? options.cart() : json(cartWithMeal);
     if (url.endsWith('/v1/guest/sessions/session-sync/orders')) return json({ orders: [] });
-    if (url.endsWith('/v1/guest/sessions/session-sync/operations')) return json({ orders: [], cash_enabled: true });
+    if (url.endsWith('/v1/guest/sessions/session-sync/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);

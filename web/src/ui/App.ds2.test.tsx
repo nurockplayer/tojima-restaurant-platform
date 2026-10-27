@@ -38,7 +38,7 @@ function installGuestFetch(onAdd: FetchHandler = () => json(emptyCart), options:
     if (url.endsWith('/v1/guest/sessions/session-1/cart/lines') && init.method === 'POST') return onAdd(url, init);
     if (url.endsWith('/v1/guest/sessions/session-1/cart')) return options.onCartRead ? options.onCartRead(url, init) : json(emptyCart);
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -69,7 +69,7 @@ function installCartFetch(options: {
       return json(current ?? cartWithMeal);
     }
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -570,7 +570,7 @@ describe('guest App option sheet acceptance', () => {
       if (url.endsWith('/v1/guest/sessions/session-1/cart/lines') && init.method === 'POST') return addResponse.promise;
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(++cartReads > 0 && pollEnabled ? newestCart : emptyCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -614,7 +614,7 @@ describe('guest App option sheet acceptance', () => {
       if (url.endsWith('/v1/guest/sessions/session-1/cart/lines') && init.method === 'POST') return addCallsCount++ === 0 ? json({ error: 'temporary' }, 503) : replayResponse.promise;
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(++cartReads > 0 && pollEnabled ? newestCart : emptyCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
@@ -658,7 +658,7 @@ describe('guest App option sheet acceptance', () => {
       if (url.endsWith('/v1/guest/tables/ds2-app/menu?amounts=string')) return json(menu);
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(++cartReads > 0 && pollEnabled ? pollCart : emptyCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });

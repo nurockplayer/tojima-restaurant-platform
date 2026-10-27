@@ -193,6 +193,7 @@ type GuestOrderState struct {
 type GuestOperations struct {
 	Orders      []GuestOrderState `json:"orders"`
 	CashEnabled bool              `json:"cash_enabled"`
+	CardEnabled bool              `json:"card_enabled"`
 }
 
 type OutboxEvent struct {

@@ -24,7 +24,7 @@ it('P84 renders untrusted menu category, product and description as literal text
     });
     if (path === '/v1/guest/sessions/p84-session/cart') return json({ session_id: 'p84-session', generation: 1, version: 1, lines: [] });
     if (path === '/v1/guest/sessions/p84-session/orders') return json({ orders: [] });
-    if (path === '/v1/guest/sessions/p84-session/operations') return json({ orders: [], cash_enabled: true });
+    if (path === '/v1/guest/sessions/p84-session/operations') return json({ orders: [], cash_enabled: true, card_enabled: true });
     throw new Error(`Unexpected P84 request: ${path}`);
   }));
   const host = document.createElement('div');
