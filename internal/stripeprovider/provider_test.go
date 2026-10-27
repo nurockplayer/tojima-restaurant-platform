@@ -164,7 +164,7 @@ func TestRefundCreateAndRetrieveUseOriginalIntentScopeAndIdempotency(t *testing.
 	if got.Status != "pending" || got.AmountJPY != 500 || got.PaymentIntentID != "pi_test123" || got.LiveMode {
 		t.Fatalf("refund result %#v", got)
 	}
-	if gotForm.Get("payment_intent") != "pi_test123" || gotForm.Get("amount") != "500" || gotForm.Get("currency") != "jpy" || gotForm.Get("metadata[tenant_id]") != "tenant-1" || gotForm.Get("metadata[store_id]") != "store-1" || gotForm.Get("metadata[order_id]") != "order-1" || gotForm.Get("metadata[refund_id]") != "refund-1" {
+	if gotForm.Get("payment_intent") != "pi_test123" || gotForm.Get("amount") != "500" || gotForm.Has("currency") || gotForm.Get("metadata[tenant_id]") != "tenant-1" || gotForm.Get("metadata[store_id]") != "store-1" || gotForm.Get("metadata[order_id]") != "order-1" || gotForm.Get("metadata[refund_id]") != "refund-1" {
 		t.Fatalf("unexpected refund form %#v", gotForm)
 	}
 	retrieved, err := p.RetrieveRefund(context.Background(), req.Account, "re_test123")

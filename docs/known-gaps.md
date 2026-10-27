@@ -4,7 +4,7 @@ As of 2026-10-27 JST, main `db13a8e`; MVP done does not mean pilot approval.
 
 ## Payments (EXT-1)
 
-- **Owner: P-80 payments/merchant owner.** Real Sandbox evidence covers tenant A paid / declined / 3DS only (2026-10-27 JST). Open: concurrent A+B isolation ([P-84 5a](p84-acceptance-matrix.md)), an actual asynchronous payment method, Checkout expiry and reconciliation, and refund journeys (5i).
+- **Owner: P-80 payments/merchant owner.** Real Sandbox evidence: tenant A paid / declined / 3DS (2026-10-27 JST); concurrent A+B isolation ([P-84 5a](p84-acceptance-matrix.md)), Checkout expiry and a full refund (2026-10-28 JST). Open: an actual asynchronous payment method (5i; fixture merchants lack `konbini_payments`). Phase-1 pilot takes payment at the store's own register; Stripe is phase 2.
 - Stripe Checkout custom domains are not accepted: the provider allows exactly `checkout.stripe.com` ([PR #65](https://github.com/nurockplayer/tojima-restaurant-platform/pull/65)). Enabling a custom domain needs an explicit allowlist change.
 - Live mode is not authorised; test-mode evidence is not authorisation.
 - A lost original Checkout grant has no identity recovery in MVP (D9, [P-84 5h](p84-acceptance-matrix.md)); manager void exists for expired-unpaid orders.
@@ -38,7 +38,7 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 
 ### 決済（EXT-1）
 
-- **担当: P-80 決済／merchant 責任者。** 実 Sandbox 証跡は tenant A の paid / declined / 3DS のみ（2026-10-27 JST）。A+B 同時分離（[P-84 5a](p84-acceptance-matrix.md)）、実際の非同期決済手段、Checkout 期限切れと照合、返金経路（5i）は未完了。
+- **担当: P-80 決済／merchant 責任者。** 実 Sandbox 証跡: tenant A の paid / declined / 3DS（2026-10-27 JST）、A+B 同時分離（[P-84 5a](p84-acceptance-matrix.md)）、Checkout 期限切れ、全額返金（2026-10-28 JST）。未完了: 実際の非同期決済手段（5i、fixture merchant に `konbini_payments` なし）。第1段階の試店は店舗の既存レジで精算し、Stripe は第2段階。
 - Stripe Checkout custom domain は未対応。provider は `checkout.stripe.com` のみ許可する（[PR #65](https://github.com/nurockplayer/tojima-restaurant-platform/pull/65)）。有効化には明示的な allowlist 変更が必要。
 - live mode は未承認。test mode の証跡は承認ではない。
 - 元の Checkout grant を紛失した場合、MVP に identity recovery はない（D9、[P-84 5h](p84-acceptance-matrix.md)）。期限切れ未払注文には manager void がある。
@@ -72,7 +72,7 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 
 ### 付款（EXT-1）
 
-- **負責人：P-80 付款／商戶負責人。** 真實 Sandbox 證據僅涵蓋 tenant A paid / declined / 3DS（2026-10-27 JST）。A+B 並行隔離（[P-84 5a](p84-acceptance-matrix.md)）、實際非同步付款方式、Checkout 到期與對帳、退款流程（5i）仍未完成。
+- **負責人：P-80 付款／商戶負責人。** 真實 Sandbox 證據：tenant A paid / declined / 3DS（2026-10-27 JST）；A+B 並行隔離（[P-84 5a](p84-acceptance-matrix.md)）、Checkout 到期、全額退款（2026-10-28 JST）。未完成：實際非同步付款方式（5i；fixture 商戶沒有 `konbini_payments`）。第一階段試營運使用店家原有收銀，Stripe 為第二階段。
 - 不接受 Stripe Checkout custom domain：provider 僅允許 `checkout.stripe.com`（[PR #65](https://github.com/nurockplayer/tojima-restaurant-platform/pull/65)）。啟用 custom domain 須明確修改 allowlist。
 - live mode 尚未授權；test mode 證據不等於授權。
 - 原始 Checkout grant 遺失時，MVP 無身分復原（D9、[P-84 5h](p84-acceptance-matrix.md)）；已過期未付款訂單可由 manager void。
