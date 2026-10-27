@@ -119,10 +119,13 @@ smoke_app_elevated=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smok
     || fail "runtime role attributes query"
 [ "$smoke_app_elevated" = "f" ] \
     || fail "runtime role $smoke_app_user is superuser/createrole/createdb: $smoke_app_elevated"
-if compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$smoke_app_user" -d "$smoke_db" \
-    -c 'CREATE TABLE smoke_ddl_probe(i int)' >/dev/null 2>&1; then
+# The probe must fail for lack of privilege, not because the role cannot connect.
+if smoke_ddl=$(compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$smoke_app_user" -d "$smoke_db" \
+    -c 'CREATE TABLE smoke_ddl_probe(i int)' 2>&1); then
     fail "runtime role $smoke_app_user created a table (DDL allowed)"
 fi
+printf '%s\n' "$smoke_ddl" | grep -q 'permission denied for schema' \
+    || fail "runtime role DDL probe failed for another reason"
 echo "runtime role: $smoke_app_user is not elevated and cannot create tables"
 
 smoke_staffadmin=$(compose run --rm --no-deps --entrypoint /staffadmin server status --subject nobody) \
