@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -28,8 +29,11 @@ const (
 	BackchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
 )
 
+var errInvalidLogoutToken = errors.New("invalid logout token")
+
 type Config struct {
 	IssuerURL    string
+	DiscoveryURL string
 	ClientID     string
 	ClientSecret string
 	PublicOrigin string
@@ -46,25 +50,28 @@ type Handler struct {
 }
 
 func NewHandler(ctx context.Context, store *Store, cfg Config) (*Handler, error) {
-	if store == nil || strings.TrimSpace(cfg.IssuerURL) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
-		return nil, errors.New("invalid staff auth configuration")
-	}
-	u, err := url.Parse(cfg.PublicOrigin)
-	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(cfg.PublicOrigin, "#") ||
-		(u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != "")) {
-		return nil, errors.New("invalid staff auth public origin")
+	if err := validateConfig(store, cfg); err != nil {
+		return nil, err
 	}
 	if cfg.HTTPClient == nil {
 		cfg.HTTPClient = &http.Client{Timeout: 10 * time.Second}
 	}
-	provider, err := oidc.NewProvider(oidc.ClientContext(ctx, cfg.HTTPClient), cfg.IssuerURL)
+	discoveryURL := cfg.IssuerURL
+	discoveryCtx := oidc.ClientContext(ctx, cfg.HTTPClient)
+	if cfg.DiscoveryURL != "" {
+		discoveryURL = cfg.DiscoveryURL
+		// Only the discovery address changes; the verifier keeps the public issuer.
+		discoveryCtx = oidc.InsecureIssuerURLContext(discoveryCtx, cfg.IssuerURL)
+	}
+	provider, err := oidc.NewProvider(discoveryCtx, discoveryURL)
 	if err != nil {
 		return nil, errors.New("staff auth discovery failed")
 	}
 	var metadata struct {
+		Issuer        string `json:"issuer"`
 		EndSessionURL string `json:"end_session_endpoint"`
 	}
-	if err = provider.Claims(&metadata); err != nil {
+	if err = provider.Claims(&metadata); err != nil || metadata.Issuer != cfg.IssuerURL {
 		return nil, errors.New("invalid staff auth discovery")
 	}
 	return &Handler{
@@ -74,6 +81,30 @@ func NewHandler(ctx context.Context, store *Store, cfg Config) (*Handler, error)
 		oauth:          oauth2.Config{ClientID: cfg.ClientID, ClientSecret: cfg.ClientSecret, Endpoint: provider.Endpoint(), RedirectURL: cfg.PublicOrigin + CallbackPath, Scopes: []string{oidc.ScopeOpenID}},
 		endSessionURL:  metadata.EndSessionURL,
 	}, nil
+}
+
+// validateConfig is shared by eager and lazy construction and performs no I/O.
+func validateConfig(store *Store, cfg Config) error {
+	if store == nil || strings.TrimSpace(cfg.IssuerURL) == "" || strings.TrimSpace(cfg.ClientID) == "" || strings.TrimSpace(cfg.ClientSecret) == "" {
+		return errors.New("invalid staff auth configuration")
+	}
+	u, err := url.Parse(cfg.PublicOrigin)
+	if err != nil || u.Host == "" || u.User != nil || u.Path != "" || u.RawQuery != "" || u.ForceQuery || u.Fragment != "" || strings.Contains(cfg.PublicOrigin, "#") ||
+		(u.Scheme != "https" && !(u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != "")) {
+		return errors.New("invalid staff auth public origin")
+	}
+	issuer, err := url.Parse(cfg.IssuerURL)
+	if err != nil || issuer.Hostname() == "" || issuer.User != nil || issuer.RawQuery != "" || issuer.ForceQuery || strings.Contains(cfg.IssuerURL, "#") || strings.ContainsFunc(cfg.IssuerURL, unicode.IsSpace) ||
+		(issuer.Scheme != "https" && !(issuer.Scheme == "http" && (issuer.Hostname() == "keycloak" || issuer.Hostname() == "127.0.0.1" || issuer.Hostname() == "localhost"))) {
+		return errors.New("invalid staff auth issuer")
+	}
+	if cfg.DiscoveryURL != "" {
+		u, err := url.Parse(cfg.DiscoveryURL)
+		if err != nil || u.Scheme != "http" || u.Host != "keycloak:8080" || u.User != nil || u.RawQuery != "" || u.ForceQuery || strings.Contains(cfg.DiscoveryURL, "#") || u.EscapedPath() != issuer.EscapedPath() {
+			return errors.New("invalid staff auth discovery address")
+		}
+	}
+	return nil
 }
 
 // Mount keeps even method and Origin rejections out of shared caches.
@@ -132,11 +163,15 @@ func authFail(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) cookieSession(ctx context.Context, r *http.Request) (Session, error) {
+	return cookieSession(ctx, h.store, r)
+}
+
+func cookieSession(ctx context.Context, store *Store, r *http.Request) (Session, error) {
 	cookie, err := r.Cookie(SessionCookie)
 	if err != nil || cookie.Value == "" {
 		return Session{}, ErrNoSession
 	}
-	return h.store.ResolveSession(ctx, cookie.Value)
+	return store.ResolveSession(ctx, cookie.Value)
 }
 
 func (h *Handler) begin(w http.ResponseWriter, r *http.Request, purpose string) {
@@ -351,10 +386,36 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 		invalid()
 		return
 	}
-	id, err := h.logoutVerifier.Verify(oidc.ClientContext(r.Context(), h.cfg.HTTPClient), r.PostForm.Get("logout_token"))
-	if err != nil {
+	fresh, err := h.applyBackchannelLogout(r.Context(), r.PostForm.Get("logout_token"), time.Now())
+	if err != nil && !errors.Is(err, errInvalidLogoutToken) {
+		// A valid token we could not apply (JWKS fetch, DB) is not the sender's fault.
+		// Keycloak does not retry; operators revoke with staffadmin (ADR-0008 decision 6).
+		log.Print("staff back-channel logout not applied; revoke the subject with staffadmin if the IdP logout must hold")
+		authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout_not_applied"})
+		return
+	}
+	if err != nil || !fresh {
 		invalid()
 		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) applyBackchannelLogout(ctx context.Context, rawToken string, receivedAt time.Time) (bool, error) {
+	verifyCtx := oidc.ClientContext(ctx, h.cfg.HTTPClient)
+	id, err := h.logoutVerifier.Verify(verifyCtx, rawToken)
+	if err != nil {
+		var expired *oidc.TokenExpiredError
+		if errors.As(err, &expired) && !expired.Expiry.Before(receivedAt) {
+			verifier := h.provider.Verifier(&oidc.Config{ClientID: h.cfg.ClientID, Now: func() time.Time { return receivedAt }})
+			id, err = verifier.Verify(verifyCtx, rawToken)
+		}
+		if err != nil {
+			if strings.Contains(err.Error(), "fetching keys") {
+				return false, err
+			}
+			return false, errInvalidLogoutToken
+		}
 	}
 	var claims struct {
 		IAT    *int64                     `json:"iat"`
@@ -365,8 +426,7 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	var raw map[string]json.RawMessage
 	if id.Claims(&claims) != nil || id.Claims(&raw) != nil {
-		invalid()
-		return
+		return false, errInvalidLogoutToken
 	}
 	_, nonce := raw["nonce"]
 	event, present := claims.Events[BackchannelLogoutEvent]
@@ -375,20 +435,22 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 	validEvent := present && json.Unmarshal(event, &payload) == nil && payload != nil && len(payload) == 0
 	// Replay records are retained for 24 hours. Never accept a token that
 	// could still be valid after its record has been cleaned up.
-	if claims.IAT == nil || claims.JTI == "" || !validEvent || nonce || (claims.SID == "" && claims.Sub == "") || id.Expiry.After(time.Now().Add(24*time.Hour)) {
-		invalid()
-		return
+	if claims.IAT == nil || claims.JTI == "" || !validEvent || nonce || (claims.SID == "" && claims.Sub == "") || id.Expiry.After(receivedAt.Add(24*time.Hour)) {
+		return false, errInvalidLogoutToken
 	}
-	fresh, err := h.store.ApplyIDPLogout(r.Context(), claims.JTI, claims.SID, claims.Sub)
-	if err != nil || !fresh {
-		invalid()
-		return
+	fresh, err := h.store.ApplyIDPLogout(ctx, claims.JTI, claims.SID, claims.Sub)
+	if err != nil {
+		return false, err
 	}
-	w.WriteHeader(http.StatusOK)
+	return fresh, nil
 }
 
 func (h *Handler) Resolve(ctx context.Context, r *http.Request) (authz.Actor, error) {
-	s, err := h.cookieSession(ctx, r)
+	return resolve(ctx, h.store, r)
+}
+
+func resolve(ctx context.Context, store *Store, r *http.Request) (authz.Actor, error) {
+	s, err := cookieSession(ctx, store, r)
 	if err != nil {
 		return authz.Actor{}, authz.ErrDenied
 	}

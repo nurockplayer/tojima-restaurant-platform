@@ -313,6 +313,8 @@ PostgreSQL migration: it is the legacy disposable SQLite check.
 | [014 stripe_unpaid_void](../migrations/postgres/014_stripe_unpaid_void.up.sql) | D9 manager void: `VOIDED` payment status, `STRIPE_VOID` action/idempotency and late-payment refund events / 未払いStripe注文の取消 / 未付款 Stripe 訂單作廢 | Explicitly refuses while any `VOIDED` state, `STRIPE_UNPAID_VOIDED`/`STRIPE_LATE_PAYMENT_REFUND` event or `STRIPE_VOID` action exists; restores pre-D9 constraints / void履歴があると拒否 / 有作廢歷史即拒絕。 |
 | [015 store_guest_display_name](../migrations/postgres/015_store_guest_display_name.up.sql) | Optional public `stores.guest_display_name` (NULL omits the guest topbar name) / 店舗表示名 / 店家顯示名稱 | Drops the column; export non-NULL values first. Migration 015 must be deployed before the app; see [guest store display name](ops/store-guest-display-name.md) / 値の先出しが必要 / 須先匯出非空值。 |
 | [016 payment_work_dispatch_fence](../migrations/postgres/016_payment_work_dispatch_fence.up.sql) | `stripe_payment_work.dispatched_at` fence; conservative backfill marks claimed CREATE work dispatched / 決済送信fence / 付款送出fence | Drops the column; pre-016 binaries must stay stopped (no rolling upgrade across 016) / 016前のworkerを再開しない / 不得重啟016前的worker |
+| [017 staff_auth](../migrations/postgres/017_staff_auth.up.sql) | Staff subjects/sessions/auth transactions/memberships, append-only events, logout replay and revoked IdP sessions / staff認証・membership・追記専用監査 / 員工認證、membership、僅附加稽核 | Down drops the staff tables and every staff session, membership and audit event; back up and require fresh sign-in / 全staff session・権限・監査を削除、backupと再認証必須 / 刪除全部員工session、權限及稽核，須備份並重新登入。 |
+| [018 staff_auth_logout_fence](../migrations/postgres/018_staff_auth_logout_fence.up.sql) | Auth transaction cancel/complete, session auth-state/browser link and previous-token lineage / logout競合fence・旧token / logout競態防護、前代token | Down drops cancellation/completion/link columns and the previous-token table; revoke all staff sessions before downgrade, as old code loses these logout fences. Full Down also drops all sessions via 017 / 戻す前に全staff session失効、旧codeはfence非対応、全Downは017でsessionも削除 / 回退前撤銷全部員工session，舊code缺少fence；完整Down經017刪除所有session。 |
 
 Read the paired downs before any rollback. A failed `Down` rolls back the entire
 transaction. Do not delete audit/history rows or disable guards to force it.
@@ -383,8 +385,8 @@ psql "$rehearsal_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT current_database(), current_schema();
 SELECT version, applied_at FROM schema_migrations ORDER BY version;
--- Exactly versions 1..16, not merely max(version)=16.
-SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16] AS ledger_complete
+-- Exactly versions 1..18, not merely max(version)=18.
+SELECT array_agg(version ORDER BY version)=ARRAY[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18] AS ledger_complete
 FROM schema_migrations;
 SELECT to_regclass('order_read_grants'), to_regclass('order_adjustments'),
        to_regclass('operation_refunds'), to_regclass('cancellation_requests'),
@@ -434,7 +436,7 @@ PGOPTIONS='-c search_path=p84c_rehearsal' pg_restore --dbname="$restore_url" \
 psql "$restore_url" -X -v ON_ERROR_STOP=1 <<'SQL'
 SET search_path TO p84c_rehearsal;
 SELECT * FROM restore_probe; -- p84c-disposable-only, exactly one row
-SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..16
+SELECT array_agg(version ORDER BY version) FROM schema_migrations; -- 1..18
 SELECT to_regclass('cancellation_requests');
 SQL
 # Confirm Up is idempotent on the restored schema.

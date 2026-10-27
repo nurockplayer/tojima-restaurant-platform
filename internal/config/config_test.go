@@ -210,3 +210,79 @@ func TestSecretsAreRedacted(t *testing.T) {
 		}
 	}
 }
+
+func staffEnv() map[string]string {
+	values := guestEnv()
+	values["STAFF_AUTH_MODE"] = "oidc"
+	values["STAFF_OIDC_ISSUER"] = "https://idp.example.invalid/realms/tojima"
+	values["STAFF_OIDC_CLIENT_ID"] = "tojima-staff"
+	values["STAFF_OIDC_CLIENT_SECRET"] = strings.Repeat("s", 32)
+	values["APP_PUBLIC_ORIGIN"] = "https://staff.example.invalid"
+	return values
+}
+
+func TestStaffAuthConfiguration(t *testing.T) {
+	for _, test := range []struct {
+		key, value string
+		valid      bool
+	}{
+		{"STAFF_AUTH_MODE", "oidc", true}, {"STAFF_AUTH_MODE", "disabled", false},
+		{"STAFF_AUTH_MODE", "unexpected", false}, {"STAFF_AUTH_MODE", "OIDC", false},
+		{"STAFF_OIDC_ISSUER", "", false}, {"STAFF_OIDC_CLIENT_ID", "", false},
+		{"STAFF_OIDC_CLIENT_SECRET", "", false}, {"STAFF_OIDC_CLIENT_SECRET", strings.Repeat("s", 31), false},
+		{"STAFF_OIDC_CLIENT_SECRET", strings.Repeat("s", 32), true},
+		{"APP_PUBLIC_ORIGIN", "", false}, {"APP_HEALTH_ONLY", "true", false},
+		{"STAFF_OIDC_ISSUER", "http://keycloak:8080/realms/tojima", true},
+		{"STAFF_OIDC_ISSUER", "http://localhost:8081/realms/tojima", true},
+		{"STAFF_OIDC_ISSUER", "http://127.0.0.1:8081/realms/tojima", true},
+		{"STAFF_OIDC_ISSUER", "http://idp.example.invalid/realm", false},
+		{"STAFF_OIDC_ISSUER", "/realms/tojima", false}, {"STAFF_OIDC_ISSUER", "ftp://localhost/realm", false},
+		{"STAFF_OIDC_ISSUER", "https://user:secret@idp.example.invalid/realm", false},
+		{"STAFF_OIDC_ISSUER", "https://idp.example.invalid/realm?secret=value", false},
+		{"STAFF_OIDC_ISSUER", "https://idp.example.invalid/realm#", false},
+		{"APP_PUBLIC_ORIGIN", "http://127.0.0.1:8080", true},
+		{"APP_PUBLIC_ORIGIN", "http://localhost:8080", false}, {"APP_PUBLIC_ORIGIN", "http://127.0.0.1", false},
+		{"APP_PUBLIC_ORIGIN", "http://127.0.0.1:0", false}, {"APP_PUBLIC_ORIGIN", "https://staff.example.invalid/", false},
+		{"APP_PUBLIC_ORIGIN", "https://staff.example.invalid/path", false},
+		{"APP_PUBLIC_ORIGIN", "https://staff.example.invalid?x=y", false},
+		{"APP_PUBLIC_ORIGIN", "https://staff.example.invalid#", false},
+		{"APP_PUBLIC_ORIGIN", "https://user:secret@staff.example.invalid", false},
+		{"STAFF_OIDC_DISCOVERY_URL", "http://keycloak:8080/realms/tojima", true},
+		{"STAFF_OIDC_DISCOVERY_URL", "http://other:8080/realms/tojima", false},
+		{"STAFF_OIDC_DISCOVERY_URL", "http://keycloak:8080/realms/other", false},
+	} {
+		t.Run(test.key+"="+test.value, func(t *testing.T) {
+			values := staffEnv()
+			values[test.key] = test.value
+			c, err := LoadFromEnv(env(values))
+			if (err == nil) != test.valid {
+				t.Fatalf("valid=%v, error=%v", test.valid, err)
+			}
+			if test.valid && !c.StaffAuth.Enabled {
+				t.Fatal("staff auth not enabled")
+			}
+		})
+	}
+	for _, mode := range []string{"", "disabled"} {
+		values := guestEnv()
+		values["STAFF_AUTH_MODE"] = mode
+		c, err := LoadFromEnv(env(values))
+		if err != nil || c.StaffAuth.Enabled {
+			t.Fatalf("disabled mode: %v", err)
+		}
+	}
+	values := stripeEnv()
+	for key, value := range staffEnv() {
+		if strings.HasPrefix(key, "STAFF_") {
+			values[key] = value
+		}
+	}
+	c, err := LoadFromEnv(env(values))
+	if err != nil || !c.StaffAuth.Enabled || !c.Stripe.Enabled || c.Stripe.Origin != c.StaffAuth.PublicOrigin {
+		t.Fatalf("combined config: %v", err)
+	}
+	secret := values["STAFF_OIDC_CLIENT_SECRET"]
+	if strings.Contains(fmt.Sprintf("%v %+v %#v", c.StaffAuth, c.StaffAuth, c.StaffAuth), secret) {
+		t.Fatal("staff secret leaked")
+	}
+}

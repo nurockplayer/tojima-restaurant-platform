@@ -42,7 +42,7 @@ func request(handler http.Handler, method, path string) *httptest.ResponseRecord
 }
 func TestProductionNamespacesDenyBeforeDispatch(t *testing.T) {
 	forbiddenNext := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { t.Fatal("staff request reached API/SPA") })
-	handler := productionHandler(forbiddenNext, forbiddenNext)
+	handler := productionHandler(forbiddenNext, forbiddenNext, nil, "")
 	for _, path := range []string{
 		"/v1/staff", "/v1/admin", "/v1/staff/tenants/t/stores/s/tables/a/sessions",
 		"/v1/staff/tenants/t/stores/s/operations/kds", "/v1/staff/tenants/t/stores/s/operations/reviews",
@@ -69,7 +69,7 @@ func TestProductionDeniesEncodedAndNormalizedNamespaces(t *testing.T) {
 			t.Run(method+" "+path, func(t *testing.T) {
 				called := false
 				api := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
-				handler := productionHandler(api, http.NotFoundHandler())
+				handler := productionHandler(api, http.NotFoundHandler(), nil, "")
 				got := request(handler, method, path)
 				if got.Code != http.StatusForbidden {
 					t.Errorf("status = %d, want 403", got.Code)
@@ -94,7 +94,7 @@ func TestProductionDispatchKeepsAPIOutOfSPAFallback(t *testing.T) {
 		}
 		http.NotFound(w, r)
 	})
-	handler := productionHandler(api, spa)
+	handler := productionHandler(api, spa, nil, "")
 	for path, status := range map[string]int{"/healthz": 200, "/v1/guest/tables/table-1": 204, "/v1/unknown": 404, "/v1": 404, "/checkout/return": 200} {
 		got := request(handler, "GET", path)
 		if got.Code != status {
@@ -111,13 +111,13 @@ func TestSPAFallbackFilesAndCaching(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeSPA()
-	handler := productionHandler(http.NotFoundHandler(), spa)
+	handler := productionHandler(http.NotFoundHandler(), spa, nil, "")
 	for _, test := range []struct {
 		path        string
 		status      int
 		body, cache string
 	}{
-		{"/", 200, "guest shell", "no-cache"}, {"/guest/orders/123", 200, "guest shell", "no-cache"},
+		{"/", 200, "guest shell", "no-cache"}, {"/staff/auth/login", 200, "guest shell", "no-cache"}, {"/guest/orders/123", 200, "guest shell", "no-cache"},
 		{"/index.html", 200, "guest shell", "no-cache"}, {"/assets/main-abcdefgh.js", 200, "console.log", "public, max-age=31536000, immutable"},
 		{"/robots.txt", 200, "Disallow:", "no-cache"}, {"/assets/", 404, "404", "no-cache"},
 		{"/assets/missing.js", 404, "404", "no-cache"}, {"/assets/missing", 404, "404", "no-cache"},
@@ -274,14 +274,17 @@ func TestComposedAPIPaymentMountsAndSecurity(t *testing.T) {
 	}
 	for _, enabled := range []bool{false, true} {
 		cfg.Stripe.Enabled = enabled
-		api, worker, err := composeAPI(pool, cfg)
+		api, worker, staff, err := composeAPI(pool, cfg)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if staff != nil {
+			t.Fatal("staff enabled by Stripe configuration")
 		}
 		if (worker != nil) != enabled {
 			t.Errorf("worker configured with Stripe enabled=%v", enabled)
 		}
-		handler := productionHandler(api, http.NotFoundHandler())
+		handler := productionHandler(api, http.NotFoundHandler(), nil, "")
 		// Query credentials are denied by the actual ORDER_READ handler without DB I/O.
 		if got := request(handler, "GET", "/v1/guest/orders/order/status?token=forbidden"); got.Code != 403 {
 			t.Errorf("ORDER_READ route = %d", got.Code)

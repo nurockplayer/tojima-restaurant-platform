@@ -26,7 +26,19 @@ type Config struct {
 	WebRoot     string
 	Sessions    tablesession.Options `json:"-"`
 	Payments    payments.Config
-	Stripe      StripeConfig `json:"-"`
+	Stripe      StripeConfig    `json:"-"`
+	StaffAuth   StaffAuthConfig `json:"-"`
+}
+
+type StaffAuthConfig struct {
+	Enabled                                         bool
+	IssuerURL, ClientID, ClientSecret, PublicOrigin string
+	// DiscoveryURL optionally reaches the same Keycloak realm on the private Compose network.
+	DiscoveryURL string
+}
+
+func (StaffAuthConfig) Format(w fmt.State, _ rune) {
+	_, _ = io.WriteString(w, "[redacted staff auth configuration]")
 }
 
 type StripeConfig struct {
@@ -76,6 +88,42 @@ func LoadFromEnv(lookup func(string) (string, bool)) (Config, error) {
 		c.HealthOnly = true
 	default:
 		return Config{}, fmt.Errorf("APP_HEALTH_ONLY must be true or false")
+	}
+	switch get("STAFF_AUTH_MODE") {
+	case "", "disabled":
+	case "oidc":
+		c.StaffAuth.Enabled = true
+	default:
+		return Config{}, fmt.Errorf("STAFF_AUTH_MODE must be disabled or oidc")
+	}
+	if c.HealthOnly && c.StaffAuth.Enabled {
+		return Config{}, fmt.Errorf("APP_HEALTH_ONLY cannot be combined with STAFF_AUTH_MODE=oidc")
+	}
+	if c.StaffAuth.Enabled {
+		c.StaffAuth.IssuerURL = get("STAFF_OIDC_ISSUER")
+		c.StaffAuth.ClientID = get("STAFF_OIDC_CLIENT_ID")
+		c.StaffAuth.ClientSecret = get("STAFF_OIDC_CLIENT_SECRET")
+		c.StaffAuth.PublicOrigin = get("APP_PUBLIC_ORIGIN")
+		c.StaffAuth.DiscoveryURL = get("STAFF_OIDC_DISCOVERY_URL")
+		if !validIssuerURL(c.StaffAuth.IssuerURL) {
+			return Config{}, fmt.Errorf("STAFF_OIDC_ISSUER must be an absolute HTTPS URL (HTTP only for keycloak, 127.0.0.1 or localhost)")
+		}
+		if strings.TrimSpace(c.StaffAuth.ClientID) == "" {
+			return Config{}, fmt.Errorf("STAFF_OIDC_CLIENT_ID is required")
+		}
+		if len(c.StaffAuth.ClientSecret) < 32 || strings.TrimSpace(c.StaffAuth.ClientSecret) == "" {
+			return Config{}, fmt.Errorf("STAFF_OIDC_CLIENT_SECRET must contain at least 32 characters")
+		}
+		if !validPublicOrigin(c.StaffAuth.PublicOrigin) {
+			return Config{}, fmt.Errorf("APP_PUBLIC_ORIGIN must be an HTTPS origin or http://127.0.0.1:<port>, without a trailing slash")
+		}
+		if raw := c.StaffAuth.DiscoveryURL; raw != "" {
+			u, e := url.Parse(raw)
+			issuer, _ := url.Parse(c.StaffAuth.IssuerURL)
+			if e != nil || !validIssuerURL(raw) || u.Scheme != "http" || u.Host != "keycloak:8080" || u.EscapedPath() != issuer.EscapedPath() {
+				return Config{}, fmt.Errorf("STAFF_OIDC_DISCOVERY_URL must be http://keycloak:8080 with the same realm path as STAFF_OIDC_ISSUER")
+			}
+		}
 	}
 	c.DatabaseURL = get("DATABASE_URL")
 	if c.HealthOnly {
@@ -159,7 +207,7 @@ func LoadFromEnv(lookup func(string) (string, bool)) (Config, error) {
 	switch get("STRIPE_MODE") {
 	case "", "disabled":
 		for _, key := range stripeEnvKeys {
-			if get(key) != "" {
+			if get(key) != "" && !(key == "APP_PUBLIC_ORIGIN" && c.StaffAuth.Enabled) {
 				return Config{}, fmt.Errorf("%s requires STRIPE_MODE=test", key)
 			}
 		}
@@ -232,7 +280,7 @@ func validSecret(s, prefix string) bool {
 }
 func validHTTPSURL(raw string, origin bool) bool {
 	u, err := url.Parse(raw)
-	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.Fragment != "" || u.String() != raw || strings.ContainsFunc(raw, unicode.IsSpace) {
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Opaque != "" || strings.Contains(raw, "#") || u.String() != raw || strings.ContainsFunc(raw, unicode.IsSpace) {
 		return false
 	}
 	return !origin || (u.Path == "" && u.RawQuery == "" && !u.ForceQuery)
@@ -256,4 +304,20 @@ func validateAddress(address string) error {
 		return fmt.Errorf("port must be between 1 and 65535")
 	}
 	return nil
+}
+
+func validIssuerURL(raw string) bool {
+	u, err := url.Parse(raw)
+	if err != nil || u.Hostname() == "" || u.User != nil || u.Opaque != "" || u.RawQuery != "" || u.ForceQuery || strings.Contains(raw, "#") || strings.ContainsFunc(raw, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) {
+		return false
+	}
+	return u.Scheme == "https" || (u.Scheme == "http" && (u.Hostname() == "keycloak" || u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1"))
+}
+
+func validPublicOrigin(raw string) bool {
+	if validHTTPSURL(raw, true) {
+		return true
+	}
+	u, err := url.Parse(raw)
+	return err == nil && validIssuerURL(raw) && u.Scheme == "http" && u.Hostname() == "127.0.0.1" && u.Port() != "" && validateAddress(u.Host) == nil && u.Path == ""
 }
