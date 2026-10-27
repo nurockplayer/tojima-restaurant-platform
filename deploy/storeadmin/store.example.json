@@ -1,0 +1,14 @@
+{
+  "tenant": {"id": "example-co", "name": "Example Co"},
+  "store": {
+    "id": "main",
+    "name": "Example main store",
+    "guest_display_name": "Example",
+    "qr_entry_mode": "STAFF_OPEN",
+    "cash": {"enabled": true, "mode": "PAY_LATER"}
+  },
+  "tables": [
+    {"id": "t01", "name": "Table 1"},
+    {"id": "t02", "name": "Table 2"}
+  ]
+}

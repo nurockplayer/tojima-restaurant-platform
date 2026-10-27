@@ -10,7 +10,7 @@ and [ADR-0003](../adr/0003-identity-ui-and-external-gates.md) remain binding.
 ### Image and local stack
 
 The multi-stage `Dockerfile` builds `web/dist` with Node 24.15 and the pinned
-pnpm (`--frozen-lockfile`), then static `/server`, `/migrate` and `/staffadmin` binaries with
+pnpm (`--frozen-lockfile`), then static `/server`, `/migrate`, `/staffadmin` and `/storeadmin` binaries with
 Go 1.27.1. The distroless final image runs as `nonroot`, with no shell or curl.
 `/server` serves the built SPA at `/app/web/dist` and the guest API.
 
@@ -136,6 +136,30 @@ missing asset/file paths return 404. Directories are never listed. Dotfiles,
 traversal and symlink escapes are denied using `os.Root`. HTML and ordinary
 files use `no-cache`; hashed Vite files under `/assets/` use one-year immutable
 caching; APIs use `no-store`, with `nosniff` and `no-referrer` headers.
+
+### Store provisioning (`/storeadmin`)
+
+An empty migrated DB has no restaurant. `/storeadmin` creates or converges one
+tenant, one store, its tables and the store's cash setting from a JSON file
+(example: [`deploy/storeadmin/store.example.json`](../../deploy/storeadmin/store.example.json)).
+It never writes Stripe merchant rows, so a store provisioned this way is
+cash-only while `STRIPE_MODE` is disabled (phase-1 pilot: pay at the store's register).
+
+```sh
+docker compose run --rm --no-deps -v "$PWD/store.json:/store.json:ro" --entrypoint /storeadmin server apply -f /store.json -public-origin https://ORDER_HOST
+docker compose run --rm --no-deps --entrypoint /storeadmin server tables -tenant TENANT -store STORE -public-origin https://ORDER_HOST -csv > tables.csv
+docker compose run --rm --no-deps --entrypoint /storeadmin server rotate-locator -tenant TENANT -store STORE -table TABLE -public-origin https://ORDER_HOST
+```
+
+- Re-running `apply` is safe: existing table locators never change, tables
+  missing from the file are kept (and listed), and the cash setting is written
+  (with an audit row) only when it differs.
+- Each table gets a random 26-character locator; print the `tables -csv` URLs
+  as QR codes. `rotate-locator` replaces one table's locator when a QR is lost
+  or photographed; the old QR stops working.
+- Order: `apply` → publish the company menu (admin menu API / catalog screen;
+  the store must exist first) → set items AVAILABLE → grant staff with `/staffadmin`.
+- Tax rates are global (migration 003); nothing is provisioned per store.
 
 ### Staff sign-in (Keycloak)
 
@@ -397,6 +421,10 @@ escape・逆斜線・dot/重複区切り・namespace 大小文字変更で曖昧
 resource ID の大小文字は維持。header や env 自体が identity を与えることはない。
 SPA のログイン UX は PR E、ブラウザでの実認証受入は PR F。
 
+### 店舗の登録（`/storeadmin`）
+
+migrate 直後の DB に店舗はない。`/storeadmin apply -f store.json` が JSON（[例](../../deploy/storeadmin/store.example.json)）から tenant・店舗・卓・現金設定を作成／収束させる。Stripe merchant は書かないため、`STRIPE_MODE` 無効時は現金のみ（第1段階の試店は店舗レジで精算）。再実行しても既存卓の locator は変わらず、ファイルにない卓は残す。`tables -csv` の URL を QR に印刷し、QR 紛失時は `rotate-locator`。順序: `apply` → 会社メニュー公開 → 販売可に設定 → `/staffadmin` でスタッフ付与。コマンド例は英語節を参照。
+
 ### Staff sign-in (Keycloak) / スタッフ認証
 
 通常の stack は `STAFF_AUTH_MODE=disabled` のまま。上の英語手順と同じ変数を
@@ -534,6 +562,10 @@ fallback。明確設成 `oidc` 才掛載員工/operations 與 menu API，以已�
 精確符合設定的 Origin。含 escape、反斜線、dot/重複分隔符或 namespace 大小寫變化的
 歧義保護路徑回403，resource ID 大小寫保持原樣。header/env 本身不授予 identity。
 網頁登入 UX 屬 PR E；真實瀏覽器登入驗收屬 PR F。
+
+### 開店設定（`/storeadmin`）
+
+migrate 後的資料庫沒有店舖。`/storeadmin apply -f store.json` 依 JSON（[範例](../../deploy/storeadmin/store.example.json)）建立或收斂 tenant、店舖、桌位與現金設定。它不寫 Stripe 商戶資料，`STRIPE_MODE` 停用時即為純現金（第一階段試營運於店家收銀台結帳）。重複執行不會改變既有桌位 locator，檔案中沒有的桌位會保留。用 `tables -csv` 的網址印 QR；QR 遺失時用 `rotate-locator`。順序：`apply` → 發佈公司菜單 → 設為可販售 → 以 `/staffadmin` 授權員工。指令範例見英文段。
 
 ### Staff sign-in (Keycloak) / 員工登入
 
