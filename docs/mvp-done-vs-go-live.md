@@ -24,7 +24,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **Phase 2, not phase-1 pilot (D18).** **[Owner / payments owner]** Complete EXT-1 Sandbox acceptance and separately authorize Stripe live charge mode, account mapping, webhook ownership, reconciliation and refund handling. Live mode is an explicit Owner decision; test-mode evidence is not authorization.
 - [ ] **[Owner]** (Phase 1 runs on the draft, D20; confirm before phase 2.) Confirm the retention schedule with a 税理士/社労士 as applicable, approve the operational policy and deletion/hold workflow, and confirm the selected storage can meet it. See [draft retention policy](ops/retention.md); no blanket seven-year period applies.
 - [ ] Split database roles: Compose now runs migrate as the owner role, applies `GrantRuntime` to `APP_DB_ROLE` and starts server/`staffadmin` as the DML-only `tojima_app` role. Production must still create that role, apply the same split and verify it on its host before go-live.
-- [ ] Verify ingress abuse controls, HTTPS/cookies/origin, secret storage/rotation, monitoring/alerts, security-event retention and incident contacts. Run `sh scripts/ingress-check.sh --db-host <db host> https://<origin>` (read-only: TLS, HTTP→HTTPS, HSTS, headers, CSP, staff Origin/cookies, DB port closed) and `cmd/bursttest` for the D8 limits. The app sets no HSTS/CSP; the ingress must add them.
+- [ ] Verify ingress abuse controls, HTTPS/cookies/origin, secret storage/rotation, monitoring/alerts, security-event retention and incident contacts. Run `sh scripts/ingress-check.sh --db-host <db host> https://<origin>` (read-only: TLS, HTTP→HTTPS, HSTS, headers, CSP, staff Origin/cookies, DB port closed) from outside the deployment network (public DB address), and `cmd/bursttest` profiles `v1`, `commit`, `checkout` for D8. The app sets no HSTS/CSP; the ingress must add them.
 - [ ] **[Owner]** Review known gaps and explicitly authorize the pilot start. Keep scope to one store and document stop criteria and escalation contacts.
 
 ## 日本語
@@ -51,7 +51,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **第2段階（第1段階の試店には不要、D18）。** **[Owner／決済責任者]** EXT-1 Sandbox 受入を完了し、Stripe live charge mode、account 対応、webhook 管理、照合・返金を別途承認する。test mode の証跡は live 承認ではない。
 - [ ] **[Owner]** （第1段階は草案で運用、D20。第2段階前に確認。）税理士／社労士等に保存期間案を確認し、運用方針、削除／hold 手順を承認し、選定 storage が要件を満たすことを確認する。[保存期間案](ops/retention.md)を参照。全記録一律7年とはしない。
 - [ ] migrate と runtime の DB role 分離：Compose は migrate を owner role で実行し `APP_DB_ROLE` に `GrantRuntime` を適用、server／`staffadmin` は DML のみの `tojima_app` で接続する。本番では role 作成・同分離の適用・確認が未完了。
-- [ ] ingress abuse controls、HTTPS/cookie/origin、secret 保存・rotation、監視・alert、安全ログ保存、incident 連絡先を確認する。 配備先で `sh scripts/ingress-check.sh --db-host <DB host> https://<origin>`（読み取りのみ）と D8 用 `cmd/bursttest` を実行する。HSTS/CSP はアプリでは付けないため ingress で付与する。
+- [ ] ingress abuse controls、HTTPS/cookie/origin、secret 保存・rotation、監視・alert、安全ログ保存、incident 連絡先を確認する。 配備先で `sh scripts/ingress-check.sh --db-host <DB host> https://<origin>`（読み取りのみ）を配備ネットワーク外から（DB は公開アドレス）実行し、D8 用 `cmd/bursttest` を `v1`・`commit`・`checkout` の各 profile で実行する。HSTS/CSP はアプリでは付けないため ingress で付与する。
 - [ ] **[Owner]** 既知 gap を確認して試店開始を明示承認する。1店舗に限定し、中止条件と連絡先を記録する。
 
 ## 繁體中文
@@ -78,5 +78,5 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **第二階段（第一階段試營運不需要，D18）。** **[Owner／付款負責人]** 完成 EXT-1 Sandbox 驗收，另行核准 Stripe live charge mode、account 對應、webhook 管理、對帳與退款。test mode 證據不等於 live 核准。
 - [ ] **[Owner]** （第一階段依草案營運，D20；第二階段前確認。）請稅理士／社勞士等確認保存期限草案，核准營運政策與刪除／hold 流程，並確認 storage 可符合要求。參閱[保存期限草案](ops/retention.md)；不可一律保存七年。
 - [ ] 分開 migrate 與 runtime 的 DB 角色：Compose 已讓 migrate 以 owner role 執行並對 `APP_DB_ROLE` 套用 `GrantRuntime`，server／`staffadmin` 以僅 DML 的 `tojima_app` 連線。正式環境仍須建立角色、套用並驗證同樣分離。
-- [ ] 確認 ingress abuse controls、HTTPS/cookie/origin、secret 儲存與輪替、監控／告警、安全日誌保存及事故聯絡人。 部署後執行 `sh scripts/ingress-check.sh --db-host <DB host> https://<origin>`（唯讀）及 D8 的 `cmd/bursttest`。應用程式不設 HSTS/CSP，須由 ingress 加上。
+- [ ] 確認 ingress abuse controls、HTTPS/cookie/origin、secret 儲存與輪替、監控／告警、安全日誌保存及事故聯絡人。 部署後執行 `sh scripts/ingress-check.sh --db-host <DB host> https://<origin>`（唯讀）（從部署網路外、DB 用公開位址），並以 `v1`、`commit`、`checkout` 三個 profile 執行 D8 的 `cmd/bursttest`。應用程式不設 HSTS/CSP，須由 ingress 加上。
 - [ ] **[Owner]** 審閱已知缺口並明確核准開始試營運。範圍限一間店，記錄停止條件及升級聯絡人。

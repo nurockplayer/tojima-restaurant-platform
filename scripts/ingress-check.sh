@@ -25,7 +25,10 @@ usage: sh scripts/ingress-check.sh [--allow-loopback-http] [--db-host HOST] <pub
 
   <public-origin>        https://host[:port], no path (the deployed public origin)
   --allow-loopback-http  permit http:// for 127.0.0.1, localhost or [::1] only
-  --db-host HOST         also require HOST:5432 to be unreachable from the internet
+  --db-host HOST         also require HOST:5432 to be unreachable from this machine;
+                         run from outside the deployment network with the
+                         host's public address (a private address is reachable
+                         by design and will FAIL)
 
   Checks: tls http-redirect hsts healthz spa-headers csp no-listing
           staff-origin staff-cookie [db-port]
@@ -292,10 +295,12 @@ else
     report PASS spa-headers 'html/nosniff/no-referrer'
 fi
 
-# 6. csp: the app sets none; the ingress should add one (pilot tolerance: WARN).
+# 6. csp: the app sets none, so the deployed ingress must add one.
 csp=$(header_value "$WORK/root.headers" Content-Security-Policy)
-if [ -z "$csp" ]; then
-    report WARN csp 'ingress should add CSP with frame-ancestors'
+if [ -z "$csp" ] && [ "$MODE" != https ]; then
+    report WARN csp 'loopback http; the ingress must add CSP with frame-ancestors'
+elif [ -z "$csp" ]; then
+    report FAIL csp 'missing Content-Security-Policy (ingress must add frame-ancestors)'
 else
     # Match the directive name, not a substring: connect-src https://frame-ancestors.example
     # must not count as a frame-ancestors directive.
@@ -305,8 +310,10 @@ else
         csp_ok=true
     if [ "$csp_ok" = true ]; then
         report PASS csp 'frame-ancestors directive present'
-    else
+    elif [ "$MODE" != https ]; then
         report WARN csp 'CSP without frame-ancestors'
+    else
+        report FAIL csp 'CSP without frame-ancestors'
     fi
 fi
 
@@ -436,7 +443,10 @@ if [ -n "$OPT_DB_HOST" ]; then
 fi
 
 # The D8 rate limits are a separate, deliberate burst probe.
-printf 'NEXT: go run ./cmd/bursttest -base-url %s -allow-remote   # D8 rate limits\n' "$BASE"
+# D8 has three limits; each profile is a separate probe.
+for burst_profile in v1 commit checkout; do
+    printf 'NEXT: go run ./cmd/bursttest -base-url %s -allow-remote -profile %s   # D8 rate limits\n' "$BASE" "$burst_profile"
+done
 
 echo
 if [ "$FAILED" -gt 0 ]; then
