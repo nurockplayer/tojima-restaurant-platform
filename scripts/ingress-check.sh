@@ -21,6 +21,7 @@ ORIGIN=
 PORT_NUMBER=
 HSTS_MIN_MAX_AGE=15552000
 TX_COOKIE=__Host-tojima_staff_tx
+BROWSER_COOKIE=__Host-tojima_staff_browser
 
 usage() {
     cat >&2 <<'USAGE'
@@ -288,7 +289,7 @@ else
     if [ -z "$spa_reason" ]; then
         # Browsers apply the last recognized token; requiring the last token to
         # be no-referrer is stricter (an unknown trailing token also fails).
-        referrer=$(lower "$(header_value "$WORK/root.headers" Referrer-Policy)")
+        referrer=$(lower "$(header_all "$WORK/root.headers" Referrer-Policy | paste -sd, -)")
         referrer=${referrer##*,}
         if [ "$(printf '%s' "$referrer" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" != no-referrer ]; then
             spa_reason='missing Referrer-Policy: no-referrer'
@@ -311,15 +312,19 @@ else
     # Match the directive name, not a substring: connect-src https://frame-ancestors.example
     # must not count as a frame-ancestors directive.
     csp_ok=false
-    printf '%s\n' "$(lower "$csp")" | tr ';' '\n' |
-        awk 'NF && $1 == "frame-ancestors" { found = 1 } END { exit !found }' &&
+    # frame-ancestors must restrict framing: only 'none' or 'self' sources.
+    header_all "$WORK/root.headers" Content-Security-Policy | tr ';,' '\n\n' |
+        awk '{ $0 = tolower($0) } NF && $1 == "frame-ancestors" {
+                found = 1
+                for (i = 2; i <= NF; i++) if ($i != "\047none\047" && $i != "\047self\047") bad = 1
+            } END { exit !(found && !bad) }' &&
         csp_ok=true
     if [ "$csp_ok" = true ]; then
         report PASS csp 'frame-ancestors directive present'
     elif [ "$MODE" != https ]; then
-        report WARN csp 'CSP without frame-ancestors'
+        report WARN csp "CSP frame-ancestors missing or not 'none'/'self'"
     else
-        report FAIL csp 'CSP without frame-ancestors'
+        report FAIL csp "CSP frame-ancestors missing or not 'none'/'self'"
     fi
 fi
 
@@ -379,56 +384,59 @@ else
             *) cookie_reason='login Location is not https' ;;
         esac
     fi
-    cookie=
-    if [ -z "$cookie_reason" ]; then
-        header_all "$WORK/login.headers" Set-Cookie >"$WORK/setcookie"
-        while IFS= read -r line; do
-            case $line in
-                "$TX_COOKIE"=*)
-                    cookie=$line
-                    break ;;
-            esac
-        done <"$WORK/setcookie"
-        [ -n "$cookie" ] || cookie_reason="missing $TX_COOKIE cookie"
-    fi
-    if [ -z "$cookie_reason" ]; then
-        # An empty transaction value is not a usable binding cookie.
-        cookie_value=${cookie#*=}
-        cookie_value=${cookie_value%%;*}
-        [ -n "$(printf '%s' "$cookie_value" | tr -d '[:space:]')" ] ||
-            cookie_reason="empty $TX_COOKIE value"
-    fi
-    if [ -z "$cookie_reason" ]; then
-        printf '%s\n' "$cookie" | tr ';' '\n' | sed 's/^[[:space:]]*//' >"$WORK/attrs"
-        has_secure=false has_httponly=false has_path=false has_samesite=false has_domain=false
-        bad_samesite=
-        while IFS= read -r attr; do
-            case $(lower "$attr") in
-                secure) has_secure=true ;;
-                httponly) has_httponly=true ;;
-                'path=/') has_path=true ;;
-                samesite=lax) has_samesite=true ;;
-                samesite*) bad_samesite=$(lower "$attr") ;;
-                domain=*) has_domain=true ;;
-            esac
-        done <"$WORK/attrs"
-        missing=
-        [ "$has_secure" = true ] || missing="$missing Secure"
-        [ "$has_httponly" = true ] || missing="$missing HttpOnly"
-        [ "$has_path" = true ] || missing="$missing Path=/"
-        [ "$has_samesite" = true ] || missing="$missing SameSite=Lax"
-        if [ "$has_domain" = true ]; then
-            cookie_reason='cookie sets Domain'
-        elif [ -n "${bad_samesite:-}" ]; then
-            cookie_reason='cookie SameSite is not Lax'
-        elif [ -n "$missing" ]; then
-            cookie_reason="cookie missing$missing"
+    [ -z "$cookie_reason" ] && header_all "$WORK/login.headers" Set-Cookie >"$WORK/setcookie"
+    # The callback needs both the transaction and the browser-binding cookie.
+    for want in "$TX_COOKIE" "$BROWSER_COOKIE"; do
+        cookie=
+        if [ -z "$cookie_reason" ]; then
+            while IFS= read -r line; do
+                case $line in
+                    "$want"=*)
+                        cookie=$line
+                        break ;;
+                esac
+            done <"$WORK/setcookie"
+            [ -n "$cookie" ] || cookie_reason="missing $want cookie"
         fi
-    fi
+        if [ -z "$cookie_reason" ]; then
+            # An empty transaction value is not a usable binding cookie.
+            cookie_value=${cookie#*=}
+            cookie_value=${cookie_value%%;*}
+            [ -n "$(printf '%s' "$cookie_value" | tr -d '[:space:]')" ] ||
+                cookie_reason="empty $want value"
+        fi
+        if [ -z "$cookie_reason" ]; then
+            printf '%s\n' "$cookie" | tr ';' '\n' | sed 's/^[[:space:]]*//' >"$WORK/attrs"
+            has_secure=false has_httponly=false has_path=false has_samesite=false has_domain=false
+            bad_samesite=
+            while IFS= read -r attr; do
+                case $(lower "$attr") in
+                    secure) has_secure=true ;;
+                    httponly) has_httponly=true ;;
+                    'path=/') has_path=true ;;
+                    samesite=lax) has_samesite=true ;;
+                    samesite*) bad_samesite=$(lower "$attr") ;;
+                    domain=*) has_domain=true ;;
+                esac
+            done <"$WORK/attrs"
+            missing=
+            [ "$has_secure" = true ] || missing="$missing Secure"
+            [ "$has_httponly" = true ] || missing="$missing HttpOnly"
+            [ "$has_path" = true ] || missing="$missing Path=/"
+            [ "$has_samesite" = true ] || missing="$missing SameSite=Lax"
+            if [ "$has_domain" = true ]; then
+                cookie_reason='cookie sets Domain'
+            elif [ -n "${bad_samesite:-}" ]; then
+                cookie_reason='cookie SameSite is not Lax'
+            elif [ -n "$missing" ]; then
+                cookie_reason="cookie missing$missing"
+            fi
+        fi
+    done
     if [ -n "$cookie_reason" ]; then
         report FAIL staff-cookie "$cookie_reason"
     else
-        report PASS staff-cookie "$TX_COOKIE secure contract"
+        report PASS staff-cookie "$TX_COOKIE and $BROWSER_COOKIE secure contract"
     fi
 fi
 
