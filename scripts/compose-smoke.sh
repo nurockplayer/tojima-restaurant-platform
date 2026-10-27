@@ -107,6 +107,10 @@ smoke_table=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smoke_db" -
 [ "$smoke_table" = "t" ] || fail "table_sessions was not created"
 
 echo "migrations: $smoke_applied rows, table_sessions present"
+smoke_staffadmin=$(compose run --rm --no-deps --entrypoint /staffadmin server status --subject nobody) \
+    || fail "staffadmin status"
+printf '%s\n' "$smoke_staffadmin" | grep -qx 'Exists: false' || fail "staffadmin missing-subject status"
+echo 'staffadmin: missing subject reports Exists: false'
 # Seed only the disposable compose DB, through SQL rather than staff fixtures.
 # Reading this known table proves the API used the migrated DB, not a 404 stub.
 compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$smoke_user" -d "$smoke_db" >/dev/null <<'SQL' || fail "seed guest table"

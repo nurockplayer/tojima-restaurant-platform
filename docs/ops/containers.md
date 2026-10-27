@@ -1,6 +1,6 @@
 # Container runtime / コンテナ実行環境 / 容器執行環境
 
-Updated 2026-10-26 JST. `cmd/server` is the deployable guest composition.
+Updated 2026-10-27 JST. `cmd/server` is the deployable guest composition.
 This change does not approve a hosting vendor, production DB policy, staff IdP
 integration or Stripe live activation; [ADR-0002](../adr/0002-transactional-database.md)
 and [ADR-0003](../adr/0003-identity-ui-and-external-gates.md) remain binding.
@@ -10,7 +10,7 @@ and [ADR-0003](../adr/0003-identity-ui-and-external-gates.md) remain binding.
 ### Image and local stack
 
 The multi-stage `Dockerfile` builds `web/dist` with Node 24.15 and the pinned
-pnpm (`--frozen-lockfile`), then static `/server` and `/migrate` binaries with
+pnpm (`--frozen-lockfile`), then static `/server`, `/migrate` and `/staffadmin` binaries with
 Go 1.27.1. The distroless final image runs as `nonroot`, with no shell or curl.
 `/server` serves the built SPA at `/app/web/dist` and the guest API.
 
@@ -177,10 +177,17 @@ caching; APIs use `no-store`, with `nosniff` and `no-referrer` headers.
    membership. There is no public registration or password reset. Use the
    user's Keycloak subject with the existing [staffadmin CLI](../../cmd/staffadmin/main.go)
    (PR D): `grant`, `revoke`, `revoke-sessions`, `hold`, `restore`, `status`.
-   For example, on an approved CLI build with DB env set:
-   `staffadmin grant --actor operator --subject KEYCLOAK_SUBJECT --tenant TENANT --store STORE --role STAFF_CASHIER`.
+   The server image includes `/staffadmin`; use the server service's DB settings
+   (`PG*` in this Compose stack, or `DATABASE_URL` when configured on the service):
+
+   ```sh
+   docker compose run --rm --no-deps --entrypoint /staffadmin server grant --actor operator --subject KEYCLOAK_SUBJECT --tenant TENANT --store STORE --role STAFF_CASHIER
+   ```
+
+   Run this only after PostgreSQL and migrations are ready (`--no-deps` does not
+   start them). Replace `grant` and its flags for the other commands.
    Credential/email/factor changes require `hold`, the Keycloak change, then
-   `restore`; old sessions never revive. No CLI or UI changes are made here.
+   `restore`; old sessions never revive.
 
 Private discovery uses Keycloak's
 [`KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true`](https://www.keycloak.org/server/hostname)
@@ -243,9 +250,28 @@ client scopes via admin REST (global discovery may still advertise
 `offline_access`), an empty default-role composite, the PKCE S256 / `prompt=login`
 / `acr_values=basic` redirect, anonymous staff 403 and wrong-Origin POST 403.
 Its trap removes the stack, volumes, local images and temporary credentials,
-then reports dangling volumes. This is wiring evidence; **browser login,
-password/OTP/LoA freshness and logout acceptance remain PR F**. Secure `__Host-`
-cookies stay enabled in local HTTP; full browser acceptance uses HTTPS.
+then reports dangling volumes. This is wiring evidence.
+
+`orb-test --heavy --host -- sh scripts/staff-auth-acceptance.sh` covers ADR-0008
+F1 with a disposable real Keycloak and an embedded Python 3 stdlib driver (no
+pip or browser). Run only in the heavy window, **weekdays 03:00–15:00 JST**;
+allow roughly **1 GB RAM** for the running stack, plus build overhead. It creates
+`accept-manager`, enrolls OTP through the `CONFIGURE_TOTP` manual-entry form,
+and provisions STORE_MANAGER through the image's `/staffadmin`. Minimal synthetic
+tenant/store rows support the read-only operations access check. It prints
+`PASS <name>` for password-only login, central MFA denial (ADR decision 5),
+OTP step-up and cookie rotation, a second fresh OTP ceremony, prompt-login,
+back-channel revocation within 10 seconds, hold/restore without resurrection,
+and empty offline sessions (also checking assigned scopes). Failure output names
+the step, HTTP status, URL path and form action path, without provider bodies,
+query strings or credentials. Times are JST even under `TZ=UTC`.
+
+The private temporary `.env`, random loopback ports, project-specific stack,
+volumes and local images are removed by the trap; leftover checks must succeed.
+Secure `__Host-` cookies stay enabled. The driver deliberately retains/resends
+these and Keycloak cookies over disposable loopback HTTP; it does not prove
+browser cookie enforcement. **F2 Passkey still requires a real browser / virtual
+authenticator and HTTPS browser acceptance remains a separate gate.**
 
 ### Verification
 
@@ -338,8 +364,15 @@ DB/role、loopback port 8081。管理 port 9000 の ready check は curl を使�
 初回は `KEYCLOAK_PUBLIC_URL/admin/` の bootstrap admin で入り、恒久 admin を作成して
 bootstrap を廃止。realm `tojima` に承認済み SMTP を設定し、招待 user に一時 password、
 `UPDATE_PASSWORD`・`VERIFY_EMAIL`、管理者/経理には `CONFIGURE_TOTP` を指定する。
-factor 設定後に既存 `staffadmin`（PR D）の `grant` で subject と membership を結ぶ。
-資格情報・email・factor 変更は必ず `hold` → Keycloak 変更 → `restore`。登録・自己
+factor 設定後に image 内の `/staffadmin` の `grant` で subject と membership を結ぶ。
+server service と同じ DB 環境（この Compose では PG*、設定時は `DATABASE_URL`）を使う。
+PostgreSQL と migration の完了後に実行する（`--no-deps` は起動しない）。
+
+```sh
+docker compose run --rm --no-deps --entrypoint /staffadmin server grant --actor operator --subject KEYCLOAK_SUBJECT --tenant TENANT --store STORE --role STAFF_CASHIER
+```
+
+他の command は `grant` と flag を置換する。資格情報・email・factor 変更は必ず `hold` → Keycloak 変更 → `restore`。登録・自己
 password reset・account console は無効、default role は空、offline scope は staff
 client に付与しない。flow は password LoA 1＋OTP LoA 2（max age 0）、Cookie/Passkey
 代替なし。JSON import は realm が無い時のみで、既存 realm/secret は自動更新しない。
@@ -369,7 +402,19 @@ back-channel revoke を検証できない間の停止を許容する Owner rule 
 を作る。`.env` 追加後 postgres container を再作成して env を反映（volume は保持）。
 空 password 時は initdb が skip。SQL/trace で password を出力しない。上の staff smoke
 は使い捨て secret/DB を使い、ACR・scope・default role・PKCE redirect・匿名/Origin 403
-を確認し全資源を削除。HTTPS でのブラウザ認証・OTP・LoA freshness・logout 受入は PR F。
+を確認し全資源を削除。
+
+`orb-test --heavy --host -- sh scripts/staff-auth-acceptance.sh` は実 Keycloak と
+Python 3 標準 library のみで ADR-0008 F1 を確認する。重い検証は平日03:00–15:00 JST、
+実行 stack は約1 GB RAM（build は別途）。使い捨て user を `CONFIGURE_TOTP` の手入力画面で
+登録し、image 内 CLI で STORE_MANAGER を付与、最小 tenant/store を SQL で作成。
+password のみの login、MFA 必須 role の403、OTP step-up/連続 ceremony/cookie rotation、
+prompt-login、10秒以内の back-channel revoke、hold/restore、offline session 不在を確認する。
+各項目は `PASS <name>`、失敗は step/HTTP status/path/form action path のみを表示し、
+secret・query・response body は出さない。時刻は JST。trap は private `.env`、container、
+volume、local image を削除し残存確認。Secure cookie を loopback HTTP 上で手動再送するため、
+ブラウザの cookie enforcement は対象外。F2 Passkey（実 browser/virtual authenticator）と
+HTTPS ブラウザ受入は引き続き別 gate。
 
 ### SPA・検証・境界
 
@@ -453,8 +498,15 @@ fallback。明確設成 `oidc` 才掛載員工/operations 與 menu API，以已�
 首次至 `KEYCLOAK_PUBLIC_URL/admin/` 使用 bootstrap admin，建立永久 admin 後停用
 bootstrap。於 realm `tojima` 設定核准的 SMTP，邀請使用者並指定 temporary password、
 `UPDATE_PASSWORD`、`VERIFY_EMAIL`；經理/管理員/財務另加 `CONFIGURE_TOTP`。先完成
-factor，再用既有 `staffadmin`（PR D）`grant` 將 Keycloak subject 對應 membership。
-修改密碼/email/factor 必須 `hold` → Keycloak 變更 → `restore`，舊 session 不復活。
+factor，再用映像內 `/staffadmin` 的 `grant` 將 Keycloak subject 對應 membership。
+沿用 server service 的 DB 環境（此 Compose 為 PG*；若設定則為 `DATABASE_URL`）。
+須先啟動 PostgreSQL 並完成 migration；`--no-deps` 不會啟動它們。
+
+```sh
+docker compose run --rm --no-deps --entrypoint /staffadmin server grant --actor operator --subject KEYCLOAK_SUBJECT --tenant TENANT --store STORE --role STAFF_CASHIER
+```
+
+其他命令替換 `grant` 及其 flags。修改密碼/email/factor 必須 `hold` → Keycloak 變更 → `restore`，舊 session 不復活。
 停用公開註冊、自助 password reset、account console；default role 為空，staff client
 不授予 offline scope。明確 flow 使用 password LoA 1＋OTP LoA 2（max age 0），無
 Cookie/Passkey 捷徑。JSON 僅在 realm 不存在時匯入，既有 realm/secret 不會自動更新。
@@ -481,8 +533,18 @@ activation 並重試。佇列溢位時 handler 保持未公開、staff access �
 既有 volume 不重跑 initdb。先備份，再執行上方一次性 SQL 建立獨立 role/DB；新增 `.env`
 後須重建 postgres container 以載入 env，保留 volume。空密碼時 initdb 會 skip，不可用
 SQL echo/shell trace 輸出密碼。staff smoke 使用臨時機密及 DB，檢查 ACR、scope、空
-預設角色、PKCE redirect、匿名/Origin 403 後清理資源。HTTPS 瀏覽器登入、OTP、LoA
-freshness、logout 的完整驗收仍是 PR F。
+預設角色、PKCE redirect、匿名/Origin 403 後清理資源。
+
+`orb-test --heavy --host -- sh scripts/staff-auth-acceptance.sh` 以真實 Keycloak 與
+Python 3 標準函式庫驗證 ADR-0008 F1，不需 pip 或瀏覽器。重型時段限平日03:00–15:00 JST，
+執行中的 stack 約1 GB RAM，另需建置空間。以 `CONFIGURE_TOTP` 手動輸入頁註冊一次性使用者，
+透過映像 CLI 授予 STORE_MANAGER，SQL 僅建立最少 tenant/store。確認 password-only login、
+MFA 角色403、OTP step-up/連續 ceremony/cookie rotation、prompt-login、10秒內 back-channel
+撤銷、hold/restore 舊 session 不復活、offline session 為空。各項輸出 `PASS <name>`；
+失敗僅顯示 step、HTTP status、path、form action path，不輸出機密、query 或 response body。
+時間一律 JST。trap 刪除 private `.env`、container、volume、local image 並確認無殘留。
+Secure cookie 於 loopback HTTP 手動重送，不驗證瀏覽器 cookie enforcement。
+F2 Passkey（真實瀏覽器/virtual authenticator）及 HTTPS 瀏覽器驗收仍為獨立 gate。
 
 ### SPA、驗證與邊界
 

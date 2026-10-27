@@ -63,7 +63,7 @@ Keycloak（D17：程序啟動後首次 discovery 成功前若 IdP 故障，因�
 A. migration 017 + `internal/staffauth/store` (sessions, memberships implementing `authz.Memberships`, events) + DB tests.
 A2. `internal/authz`: `Actor.StepUpFresh`, `Request.RequiresStepUp`, central MFA-role rule and permission-derived mandatory step-up + tests (refund / membership grant/revoke denied with stale auth even when the caller omits `RequiresStepUp`).
 B. `internal/staffauth` OIDC BFF handlers (tx, login, callback, step-up, logout, back-channel) + IdentityResolver, tested with an in-process fake OIDC issuer (httptest + JWKS signing).
-F. Real-Keycloak acceptance (password, OTP, Passkey, LoA 2 freshness, back-channel, hold/restore, offline tokens) — go-live gate, run in the heavy window.
+F. Real-Keycloak acceptance — go-live gate, run in the heavy window. F1 (password/OTP, central MFA-role denial, fresh step-up, prompt-login, back-channel, hold/restore and no offline sessions) is covered by `scripts/staff-auth-acceptance.sh` (scripted Python stdlib, disposable Keycloak; a successful real run is still required). F2 Passkey remains: real browser / virtual authenticator acceptance, including Passkey-only LoA 1.
 C. `cmd/server` wiring (config: issuer URL, client id/secret from env, public origin), mount staff routes only when configured; Keycloak service + realm JSON in compose; smoke covers login redirect.
 D. `cmd/staffadmin` CLI (grant, revoke, revoke-sessions, hold, restore, list).
 E. Web StaffApp: 401 → redirect to `/staff/auth/login?return=…`; step-up prompt on 403 `step_up_required`.
