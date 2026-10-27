@@ -2,6 +2,7 @@
 import importlib.util
 from contextlib import contextmanager, nullcontext, redirect_stdout, redirect_stderr
 import io
+import os
 import json
 from pathlib import Path
 from types import SimpleNamespace
@@ -99,7 +100,7 @@ class EnvironmentTests(unittest.TestCase):
             mock.patch.object(runner.Path, "is_file", return_value=True),
             mock.patch.object(runner.socket, "socket"),
             mock.patch.object(runner.subprocess, "run", side_effect=[
-                SimpleNamespace(returncode=0, stdout=b"stripe version 1.54.0\n"),
+                SimpleNamespace(returncode=0, stdout=b"stripe version 1.54.0\nChecking for new versions...\n\n"),
                 SimpleNamespace(returncode=0, stdout=b"whsec_synthetic123\n"),
             ]) as cli,
             mock.patch.object(runner, "keychain_key", return_value=self.fixture()["TOJIMA_STRIPE_TEST_SECRET_KEY"]),
@@ -121,7 +122,7 @@ class EnvironmentTests(unittest.TestCase):
             doc = {"id": runner.PLATFORM_ACCOUNT}
         else:
             tenant = next(t for t in "ABC" if f"acct_synthetic{t}" in request.full_url)
-            doc = {"id": f"acct_synthetic{tenant}", "dashboard": "none", "identity": {"country": "jp"},
+            doc = {"id": f"acct_synthetic{tenant}", "dashboard": "none", "identity": {"country": "JP"},
                    "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
                    "defaults": {"currency": "jpy", "responsibilities": {
                        "fees_collector": "application", "losses_collector": "application"}},
@@ -184,7 +185,7 @@ class EnvironmentTests(unittest.TestCase):
         for tenant in "ABC":
             env["TOJIMA_STRIPE_TEST_ACCOUNT_" + tenant] = ids[tenant]
         def doc(tenant, **changes):
-            base = {"id": ids[tenant], "dashboard": "none", "identity": {"country": "jp"},
+            base = {"id": ids[tenant], "dashboard": "none", "identity": {"country": "JP"},
                     "metadata": {"tojima_test_fixture": f"synthetic_merchant_{tenant.lower()}_api"},
                     "defaults": {"currency": "jpy", "responsibilities": {
                         "fees_collector": "application", "losses_collector": "application"}},
@@ -451,6 +452,21 @@ time.sleep(30)
     def assert_redacted(self, text):
         for secret in ("whsec_fake_listener_secret", "sk_test_fake_cli_secret", "whsec_synthetic123"):
             self.assertNotIn(secret, text)
+
+    def test_ready_line_without_tty_prefix(self):
+        # Through a pipe CLI 1.54.0 prints "Getting ready...\nReady! ..." with no "> ".
+        for output, expected in (
+            (b"Getting ready...\nReady! You are using Stripe API Version [x]. Your webhook signing secret is whsec_fake (^C to quit)\n", True),
+            (b"> Ready! Your webhook signing secret is whsec_fake\n", True),
+            (b"Not Ready! whsec_fake\nGetting ready...\n", False),
+        ):
+            read_end, write_end = os.pipe()
+            with os.fdopen(read_end, "rb", buffering=0) as stream:
+                os.write(write_end, output)
+                os.close(write_end)
+                listener = runner.ListenerOutput(stream)
+                listener.thread.join(timeout=5)
+                self.assertEqual(listener.ready.is_set(), expected, output)
 
     def test_slow_ready_gates_runtime_and_keeps_draining(self):
         with tempfile.TemporaryDirectory() as directory:

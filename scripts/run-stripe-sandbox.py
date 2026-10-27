@@ -64,7 +64,8 @@ class ListenerOutput:
         self.thread.start()
 
     def _drain(self, stream):
-        prefix = b"> Ready! "
+        # A TTY shows "> Ready! "; through a pipe CLI 1.54.0 prints "Ready! ".
+        prefix = b"Ready! "
         matched = 0
         escape = 0
         try:
@@ -80,6 +81,8 @@ class ListenerOutput:
                     escape = 1
                 elif byte in (b"\r", b"\n"):
                     matched = 0
+                elif matched == 0 and byte in (b">", b" "):
+                    continue
                 elif matched >= 0:
                     if byte[0] != prefix[matched]:
                         matched = -1
@@ -226,7 +229,7 @@ def verify_merchant_accounts(key, env):
         identity = (account.get("identity") or {}) if isinstance(account, dict) else {}
         responsibilities = ((defaults or {}).get("responsibilities") or {}) if isinstance(defaults, dict) else {}
         if (not isinstance(account, dict) or account.get("id") != account_id or
-                account.get("dashboard") != "none" or identity.get("country") != "jp" or
+                account.get("dashboard") != "none" or str(identity.get("country") or "").lower() != "jp" or
                 responsibilities.get("fees_collector") != "application" or
                 responsibilities.get("losses_collector") != "application" or
                 not isinstance(metadata, dict) or metadata.get("tojima_test_fixture") !=
@@ -263,7 +266,8 @@ def run(args):
     version = subprocess.run([cli, "version"], env=base_env,
                              stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
                              stderr=subprocess.DEVNULL, timeout=5, check=False)
-    if version.returncode != 0 or version.stdout.strip() != b"stripe version 1.54.0":
+    # The CLI appends "Checking for new versions..." to stdout; the version is line one.
+    if version.returncode != 0 or version.stdout.strip().split(b"\n", 1)[0] != b"stripe version 1.54.0":
         raise ValueError("official pinned Stripe CLI 1.54.0 is required")
     # Never persist Stripe CLI login or put the key in argv. Capture the CLI's
     # signing-secret output into memory; do not relay stdout/stderr on errors.
