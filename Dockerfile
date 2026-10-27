@@ -10,7 +10,7 @@ RUN pnpm install --frozen-lockfile
 COPY web/ ./
 RUN pnpm build
 
-# Stage 2: Go binaries (application server and one-shot migration runner).
+# Stage 2: Go binaries (server, migrations and staff provisioning).
 # Go matches go.mod; CGO is off so the result runs on distroless static.
 FROM golang:1.27.1-bookworm AS build
 WORKDIR /src
@@ -20,7 +20,8 @@ COPY cmd ./cmd
 COPY internal ./internal
 COPY migrations ./migrations
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/server ./cmd/server \
- && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/migrate ./cmd/migrate
+ && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/migrate ./cmd/migrate \
+ && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/staffadmin ./cmd/staffadmin
 
 # Stage 3: minimal non-root runtime. No shell and no package manager, so the
 # compose healthcheck runs /server -healthcheck instead of curl.
@@ -28,6 +29,7 @@ FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
+COPY --from=build /out/staffadmin /staffadmin
 # Built SPA assets; documented at /app/web/dist in docs/ops/containers.md.
 # cmd/server serves these assets with SPA navigation fallback.
 COPY --from=web /src/web/dist /app/web/dist
