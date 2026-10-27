@@ -95,10 +95,9 @@ func main() {
 }
 
 func realMain() int {
-	args := os.Args[1:]
-	if _, err := parseArgs(args, io.Discard); err != nil {
-		// Re-run the parser so the usage text reaches stderr.
-		return run(context.Background(), args, os.Stdout, os.Stderr, nil)
+	cmd, err := parseArgs(os.Args[1:], os.Stderr)
+	if err != nil {
+		return 2
 	}
 
 	dsn := os.Getenv("DATABASE_URL")
@@ -123,14 +122,20 @@ func realMain() int {
 		fmt.Fprintln(os.Stderr, "storeadmin: database connection failed")
 		return 1
 	}
-	return run(ctx, args, os.Stdout, os.Stderr, store)
+	return execute(ctx, cmd, os.Stdout, os.Stderr, store)
 }
 
+// run parses arguments once, then executes the command. Parsing happens before
+// any database work, so a bad spec exits 2 without touching the API.
 func run(parent context.Context, args []string, stdout, stderr io.Writer, api storeAPI) int {
 	cmd, err := parseArgs(args, stderr)
 	if err != nil {
 		return 2
 	}
+	return execute(parent, cmd, stdout, stderr, api)
+}
+
+func execute(parent context.Context, cmd command, stdout, stderr io.Writer, api storeAPI) int {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	if api == nil {
@@ -138,6 +143,7 @@ func run(parent context.Context, args []string, stdout, stderr io.Writer, api st
 		return 1
 	}
 
+	var err error
 	switch cmd.name {
 	case "apply":
 		err = applyStore(ctx, cmd, stdout, api)
@@ -341,6 +347,22 @@ func applyStore(ctx context.Context, cmd command, stdout io.Writer, api storeAPI
 	if tenantStatus != "unchanged" || storeStatus != "unchanged" || len(write.NewTables) != 0 || len(write.Renamed) != 0 || write.Cash != nil {
 		if err := api.Apply(ctx, tenantID, write); err != nil {
 			return err
+		}
+		// Print the locators the database holds, not the ones this run
+		// generated: a concurrent apply may have created the same table first,
+		// and its locator is the one the QR label must carry.
+		persisted, err := api.Tables(ctx, tenantID, storeID)
+		if err != nil {
+			return err
+		}
+		stored := make(map[string]tableRow, len(persisted))
+		for _, table := range persisted {
+			stored[table.ID] = table
+		}
+		for i := range lines {
+			if table, ok := stored[lines[i].id]; ok {
+				lines[i].locator = table.Locator
+			}
 		}
 	}
 

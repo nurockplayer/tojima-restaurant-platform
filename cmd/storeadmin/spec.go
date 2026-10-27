@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/url"
 	"os"
 	"regexp"
@@ -152,12 +153,14 @@ func normalizeStore(s storeSpec) (storeSpec, error) {
 	return out, nil
 }
 
+// checkID reports only the field and the rule: a rejected value may be
+// something the operator pasted by mistake, such as a credential-bearing URL.
 func checkID(field, value string) error {
 	if value == "" {
 		return fmt.Errorf("%s is required", field)
 	}
 	if !idPattern.MatchString(value) {
-		return fmt.Errorf("%s %q must be 1-63 lowercase letters, digits or hyphens starting with a letter or digit", field, value)
+		return fmt.Errorf("%s must be 1-63 lowercase letters, digits or hyphens starting with a letter or digit", field)
 	}
 	return nil
 }
@@ -208,7 +211,7 @@ func parseOrigin(raw string) (string, error) {
 	} else if parsed.Scheme != "https" {
 		return "", errors.New("--public-origin must be https, or http for a loopback host")
 	}
-	if parsed.Host == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if parsed.Hostname() == "" || parsed.User != nil || parsed.RawQuery != "" || parsed.Fragment != "" {
 		return "", errors.New("--public-origin must be an origin such as https://order.example.jp")
 	}
 	if parsed.Path != "" && parsed.Path != "/" {
@@ -218,7 +221,11 @@ func parseOrigin(raw string) (string, error) {
 }
 
 func loopbackHost(host string) bool {
-	return host == "127.0.0.1" || host == "localhost" || host == "::1"
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // tableURL renders the guest SPA link the QR code points at (web/src/ui/App.tsx

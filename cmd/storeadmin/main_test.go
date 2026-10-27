@@ -28,6 +28,8 @@ type fakeStore struct {
 	rotated int
 	calls   int
 	err     error
+	// afterApply simulates a concurrent writer that changed rows mid-apply.
+	afterApply func()
 }
 
 func newFakeStore() *fakeStore {
@@ -102,6 +104,9 @@ func (f *fakeStore) Apply(_ context.Context, tenantID string, write plan) error 
 	if write.Cash != nil {
 		f.cash[key] = operations.CashSettings{Enabled: write.Cash.Enabled, Mode: write.Cash.Mode, Version: write.Cash.Expected + 1}
 	}
+	if f.afterApply != nil {
+		f.afterApply()
+	}
 	return nil
 }
 
@@ -172,6 +177,7 @@ func TestParseUsageErrorsDoNotCallStore(t *testing.T) {
 		{"apply too many tables", []string{"apply", "-f", writeSpec(t, many.String())}},
 		{"apply bad origin", []string{"apply", "-f", writeSpec(t, validSpec), "-public-origin", "http://order.example.jp"}},
 		{"apply origin with path", []string{"apply", "-f", writeSpec(t, validSpec), "-public-origin", "https://order.example.jp/guest"}},
+		{"apply origin without host", []string{"apply", "-f", writeSpec(t, validSpec), "-public-origin", "https://:443"}},
 		{"tables without tenant", []string{"tables", "-store", "main"}},
 		{"tables invalid store id", []string{"tables", "-tenant", "tojima", "-store", "Main"}},
 		{"rotate without table", []string{"rotate-locator", "-tenant", "tojima", "-store", "main"}},
@@ -254,15 +260,21 @@ func TestApplyPrintsTableURLsWithPublicOrigin(t *testing.T) {
 		}
 	}
 
-	code, stdout, stderr = runCLI(t, store, "tables", "-tenant", "tojima", "-store", "main", "-public-origin", "http://127.0.0.1:5173")
+	// Any loopback address is acceptable for an http origin, not just 127.0.0.1.
+	code, stdout, stderr = runCLI(t, store, "tables", "-tenant", "tojima", "-store", "main", "-public-origin", "http://127.0.0.2:5173")
 	if code != 0 || stderr != "" {
 		t.Fatalf("tables code=%d stderr=%q", code, stderr)
 	}
 	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
 		fields := strings.Fields(line)
-		if fields[4] != "http://127.0.0.1:5173/?table="+fields[3] {
+		if fields[4] != "http://127.0.0.2:5173/?table="+fields[3] {
 			t.Fatalf("line=%q", line)
 		}
+	}
+
+	code, _, stderr = runCLI(t, store, "tables", "-tenant", "tojima", "-store", "main", "-public-origin", "http://[::1]:5173")
+	if code != 0 || stderr != "" {
+		t.Fatalf("ipv6 loopback code=%d stderr=%q", code, stderr)
 	}
 }
 
@@ -314,6 +326,29 @@ func TestApplyRenamesAddsKeepsAndChangesMode(t *testing.T) {
 	// t02 is still present: apply never deletes tables missing from the file.
 	if len(store.tables[scopeKey("tojima", "main")]) != 3 {
 		t.Fatalf("tables=%+v", store.tables[scopeKey("tojima", "main")])
+	}
+}
+
+// A concurrent apply can insert the same table first; the printed QR locator
+// must then be the persisted one, not the one this run generated.
+func TestApplyPrintsPersistedLocatorAfterConcurrentCreate(t *testing.T) {
+	store := newFakeStore()
+	persisted := "cccccccccccccccccccccccccc"
+	store.afterApply = func() {
+		key := scopeKey("tojima", "main")
+		for i := range store.tables[key] {
+			store.tables[key][i].Locator = persisted
+		}
+	}
+	code, stdout, stderr := runCLI(t, store, "apply", "-f", writeSpec(t, validSpec))
+	if code != 0 || stderr != "" {
+		t.Fatalf("code=%d stderr=%q", code, stderr)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n")[2:4] {
+		fields := strings.Fields(line)
+		if fields[3] != persisted || fields[4] != persisted {
+			t.Fatalf("line=%q want persisted locator %s", line, persisted)
+		}
 	}
 }
 
