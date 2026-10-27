@@ -356,6 +356,24 @@ the script itself removes project images, not shared base images. On this Mac,
 heavy jobs use the Owner's weekday 03:00–15:00 JST window. CI's container job
 builds only; no registry push, deployment or secrets.
 
+### Phase-1 cash pilot acceptance
+
+```sh
+orb-test --heavy --host -- sh scripts/cash-pilot-acceptance.sh
+```
+
+`scripts/cash-pilot-acceptance.sh` proves the phase-1 pilot journey on one
+disposable stack. `/storeadmin` provisions the tenant, store, tables and cash
+setting (no SQL seed); one Keycloak user holds TENANT_ADMIN, STORE_MANAGER,
+KITCHEN and STAFF_CASHIER and signs in with OTP; the company menu is published
+and the product set AVAILABLE; staff open a table, the guest joins it and sees
+`cash_enabled: true` and `card_enabled: false`, is refused `payment_unavailable`
+when committing with the card, and succeeds with cash; the kitchen advances the
+order to SERVED; the cashier settles 2,000 against a 1,100 due with 900 change;
+the session closes and the table reports `open: false`.
+It prints `PASS <step> <time JST>` lines and `RESULT: PASS`, and its trap
+removes the project's containers, volumes and images.
+
 ## 日本語
 
 ### 起動・設定
@@ -505,6 +523,12 @@ project 残存資源チェック、前後の dangling volume 一覧を実行。�
 DB を削除する場合は `docker compose down -v`。TLS/ingress、本番 DB hosting/
 backup、secret 運用、staff のブラウザ認証受入、live activation は別 gate。ADR-0002/0003 は維持。
 
+第1段階（現金パイロット）の通し受入は
+`orb-test --heavy --host -- sh scripts/cash-pilot-acceptance.sh`。`/storeadmin`
+による開店、会社メニューの公開と販売可、staff の卓開放、客の参加と注文、
+KDS の PREPARING/READY/SERVED、現金会計（お預かり2,000／釣銭900）、閉店までを
+`PASS` 行と `RESULT: PASS` で確認する。
+
 ## 繁體中文
 
 ### 啟動與設定
@@ -642,3 +666,9 @@ API 讀取。trap 執行 `down -v --rmi local --remove-orphans`、專案資源�
 03:00–15:00 JST。刪除本機資料用 `docker compose down -v`。TLS/ingress、正式 DB
 主機/備份、機密管理、staff 瀏覽器認證驗收、live activation 仍是分別的 gate，ADR-0002/0003
 持續有效。
+
+第一階段（現金試營運）端到端驗收用
+`orb-test --heavy --host -- sh scripts/cash-pilot-acceptance.sh`：以 `/storeadmin`
+開店、發佈公司菜單並設為可販售、員工開桌、客人加入並點餐、KDS 依序
+PREPARING/READY/SERVED、現金結帳（收 2,000／找 900）、關閉桌次，輸出 `PASS`
+各行與 `RESULT: PASS`。
