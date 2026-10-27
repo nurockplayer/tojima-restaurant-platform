@@ -463,6 +463,32 @@ func TestPostgresStripeCommitResumeWebhookAndReviewGate(t *testing.T) {
 	if guestOrder.FulfillmentStatus != operations.Waiting {
 		t.Fatalf("direct scan should await staff acceptance: %+v", guestOrder)
 	}
+	// Guests only see card when this process takes card payments and the store
+	// has an enabled merchant mapping; the fixture enables the merchant above.
+	if guest.CardEnabled {
+		t.Fatalf("card must be hidden while the process cannot take card payments: %+v", guest)
+	}
+	f.Operations.EnableCardPayments()
+	readCardEnabled := func() bool {
+		t.Helper()
+		state, err := f.Operations.ReadGuestOperations(ctx, grant.Session.ID, grant.Token)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return state.CardEnabled
+	}
+	if _, err = f.Pool.Exec(ctx, `UPDATE store_stripe_merchants SET enabled=false WHERE tenant_id='test-tenant' AND store_id='test-store'`); err != nil {
+		t.Fatal(err)
+	}
+	if readCardEnabled() {
+		t.Fatal("card must be hidden without an enabled merchant mapping")
+	}
+	if _, err = f.Pool.Exec(ctx, `UPDATE store_stripe_merchants SET enabled=true WHERE tenant_id='test-tenant' AND store_id='test-store'`); err != nil {
+		t.Fatal(err)
+	}
+	if !readCardEnabled() {
+		t.Fatal("card must be offered with an enabled merchant mapping")
+	}
 	// The accepted session snapshot is immutable in runtime. This isolated test
 	// fixture backdates it only to exercise scoped staff reads after expiry.
 	if _, err = f.Pool.Exec(ctx, `ALTER TABLE table_sessions DISABLE TRIGGER table_session_snapshot_immutable`); err != nil {

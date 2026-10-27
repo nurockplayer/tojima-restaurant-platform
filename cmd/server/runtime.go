@@ -243,6 +243,7 @@ func composeAPI(pool *pgxpool.Pool, cfg config.Config) (http.Handler, *payments.
 	}
 	var worker *payments.Service
 	if cfg.Stripe.Enabled {
+		ops.EnableCardPayments()
 		proofs, err := checkoutproof.New(checkoutproof.Config{SigningKeys: cfg.Stripe.SigningKeys, TTL: cfg.Stripe.ProofTTL})
 		if err != nil {
 			return nil, nil, nil, errors.New("cannot initialize checkout proofs")

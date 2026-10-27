@@ -185,7 +185,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const [checkoutStatus, setCheckoutStatus] = useState<CheckoutStatus | null>(null);
   const [checkoutError, setCheckoutError] = useState('');
   const [resumingOrderID, setResumingOrderID] = useState('');
-  const [payment, setPayment] = useState<'STRIPE' | 'CASH'>(demo ? 'CASH' : 'STRIPE');
+  const [payment, setPayment] = useState<'STRIPE' | 'CASH'>('CASH');
   const [pin, setPin] = useState('');
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -662,9 +662,20 @@ export function App({ demo = false }: DemoSurfaceProps) {
       && ((previous.lineCount > 0 && lineCount === 0) || previous.menu !== entry?.menu)) focusPage(() => menuHeading.current);
   }, [entry, blocked, loading, tab, cartSheetOpen, optionSheetOpen, cart, focusPage]);
   useEffect(() => {
-    if (demo && payment === 'STRIPE') setPayment('CASH');
-    else if (guestOperations?.cash_enabled === false && payment === 'CASH' && !demo) setPayment('STRIPE');
-  }, [demo, guestOperations?.cash_enabled, payment]);
+    if (demo) {
+      if (payment === 'STRIPE') setPayment('CASH');
+      return;
+    }
+    if (!guestOperations) return;
+    const cardEnabled = !!guestOperations.card_enabled;
+    if (!cardEnabled && payment === 'STRIPE') setPayment('CASH');
+    else if (cardEnabled && !guestOperations.cash_enabled && payment === 'CASH') setPayment('STRIPE');
+  }, [demo, guestOperations, payment]);
+  // Only a method the store offers may be committed, even in the render before
+  // the effect above settles the stored choice.
+  const cardEnabled = !demo && !!guestOperations?.card_enabled;
+  const cashEnabled = !!guestOperations?.cash_enabled;
+  const paymentMethod: 'STRIPE' | 'CASH' = !cardEnabled ? 'CASH' : !cashEnabled ? 'STRIPE' : payment;
   useEffect(() => {
     if (preview && cart && (preview.generation !== cart.generation || preview.version !== cart.version)) {
       dispatchCart({ type: 'preview-cleared' });
@@ -803,7 +814,8 @@ export function App({ demo = false }: DemoSurfaceProps) {
     const origin = syncOrigin(entry);
     setBusy(true); setError(''); setNotice('');
     const key = newOperationKey();
-    if (payment === 'STRIPE') {
+    const method = paymentMethod;
+    if (method === 'STRIPE') {
       try {
         await checkoutClient.ensureContext(entry.grant.session.id, entry.grant.table_join_token);
       } catch {
@@ -815,10 +827,10 @@ export function App({ demo = false }: DemoSurfaceProps) {
       }
     }
     try {
-      const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, payment, key);
+      const result = await cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, preview, method, key);
       if (result.order_read_grant) rememberOrderGrant(result.order_read_grant);
       adoptCart(result.cart, origin); setOrders((current) => [result.order, ...current.filter((order) => order.order_id !== result.order.order_id)]);
-      selectCheckoutOrder(payment === 'STRIPE' ? result.order.order_id : '');
+      selectCheckoutOrder(method === 'STRIPE' ? result.order.order_id : '');
       clearPreview(); setTab('orders'); setNotice(result.outcome === 'ALREADY_COMMITTED' ? t.already : t.order);
       await refresh(entry);
     } catch (cause) {
@@ -827,7 +839,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
         clearPreview(); setError(cause.body.error === 'unavailable' ? t.unavailableLines : t.stale);
       } else if (cause instanceof ApiError && cause.status >= 500) {
         setError(t.network); setUncertain(true);
-        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
+        replay.current = { ...createReplayOperation(key, { preview, payment: method }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       } else if (cause instanceof ApiError) {
         clearPreview();
         if (cause.status === 403 || cause.status === 410) invalidateGrant(entry.grant.session.id);
@@ -838,7 +850,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
       }
       else {
         setError(t.network); setUncertain(true);
-        replay.current = { ...createReplayOperation(key, { preview, payment }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
+        replay.current = { ...createReplayOperation(key, { preview, payment: method }, (original) => cartClient.commit(entry.grant.session.id, entry.grant.table_join_token, original.preview, original.payment, key)), origin };
       }
     } finally { setBusy(false); }
   };
@@ -896,7 +908,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
           sync={sync.degraded ? `${t.syncWaiting}・${syncTime} ${t.syncAt}` : `${t.synced}・${syncTime}`} />
         <CartSheet isOpen={cartSheetOpen} onOpenChange={setCartOpen} cart={cart} preview={preview} products={menuProducts}
           locale={locale} demo={demo} demoNotice={<DemoNotice demo={demo} locale={locale} />}
-          degraded={sync.degraded} syncNotice={syncNotice(`${syncID}-cart`)} syncReasonID={`${syncID}-cart`} payment={payment} cashEnabled={!!guestOperations?.cash_enabled}
+          degraded={sync.degraded} syncNotice={syncNotice(`${syncID}-cart`)} syncReasonID={`${syncID}-cart`} payment={paymentMethod} cashEnabled={!!guestOperations?.cash_enabled} cardEnabled={!demo && !!guestOperations?.card_enabled}
           onPayment={setPayment} busy={busy} uncertain={uncertain} unavailable={unavailable} previewMatchesCart={previewMatchesCart} previewAmountsSafe={previewAmountsSafe}
           error={visibleError} notice={notice} onPreview={() => void openPreview()} onClearPreview={clearPreview} onInvalidated={() => setError((current) => current || t.stale)} onConfirm={() => void confirmOrder()}
           onRefresh={() => void refreshCurrent(entry)} onRetry={() => void retryUncertain()}

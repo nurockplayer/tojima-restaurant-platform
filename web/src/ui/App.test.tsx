@@ -58,7 +58,7 @@ describe('guest app mount', () => {
       if (url.endsWith('/v1/guest/sessions/session-1/cart/commit')) return json({ error: 'unavailable', cart: after }, 409);
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(before);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -109,7 +109,7 @@ describe('guest app mount', () => {
       }
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(currentCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -157,7 +157,7 @@ describe('guest app mount', () => {
       if (url.includes('/v1/guest/sessions/session-1/cart/lines/held-line') && init.method === 'DELETE') { currentCart = { ...currentCart, version: 3, lines: [] }; return json(currentCart); }
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(currentCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -199,7 +199,7 @@ describe('guest app mount', () => {
       if (url.endsWith('/v1/guest/sessions/session-1/cart/commit')) return json({ error: 'unavailable', cart: heldCart }, 409);
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(availableCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
@@ -233,7 +233,7 @@ describe('guest app mount', () => {
         quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: 'カレー', base_gross_jpy: '1100', quantity: 1, options: [{ group_key: 'rice', option_key: 'large', name: '大盛り', price_gross_jpy: '110' }] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1210', total_net_jpy: '1100', total_tax_jpy: '110', buckets: [] } },
         created_at: '2026-10-18T00:00:00Z',
       }] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [{ id: 'order-1', display_state: 'STANDARD', payment_status: 'UNPAID', fulfillment_status: 'WAITING', requires_staff_acceptance: true, staff_accepted: false, cash_mode: 'PREPAID', total_gross_jpy: '1210', effective_total_gross_jpy: '1210', effective_lines: [{ product_name: 'カレー', quantity: 1, line_total_jpy: '1210', option_names: ['大盛り'] }], adjusted: false, refunds: [], refunded_total_jpy: '0' }], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [{ id: 'order-1', display_state: 'STANDARD', payment_status: 'UNPAID', fulfillment_status: 'WAITING', requires_staff_acceptance: true, staff_accepted: false, cash_mode: 'PREPAID', total_gross_jpy: '1210', effective_total_gross_jpy: '1210', effective_lines: [{ product_name: 'カレー', quantity: 1, line_total_jpy: '1210', option_names: ['大盛り'] }], adjusted: false, refunds: [], refunded_total_jpy: '0' }], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -287,7 +287,7 @@ describe('guest app mount', () => {
       if (url.endsWith(`/v1/guest/tables/${demoLocator}/menu?amounts=string`)) return json(menu);
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(initialCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [committed.order] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       if (url.endsWith('/cart/lines') && init.method === 'POST') { writes.push({ url, method: init.method, body: String(init.body) }); return json(addedCart); }
       if (url.endsWith('/cart/preview') && init.method === 'POST') return json(preview);
       if (url.endsWith('/cart/commit') && init.method === 'POST') { writes.push({ url, method: init.method, body: String(init.body) }); return json(committed); }
@@ -389,7 +389,7 @@ describe('guest app mount', () => {
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), operation, async () => {
       reads++;
       if (reads === 2) throw new TypeError('offline');
-      return json({ orders: [reads === 1 ? operation : { ...operation, refunds: [{ status: 'SUCCEEDED', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '330' }], cash_enabled: true });
+      return json({ orders: [reads === 1 ? operation : { ...operation, refunds: [{ status: 'SUCCEEDED', amount_jpy: '330', method: 'STRIPE' }], refunded_total_jpy: '330' }], cash_enabled: true, card_enabled: true });
     });
     await clickButton(host!, '注文履歴');
     if (locale === 'zh') await clickButton(host!, '繁中');
@@ -468,7 +468,7 @@ describe('guest app mount', () => {
         if (failure === 'network') throw new TypeError('Network unavailable');
         return json({ error: 'temporarily_unavailable' }, 503);
       }
-      return json({ orders: [{ id: 'order-1', display_state: reads === 1 ? 'PAID_UNDER_REVIEW' : 'STANDARD', payment_status: 'PAID', fulfillment_status: reads === 1 ? 'WAITING' : 'PREPARING', requires_staff_acceptance: false, staff_accepted: true }], cash_enabled: false });
+      return json({ orders: [{ id: 'order-1', display_state: reads === 1 ? 'PAID_UNDER_REVIEW' : 'STANDARD', payment_status: 'PAID', fulfillment_status: reads === 1 ? 'WAITING' : 'PREPARING', requires_staff_acceptance: false, staff_accepted: true }], cash_enabled: false, card_enabled: true });
     });
     await clickButton(host!, '注文履歴');
     expect(reads).toBe(1);
@@ -498,7 +498,7 @@ describe('guest app mount', () => {
   it.each(['missing', 'network', '503'] as const)('renders %s initial operations neutrally without checkout controls', async (result) => {
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), undefined, async () => {
       if (result === 'network') throw new TypeError('Network unavailable');
-      return result === '503' ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [], cash_enabled: false });
+      return result === '503' ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [], cash_enabled: false, card_enabled: true });
     });
     await clickButton(host!, '注文履歴');
     expect(host?.querySelector('[data-order-status]')?.textContent).toBe('店舗に確認してください');
@@ -512,7 +512,7 @@ describe('guest app mount', () => {
     let reads = 0;
     await mountGuestStatus('DIRECT_SCAN', stripeOrder('order-1'), undefined, async () => {
       reads++;
-      return reads === 2 ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [standardOperation(stripeOrder('order-1'))], cash_enabled: false });
+      return reads === 2 ? json({ error: 'temporarily_unavailable' }, 503) : json({ orders: [standardOperation(stripeOrder('order-1'))], cash_enabled: false, card_enabled: true });
     });
     await clickButton(host!, '注文履歴');
     expect(host?.querySelector('[data-checkout-panel]')).not.toBeNull();
@@ -558,6 +558,7 @@ describe('guest app mount', () => {
       }
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(openCart);
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false, card_enabled: true });
       if (url.endsWith('/v1/guest/sessions/session-1/cart/preview')) {
         previewCalls += 1;
         return json(quoted);
@@ -674,7 +675,7 @@ describe('guest app mount', () => {
       if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(menu);
       if (url.endsWith('/sessions/session-1/cart') && !url.endsWith('/preview')) return json(openCart);
       if (url.endsWith('/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false });
+      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: [], cash_enabled: false, card_enabled: true });
       if (url.endsWith('/cart/preview')) return json(quoted);
       if (url.endsWith('/checkout-context')) { calls.push('context'); return json({ error: 'temporary_failure' }, 503); }
       if (url.endsWith('/cart/commit')) { commits += 1; calls.push('commit'); return json({ error: 'unexpected_commit' }, 500); }
@@ -709,7 +710,7 @@ describe('guest app mount', () => {
       if (url.endsWith('/sessions/session-1/cart/preview')) return json(quoted);
       if (url.endsWith('/sessions/session-1/cart') && init.method !== 'POST') return json(flow.includes('commit') ? emptyCart : openCart);
       if (url.endsWith('/sessions/session-1/orders') && !url.includes('/checkout')) return json({ orders: flow.includes('commit') ? [order] : [] });
-      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: flow.includes('commit') ? [standardOperation(order)] : [], cash_enabled: false });
+      if (url.endsWith('/sessions/session-1/operations')) return json({ orders: flow.includes('commit') ? [standardOperation(order)] : [], cash_enabled: false, card_enabled: true });
       if (url.endsWith('/checkout-context')) { flow.push('bootstrap'); return new Response(null, { status: 204 }); }
       if (url.endsWith('/cart/commit')) { flow.push('commit'); return json({ outcome: 'COMMITTED', order, cart: emptyCart }); }
       if (url.endsWith('/orders/order-created/checkout')) { flow.push('status'); return json(checkoutStatus('order-created', 'CREATE_PENDING', false)); }
@@ -1074,7 +1075,7 @@ describe('guest store display name', () => {
       }
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -1108,7 +1109,7 @@ describe('guest store display name', () => {
       if (url.endsWith('/v1/guest/tables/no-display-name/menu?amounts=string')) return json(guestMenu);
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     });
     vi.stubGlobal('fetch', noNameFetch);
@@ -1128,7 +1129,7 @@ describe('guest store display name', () => {
       if (url.endsWith('/v1/guest/tables/demo-name/menu?amounts=string')) return json({ ...guestMenu, store_display_name: 'API-NAME-MUST-NOT-WIN' });
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -1145,7 +1146,7 @@ describe('guest store display name', () => {
       if (url.endsWith('/v1/guest/sessions/session-1/menu?amounts=string')) return json({ ...guestMenu, store_display_name: 'SESSION-MENU-NAME' });
       if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
       if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [] });
-      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true });
+      if (url.endsWith('/v1/guest/sessions/session-1/operations')) return json({ orders: [], cash_enabled: true, card_enabled: true });
       throw new Error(`Unexpected API request: ${url}`);
     }));
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
@@ -1230,6 +1231,63 @@ describe('guest store display name', () => {
   });
 });
 
+describe('guest payment method availability', () => {
+  async function mountCartWithOperations(operations: Record<string, unknown>) {
+    window.history.replaceState({}, '', '/?table=table-1');
+    const menu = { currency: 'JPY', price_mode: 'TAX_INCLUSIVE', categories: [{ key: 'food', name: '食事', position: 1, products: [{ key: 'meal', name: '定食', effective_price_minor: '1000', position: 1, availability: 'AVAILABLE', selectable: true, option_groups: [] }] }] };
+    const openCart = { session_id: 'session-1', generation: 1, version: 2, lines: [{ line_id: 'line-1', product_key: 'meal', product_name: '定食', product_available: true, quantity: 1, options: [] }] };
+    const quoted = { session_id: 'session-1', generation: 1, version: 2, fingerprint: 'fp-1', quote: { lines: [{ line_id: 'line-1', product_key: 'meal', name: '定食', base_gross_jpy: '1000', quantity: 1, options: [] }], tax: { currency: 'JPY', price_mode: 'INCLUSIVE', total_gross_jpy: '1000', total_net_jpy: '909', total_tax_jpy: '91', buckets: [] } } };
+    const commits: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url === '/v1/guest/tables/table-1') return json(table);
+      if (url === '/v1/guest/tables/table-1/join') return json(grant);
+      if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(menu);
+      if (url.endsWith('/sessions/session-1/cart/preview')) return json(quoted);
+      if (url.endsWith('/sessions/session-1/cart/commit')) {
+        commits.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return json({ outcome: 'COMMITTED', order: { order_id: 'order-1', session_id: 'session-1', generation: 1, payment_method: 'CASH', requires_staff_acceptance: true, total_gross_jpy: '1000', created_at: '2026-10-18T00:00:00Z' }, cart: { ...openCart, generation: 2, version: 0, lines: [] } });
+      }
+      if (url.endsWith('/sessions/session-1/cart')) return json(openCart);
+      if (url.endsWith('/sessions/session-1/orders')) return json({ orders: [] });
+      if (url.endsWith('/sessions/session-1/operations')) return json(operations);
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith('/operations'))).toBe(true);
+    await openCartSheet(host);
+    await clickButton(host, '金額を確認する');
+    return commits;
+  }
+
+  const radios = () => [...document.body.querySelectorAll<HTMLInputElement>('input[type="radio"][name="payment"]')];
+
+  it('hides the card option and sends CASH when the store takes only cash', async () => {
+    const commits = await mountCartWithOperations({ orders: [], cash_enabled: true, card_enabled: false });
+    expect(radios().map((radio) => radio.parentElement?.textContent)).toEqual(['店頭で現金']);
+    expect(radios()[0]?.checked).toBe(true);
+    await clickButton(host!, 'この内容で注文を確定');
+    expect(commits).toHaveLength(1);
+    expect(commits[0]?.payment_method).toBe('CASH');
+  });
+
+  it('selects card when the store cannot take cash', async () => {
+    await mountCartWithOperations({ orders: [], cash_enabled: false, card_enabled: true });
+    expect(radios().map((radio) => radio.parentElement?.textContent)).toEqual(['クレジットカード']);
+    expect(radios()[0]?.checked).toBe(true);
+  });
+
+  it('blocks ordering when the store takes neither payment method', async () => {
+    await mountCartWithOperations({ orders: [], cash_enabled: false, card_enabled: false });
+    expect(radios()).toHaveLength(0);
+    expect(document.body.textContent).toContain('この店舗では現在ご注文を確定できません。スタッフにお声がけください。');
+    expect(getButton(host!, 'この内容で注文を確定').disabled).toBe(true);
+  });
+});
+
 async function mountGuestStatus(
   mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN',
   order: unknown,
@@ -1247,7 +1305,7 @@ async function mountGuestStatus(
     if (url.endsWith('/v1/guest/tables/table-1/menu?amounts=string')) return json(guestMenu);
     if (url.endsWith('/v1/guest/sessions/session-1/cart')) return json(cart);
     if (url.endsWith('/v1/guest/sessions/session-1/orders')) return json({ orders: [order] });
-    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return operationsRoute ? operationsRoute() : json({ orders: [operation], cash_enabled: true });
+    if (url.endsWith('/v1/guest/sessions/session-1/operations')) return operationsRoute ? operationsRoute() : json({ orders: [operation], cash_enabled: true, card_enabled: true });
     throw new Error(`Unexpected API request: ${url}`);
   });
   vi.stubGlobal('fetch', fetchMock);
@@ -1274,7 +1332,7 @@ async function mountCheckoutOrders(
     if (url === '/v1/guest/tables/table-1/menu?amounts=string') return json(guestMenu);
     if (url === '/v1/guest/sessions/session-1/cart') return json({ session_id: 'session-1', generation: 1, version: 0, lines: [] });
     if (url === '/v1/guest/sessions/session-1/orders') return json({ orders });
-    if (url === '/v1/guest/sessions/session-1/operations') return json({ orders: orders.map(standardOperation), cash_enabled: false });
+    if (url === '/v1/guest/sessions/session-1/operations') return json({ orders: orders.map(standardOperation), cash_enabled: false, card_enabled: true });
     if (url.includes('/orders/') && url.includes('/checkout')) return checkoutRoute(url, init);
     throw new Error(`Unexpected API request: ${url}`);
   });
