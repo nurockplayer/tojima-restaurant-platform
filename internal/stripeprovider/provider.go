@@ -343,10 +343,11 @@ func (p *Provider) CreateRefund(ctx context.Context, req CreateRefundRequest) (R
 	if !validRef(req.TenantID) || !validRef(req.StoreID) || !validRef(req.OrderID) || !validRef(req.RefundID) || !validStripeObjectID(req.PaymentIntentID, "pi") || !idempotencyPattern.MatchString(req.IdempotencyKey) || req.AmountJPY <= 0 || req.AmountJPY > p.maxAmountJPY {
 		return RefundResult{}, ErrInvalid
 	}
-	currency := CurrencyJPY
+	// Stripe rejects `currency` on PaymentIntent refunds ("Received unknown
+	// parameter: currency", Sandbox 2026-10-28 JST); JPY is enforced on the response.
 	params := &stripe.RefundCreateParams{
 		Params:        stripe.Params{Context: ctx, IdempotencyKey: stripe.String(req.IdempotencyKey), StripeAccount: stripe.String(req.Account.StripeAccountID)},
-		PaymentIntent: stripe.String(req.PaymentIntentID), Amount: stripe.Int64(req.AmountJPY), Currency: &currency,
+		PaymentIntent: stripe.String(req.PaymentIntentID), Amount: stripe.Int64(req.AmountJPY),
 		Metadata: map[string]string{"tenant_id": req.TenantID, "store_id": req.StoreID, "order_id": req.OrderID, "refund_id": req.RefundID},
 	}
 	r, err := p.client.V1Refunds.Create(ctx, params)
