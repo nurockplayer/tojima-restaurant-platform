@@ -21,7 +21,8 @@ COPY internal ./internal
 COPY migrations ./migrations
 RUN CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/server ./cmd/server \
  && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/migrate ./cmd/migrate \
- && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/staffadmin ./cmd/staffadmin
+ && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/staffadmin ./cmd/staffadmin \
+ && CGO_ENABLED=0 go build -trimpath -ldflags='-s -w' -o /out/storeadmin ./cmd/storeadmin
 
 # Stage 3: minimal non-root runtime. No shell and no package manager, so the
 # compose healthcheck runs /server -healthcheck instead of curl.
@@ -30,6 +31,7 @@ WORKDIR /app
 COPY --from=build /out/server /server
 COPY --from=build /out/migrate /migrate
 COPY --from=build /out/staffadmin /staffadmin
+COPY --from=build /out/storeadmin /storeadmin
 # Built SPA assets; documented at /app/web/dist in docs/ops/containers.md.
 # cmd/server serves these assets with SPA navigation fallback.
 COPY --from=web /src/web/dist /app/web/dist
