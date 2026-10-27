@@ -16,7 +16,7 @@ Go 1.27.1. The distroless final image runs as `nonroot`, with no shell or curl.
 
 ```sh
 cp .env.example .env
-# Replace POSTGRES_PASSWORD and PIN_PEPPER; review the local example policy.
+# Replace POSTGRES_PASSWORD, APP_DB_PASSWORD and PIN_PEPPER; review the local policy.
 # Generate PIN_PEPPER with: openssl rand -base64 32
 # Never commit .env or print resolved compose config containing secrets.
 docker compose up -d --build --wait
@@ -24,15 +24,23 @@ docker compose down -v  # deletes local database data
 ```
 
 Compose starts PostgreSQL 17 (no host DB port, `pgdata` volume), runs `/migrate`
-once, then starts `/server` only after migration success. Both binaries receive
-the same PG* variables, so passwords need no URL encoding. The app itself does
-not migrate, seed tenants/tables, publish menus, enable cash, configure merchants
-or create identities. Use separately authorized provisioning; an empty migrated
-DB has no usable restaurant. Existing `cmd/guesttest`, `cmd/operationstest` and
-`cmd/demogateway` remain unchanged loopback test harnesses.
+once, then starts `/server` only after migration success. `/migrate` keeps the
+owner `POSTGRES_USER` credentials; `/server` (and `staffadmin`, which reuses the
+same service) connects as the DML-only runtime role via `PGUSER`/`PGPASSWORD`.
+Passwords go through libpq variables, so no URL encoding is needed. The app
+itself does not migrate, seed tenants/tables, publish menus, enable cash,
+configure merchants or create identities. Use separately authorized
+provisioning; an empty migrated DB has no usable restaurant. Existing
+`cmd/guesttest`, `cmd/operationstest` and `cmd/demogateway` remain unchanged
+loopback test harnesses.
 
-- Compose uses one PostgreSQL superuser for migrate and server; production must
-  use a separate least-privilege runtime role (no DDL, no role management).
+- Migrations run as the owner role and, with `APP_DB_ROLE` set, apply
+  `GrantRuntime` (DML on tables/sequences, `EXECUTE` on functions, `USAGE` on the
+  schema; no DDL, no `TRUNCATE`, no writes to `schema_migrations`). The server
+  and `staffadmin` connect as `tojima_app` (`APP_DB_USER`), which is a login role
+  created by initdb with no superuser/createdb/createrole and no replication or
+  `BYPASSRLS` attributes. Production must keep this split and grant the role
+  itself, not a superuser.
 
 The HTTP bind inside the image is `APP_ADDR=0.0.0.0:8080`; compose publishes
 `${APP_BIND:-127.0.0.1}:${APP_PORT:-8080}`. TLS/ingress, backups, secret management
@@ -57,6 +65,8 @@ not printed. No config value enables payments by default.
 | `PIN_PEPPER` | Required standard base64 of at least 32 secret bytes. Keep stable across restarts; no automatic random replacement. |
 | `PAYMENT_CREATE_RETRY_WINDOW`, `PAYMENT_CONTINUATION_TTL`, `PAYMENT_WORK_LEASE_TTL` | Required durations, at least 1ms; create retry must be less than 24h. Required even with Stripe disabled because the shared payment policy is constructed for cash and fail-closed Stripe ordering. |
 | `APP_HEALTH_ONLY` | Default `false`. Explicit `true` serves only `/healthz`, needs only `APP_ADDR`, and rejects DB/Stripe/staff OIDC configuration. No DB never silently becomes a healthy empty application. |
+| `APP_DB_USER`, `APP_DB_PASSWORD` | Compose interpolation only, not read by the binaries: initdb creates this login role on a fresh volume and the `server` service passes them as `PGUSER`/`PGPASSWORD`. Defaults to `tojima_app`; the password is required. |
+| `APP_DB_ROLE` | `cmd/migrate` only. When set, `/migrate` applies `GrantRuntime` to that role after `Up`; unset skips the grants (tests and CI unchanged). Compose sets it from `APP_DB_USER`. |
 
 `.env.example` contains **local example policy**, not accepted production TTLs.
 ORDER_READ retains the existing Owner-approved 24h default. Health is process
@@ -273,6 +283,33 @@ these and Keycloak cookies over disposable loopback HTTP; it does not prove
 browser cookie enforcement. **F2 Passkey still requires a real browser / virtual
 authenticator and HTTPS browser acceptance remains a separate gate.**
 
+### Database roles and existing volumes
+
+Compose now splits the database roles. On a fresh volume,
+`deploy/postgres/initdb/20-app-role.sh` creates the login role
+`${APP_DB_USER:-tojima_app}` (empty `APP_DB_PASSWORD` prints a skip message);
+`/migrate` then applies `GrantRuntime` to `APP_DB_ROLE` after every `Up`, so
+tables added by later migrations are covered without default privileges. The
+server and `staffadmin` connect as that role through `PGUSER`/`PGPASSWORD`.
+
+initdb never reruns on an existing `pgdata` volume, so the role and its grants
+must be created once by hand, then applied by rerunning `/migrate` (back up
+first; omit `CREATE ROLE` if it already exists and use an approved password
+rotation instead):
+
+```sh
+docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U tojima -d tojima <<'SQL'
+\getenv app_password APP_DB_PASSWORD
+\getenv app_user APP_DB_USER
+CREATE ROLE :"app_user" LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+SQL
+docker compose run --rm migrate
+```
+
+Use your actual `POSTGRES_USER`/`POSTGRES_DB`/`APP_DB_USER` if changed. The SQL
+never prints the password (do not enable SQL echo or shell tracing). Re-running
+`/migrate` is safe: `Up` and `GrantRuntime` are both idempotent.
+
 ### Verification
 
 ```sh
@@ -298,12 +335,17 @@ builds only; no registry push, deployment or secrets.
 `cmd/server` は PostgreSQL を使う顧客 API と SPA の本番用組込を提供する。
 イメージは Node 24.15＋固定 pnpm（frozen lockfile）、Go 1.27.1 で生成し、
 distroless/nonroot で実行。Compose は PostgreSQL 17 → `/migrate` 成功 →
-`/server` の順で起動する。migrate と server は同じ PG* を受け取り、DB の
+`/server` の順で起動する。migrate は owner の `POSTGRES_USER`、server と
+`staffadmin` は DML のみの runtime role（`APP_DB_USER`）で接続し、DB の
 ホストポートは公開しない。`.env.example` を `.env` にコピーし、
-`POSTGRES_PASSWORD` と `PIN_PEPPER`（`openssl rand -base64 32`）を置換する。
-例示 TTL はローカル用で、本番ポリシーの承認ではない。
+`POSTGRES_PASSWORD`・`APP_DB_PASSWORD` と `PIN_PEPPER`（`openssl rand -base64 32`）
+を置換する。例示 TTL はローカル用で、本番ポリシーの承認ではない。
 
-- 本番は migrate と runtime の DB role を分け、runtime は最小権限にする。
+- migrate は owner role で `GrantRuntime` を `APP_DB_ROLE` に適用し、server/
+  `staffadmin` は `tojima_app`（DDL・TRUNCATE・`schema_migrations` 書込みなし）で
+  接続する。既存 volume では initdb が再実行されないため、English 節
+  「Database roles and existing volumes」の SQL で role を作成してから
+  `/migrate` を再実行する。本番もこの分離を維持する。
 
 上の環境変数表が共通仕様。通常起動には `APP_ADDR`、`DATABASE_URL` または
 `PGHOST`/`PGDATABASE`/`PGUSER`、全 SESSION/GRANT/PIN 設定、全 PAYMENT 期間が
@@ -437,12 +479,16 @@ backup、secret 運用、staff のブラウザ認証受入、live activation は
 
 `cmd/server` 現在組裝 PostgreSQL 客人 API 與 SPA。映像由 Node 24.15、固定 pnpm
 （frozen lockfile）、Go 1.27.1 建置，最後用 distroless/nonroot 執行。Compose
-依序啟動 PostgreSQL 17、成功完成 `/migrate`、再啟動 `/server`。migrate/server
-取得相同 PG*，DB 不公開宿主機埠。複製 `.env.example` 為 `.env`，替換
-`POSTGRES_PASSWORD` 與 `PIN_PEPPER`（`openssl rand -base64 32`）。TTL 範例只供
-本機使用，不代表正式政策獲准。
+依序啟動 PostgreSQL 17、成功完成 `/migrate`、再啟動 `/server`。migrate 以 owner
+的 `POSTGRES_USER` 連線；server 與 `staffadmin` 以僅 DML 的 runtime role
+（`APP_DB_USER`）連線，DB 不公開宿主機埠。複製 `.env.example` 為 `.env`，替換
+`POSTGRES_PASSWORD`、`APP_DB_PASSWORD` 與 `PIN_PEPPER`（`openssl rand -base64 32`）。
+TTL 範例只供本機使用，不代表正式政策獲准。
 
-- 正式環境須分開 migrate 與 runtime 的 DB 角色，runtime 僅最小權限。
+- migrate 以 owner role 對 `APP_DB_ROLE` 套用 `GrantRuntime`；server／`staffadmin`
+  以 `tojima_app` 連線（無 DDL、不可 TRUNCATE、不可寫 `schema_migrations`）。
+  既有 volume 不會重跑 initdb，須先依 English 節「Database roles and existing
+  volumes」的 SQL 建立 role，再重跑 `/migrate`。正式環境同樣維持此分離。
 
 上方環境變數表是共同契約。正常啟動必須有 `APP_ADDR`、`DATABASE_URL` 或
 `PGHOST`/`PGDATABASE`/`PGUSER`、完整 SESSION/GRANT/PIN 設定及 PAYMENT 時長。

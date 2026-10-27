@@ -9,6 +9,8 @@ smoke_project="tojima-smoke-$$"
 smoke_password="smoke-$$-local-only"
 smoke_user="tojima"
 smoke_db="tojima"
+smoke_app_user="tojima_app"
+smoke_app_password="smoke-app-$$-local-only"
 
 # Compose interpolates these from the environment; --env-file /dev/null keeps a
 # developer's real .env out of the smoke run. APP_BIND is forced to loopback so
@@ -16,9 +18,11 @@ smoke_db="tojima"
 POSTGRES_PASSWORD="$smoke_password"
 POSTGRES_USER="$smoke_user"
 POSTGRES_DB="$smoke_db"
+APP_DB_USER="$smoke_app_user"
+APP_DB_PASSWORD="$smoke_app_password"
 APP_BIND=127.0.0.1
 APP_PORT=0
-export POSTGRES_PASSWORD POSTGRES_USER POSTGRES_DB APP_BIND APP_PORT
+export POSTGRES_PASSWORD POSTGRES_USER POSTGRES_DB APP_DB_USER APP_DB_PASSWORD APP_BIND APP_PORT
 # Synthetic local policy only, never read payment credentials from the caller.
 SESSION_TTL=4h GRANT_TTL=1h GRANT_WINDOW=1m GRANT_WINDOW_MAX=100
 PIN_TTL=15m PIN_LOCKOUT=1m PIN_MAX_ATTEMPTS=3 PIN_LENGTH=6
@@ -107,6 +111,20 @@ smoke_table=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smoke_db" -
 [ "$smoke_table" = "t" ] || fail "table_sessions was not created"
 
 echo "migrations: $smoke_applied rows, table_sessions present"
+
+# Least privilege: the server role must hold no elevated attribute and must not
+# be able to run DDL. Migrations stay on the owner role.
+smoke_app_elevated=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smoke_db" -At \
+    -c "SELECT rolsuper OR rolcreaterole OR rolcreatedb FROM pg_roles WHERE rolname='$smoke_app_user'") \
+    || fail "runtime role attributes query"
+[ "$smoke_app_elevated" = "f" ] \
+    || fail "runtime role $smoke_app_user is superuser/createrole/createdb: $smoke_app_elevated"
+if compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U "$smoke_app_user" -d "$smoke_db" \
+    -c 'CREATE TABLE smoke_ddl_probe(i int)' >/dev/null 2>&1; then
+    fail "runtime role $smoke_app_user created a table (DDL allowed)"
+fi
+echo "runtime role: $smoke_app_user is not elevated and cannot create tables"
+
 smoke_staffadmin=$(compose run --rm --no-deps --entrypoint /staffadmin server status --subject nobody) \
     || fail "staffadmin status"
 printf '%s\n' "$smoke_staffadmin" | grep -qx 'Exists: false' || fail "staffadmin missing-subject status"

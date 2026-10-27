@@ -268,7 +268,11 @@ merchant configuration stores account IDs/references, not secret values.
    version in one transaction. Any failure rolls back the entire pending set,
    including ledger changes. Inspect the cause; remove only an understood
    conflict, then rerun the same candidate. Do not mark failed versions applied.
-4. Verify the ledger, objects, backfill/work and integrity; start only the
+4. Set `APP_DB_ROLE` to the runtime login role for the migration run; after `Up`
+   it applies `GrantRuntime` (DML on tables/sequences, no DDL, no `TRUNCATE`, no
+   `schema_migrations` writes). Start the accepted runtime with
+   `PGUSER`/`PGPASSWORD` set to that role, never the owner/superuser.
+5. Verify the ledger, objects, backfill/work and integrity; start only the
    compatible accepted runtime, then smoke-check it. Keep a sanitized receipt.
 
 日本語：①SHA・DB/schema/search_path・ledger・backupと復元手順・停止担当を記録し、
@@ -277,7 +281,9 @@ merchant configuration stores account IDs/references, not secret values.
 **008・016を跨ぐrolling upgrade禁止**。以後も旧バイナリを再開しない（016前の決済workerは `dispatched_at` を記録しない）。
 ③選択schemaに `postgres.Up` を実行。advisory lockと全未適用版を一つのtransactionで扱う。
 失敗時は全未適用版とledgerがrollbackされる。原因を確認・解消して同候補を再実行し、
-適用済み扱いに書き換えない。④ledger・object・backfill／work・整合性を確認後、互換の
+適用済み扱いに書き換えない。移行時は `APP_DB_ROLE` を設定して `GrantRuntime` を適用し、
+起動するruntimeは owner ではなくその runtime role（`PGUSER`/`PGPASSWORD`）で接続する。
+④ledger・object・backfill／work・整合性を確認後、互換の
 受入済みruntimeを起動してsmoke、機密を除いた証跡を保存。
 
 繁中：①記錄SHA、DB/schema/search_path、ledger、備份位置／還原程序與停機負責人；
@@ -285,6 +291,8 @@ merchant configuration stores account IDs/references, not secret values.
 到期worker及管理自動化等**所有writer**；**禁止跨008、016滾動升級**，之後也不得重啟舊版（016前的付款worker不會記錄 `dispatched_at`）。
 ③對指定schema呼叫 `postgres.Up`，同一transaction以advisory lock套用全部缺少版本；
 失敗會回滾全部未提交版本及ledger。查明衝突並排除後重跑同候選版，不可手動標記已套用。
+migration時設定 `APP_DB_ROLE` 以套用 `GrantRuntime`，啟動的runtime須以該runtime role
+（`PGUSER`/`PGPASSWORD`）連線，不可使用 owner。
 ④核對ledger、物件、backfill／work及完整性後才啟動相容且驗收過的runtime，執行smoke並留去機密紀錄。
 
 The exact ordered set and reverse SQL are in [migrate.go](../migrations/postgres/migrate.go).

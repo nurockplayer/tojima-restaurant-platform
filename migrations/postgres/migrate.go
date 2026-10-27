@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"errors"
+	"fmt"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -69,6 +70,43 @@ func Up(ctx context.Context, conn *pgx.Conn) error {
 		}
 		if _, err = tx.Exec(ctx, "INSERT INTO schema_migrations(version) VALUES ($1)", item.version); err != nil {
 			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// GrantRuntime gives role DML-only access to the current schema. It is
+// idempotent and re-run after every Up, so tables added by later migrations
+// are covered without default privileges.
+func GrantRuntime(ctx context.Context, conn *pgx.Conn, role string) error {
+	if role == "" {
+		return errors.New("runtime role name is empty")
+	}
+	r := pgx.Identifier{role}.Sanitize()
+	tx, err := conn.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	var schema *string
+	if err = tx.QueryRow(ctx, "SELECT current_schema()").Scan(&schema); err != nil {
+		return err
+	}
+	if schema == nil {
+		return errors.New("no current schema for runtime grants")
+	}
+	s := pgx.Identifier{*schema}.Sanitize()
+	for _, stmt := range []string{
+		"GRANT USAGE ON SCHEMA " + s + " TO " + r,
+		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " + s + " TO " + r,
+		"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA " + s + " TO " + r,
+		"GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA " + s + " TO " + r,
+		"REVOKE INSERT, UPDATE, DELETE ON " + s + ".schema_migrations FROM " + r,
+		"REVOKE CREATE ON SCHEMA " + s + " FROM PUBLIC",
+		"REVOKE CREATE ON SCHEMA " + s + " FROM " + r,
+	} {
+		if _, err = tx.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("%s: %w", stmt, err)
 		}
 	}
 	return tx.Commit(ctx)
