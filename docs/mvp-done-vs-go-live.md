@@ -16,12 +16,13 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **[Owner]** Confirm final hosting provider after 東島さん feedback on 2026-11-02; confirm fixed monthly cost ¥0 and explicitly approve any exception before enabling a paid plan or billable resource.
 - [ ] Provision the chosen host, ingress, DNS/domain and production-like runtime; confirm quotas, charge boundaries, monitoring, access control and restore access. Record named platform operator.
 - [ ] Close the separately tracked gap where asynchronous Checkout creation starts after session expiry, and record exact-head acceptance evidence — closed by PR #54 (2026-10-26 JST); exact-head acceptance evidence still to record.
-- [ ] **[Owner]** Accept the IdP and MOD-08 evidence, including Keycloak R01 breached-password screening closure, staff Passkey/MFA journeys, current membership checks, immediate revocation and recovery behavior.
+- [ ] **[Owner]** Accept the IdP and MOD-08 evidence, including Keycloak R01 breached-password screening closure, staff password + OTP journeys (Passkey is post-pilot, D19), current membership checks, immediate revocation and recovery behavior.
 - [ ] Complete a restore drill against the provisioned hosting backups, with integrity checks and recorded recovery time. RPO 5 minutes / RTO 1 hour remain future production targets, not pilot requirements.
 - [ ] Complete P-84 7f assistive-technology journeys and 7g iPhone/iOS Safari plus Android/Chrome device checks. Record device/OS/browser, date with zone and evidence; do not infer PASS from desktop tests.
 - [ ] Name the store owner and staff owners for outage stop/switch decisions, cash handling, KDS continuity, order/refund verification, incident reporting and restart authorization. Train each person on the procedures.
-- [ ] **[Owner / payments owner]** Complete EXT-1 Sandbox acceptance and separately authorize Stripe live charge mode, account mapping, webhook ownership, reconciliation and refund handling. Live mode is an explicit Owner decision; test-mode evidence is not authorization.
-- [ ] **[Owner]** Confirm the retention schedule with a 税理士/社労士 as applicable, approve the operational policy and deletion/hold workflow, and confirm the selected storage can meet it. See [draft retention policy](ops/retention.md); no blanket seven-year period applies.
+- [ ] Provision the pilot store with `/storeadmin` and accept the cash-only journey end to end on the deployed stack: QR join → order → KDS → register settlement → close (D18, D21).
+- [ ] **Phase 2, not phase-1 pilot (D18).** **[Owner / payments owner]** Complete EXT-1 Sandbox acceptance and separately authorize Stripe live charge mode, account mapping, webhook ownership, reconciliation and refund handling. Live mode is an explicit Owner decision; test-mode evidence is not authorization.
+- [ ] **[Owner]** (Phase 1 runs on the draft, D20; confirm before phase 2.) Confirm the retention schedule with a 税理士/社労士 as applicable, approve the operational policy and deletion/hold workflow, and confirm the selected storage can meet it. See [draft retention policy](ops/retention.md); no blanket seven-year period applies.
 - [ ] Split database roles: Compose now runs migrate as the owner role, applies `GrantRuntime` to `APP_DB_ROLE` and starts server/`staffadmin` as the DML-only `tojima_app` role. Production must still create that role, apply the same split and verify it on its host before go-live.
 - [ ] Verify ingress abuse controls, HTTPS/cookies/origin, secret storage/rotation, monitoring/alerts, security-event retention and incident contacts.
 - [ ] **[Owner]** Review known gaps and explicitly authorize the pilot start. Keep scope to one store and document stop criteria and escalation contacts.
@@ -42,12 +43,13 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **[Owner]** 東島さんの 2026-11-02 の反応後に hosting provider を決定し、固定月額 ¥0 と課金境界を確認する。有料 plan／課金資源は事前に Owner が明示承認する。
 - [ ] host、ingress、DNS/domain、本番相当 runtime を用意し、quota、課金境界、監視、アクセス制御、復元権限を確認して platform operator を指名する。
 - [ ] session 失効後に非同期 Checkout 作成が始まる別途追跡中の gap を閉じ、exact-head の受入証跡を記録する。 — PR #54 で解消済み（2026-10-26 JST）。exact-head の受入証跡は未記録。
-- [ ] **[Owner]** IdP と MOD-08 証跡を受入。Keycloak R01 漏えいパスワード検査、スタッフ Passkey/MFA、現所属確認、即時失効、復旧動作を含む。
+- [ ] **[Owner]** IdP と MOD-08 証跡を受入。Keycloak R01 漏えいパスワード検査、スタッフ password + OTP（Passkey は試店後、D19）、現所属確認、即時失効、復旧動作を含む。
 - [ ] 配備先 backup から restore drill を行い、整合性確認と復元時間を記録する。RPO 5分／RTO 1時間は将来の本番目標であり、試店要件ではない。
 - [ ] P-84 7f 支援技術経路と 7g iPhone/iOS Safari、Android/Chrome 実機確認を完了。端末／OS／browser、zone付き日付、証跡を記録し、desktop 試験を PASS の代用にしない。
 - [ ] 障害時の停止・切替、現金、KDS 継続、注文／返金確認、事故報告、営業再開判断の店主・店員担当を実名で決め、手順を訓練する。
-- [ ] **[Owner／決済責任者]** EXT-1 Sandbox 受入を完了し、Stripe live charge mode、account 対応、webhook 管理、照合・返金を別途承認する。test mode の証跡は live 承認ではない。
-- [ ] **[Owner]** 税理士／社労士等に保存期間案を確認し、運用方針、削除／hold 手順を承認し、選定 storage が要件を満たすことを確認する。[保存期間案](ops/retention.md)を参照。全記録一律7年とはしない。
+- [ ] `/storeadmin` で試店店舗を登録し、配備環境で現金のみの経路（QR 参加 → 注文 → KDS → レジ精算 → 閉卓）を受け入れる（D18、D21）。
+- [ ] **第2段階（第1段階の試店には不要、D18）。** **[Owner／決済責任者]** EXT-1 Sandbox 受入を完了し、Stripe live charge mode、account 対応、webhook 管理、照合・返金を別途承認する。test mode の証跡は live 承認ではない。
+- [ ] **[Owner]** （第1段階は草案で運用、D20。第2段階前に確認。）税理士／社労士等に保存期間案を確認し、運用方針、削除／hold 手順を承認し、選定 storage が要件を満たすことを確認する。[保存期間案](ops/retention.md)を参照。全記録一律7年とはしない。
 - [ ] migrate と runtime の DB role 分離：Compose は migrate を owner role で実行し `APP_DB_ROLE` に `GrantRuntime` を適用、server／`staffadmin` は DML のみの `tojima_app` で接続する。本番では role 作成・同分離の適用・確認が未完了。
 - [ ] ingress abuse controls、HTTPS/cookie/origin、secret 保存・rotation、監視・alert、安全ログ保存、incident 連絡先を確認する。
 - [ ] **[Owner]** 既知 gap を確認して試店開始を明示承認する。1店舗に限定し、中止条件と連絡先を記録する。
@@ -68,12 +70,13 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 - [ ] **[Owner]** 待東島先生 2026-11-02 回饋後決定 hosting provider，確認固定月費 ¥0 與計費邊界。付費方案或計費資源須事先由 Owner 明確核准。
 - [ ] 建置 host、ingress、DNS/domain 及正式相當 runtime；確認 quota、計費邊界、監控、存取控制及還原權限，並指定平台營運者。
 - [ ] 關閉另行追蹤的 session 到期後才非同步建立 Checkout 缺口，並記錄 exact-head 驗收證據。 — 已由 PR #54 關閉（2026-10-26 JST）；exact-head 驗收證據尚待記錄。
-- [ ] **[Owner]** 驗收 IdP 與 MOD-08 證據，包括 Keycloak R01 外洩密碼檢查完成、員工 Passkey/MFA、目前 membership 檢查、即時撤銷及復原行為。
+- [ ] **[Owner]** 驗收 IdP 與 MOD-08 證據，包括 Keycloak R01 外洩密碼檢查完成、員工密碼＋OTP（Passkey 於試營運後，D19）、目前 membership 檢查、即時撤銷及復原行為。
 - [ ] 從實際 hosting 備份執行 restore drill，進行完整性檢查並記錄復原時間。RPO 5 分鐘／RTO 1 小時是未來正式環境目標，不是試營運要求。
 - [ ] 完成 P-84 7f 輔助科技流程及 7g iPhone/iOS Safari、Android/Chrome 實機測試。記錄裝置／OS/browser、含時區日期及證據；桌面測試不能代替實機 PASS。
 - [ ] 指名店主與店員負責故障停止／切換、現金處理、KDS 持續、訂單／退款核對、事件通報及恢復營業核准，並完成流程訓練。
-- [ ] **[Owner／付款負責人]** 完成 EXT-1 Sandbox 驗收，另行核准 Stripe live charge mode、account 對應、webhook 管理、對帳與退款。test mode 證據不等於 live 核准。
-- [ ] **[Owner]** 請稅理士／社勞士等確認保存期限草案，核准營運政策與刪除／hold 流程，並確認 storage 可符合要求。參閱[保存期限草案](ops/retention.md)；不可一律保存七年。
+- [ ] 以 `/storeadmin` 建立試營運店舖，並在部署環境驗收純現金流程（QR 加入 → 點餐 → KDS → 收銀結帳 → 關桌）（D18、D21）。
+- [ ] **第二階段（第一階段試營運不需要，D18）。** **[Owner／付款負責人]** 完成 EXT-1 Sandbox 驗收，另行核准 Stripe live charge mode、account 對應、webhook 管理、對帳與退款。test mode 證據不等於 live 核准。
+- [ ] **[Owner]** （第一階段依草案營運，D20；第二階段前確認。）請稅理士／社勞士等確認保存期限草案，核准營運政策與刪除／hold 流程，並確認 storage 可符合要求。參閱[保存期限草案](ops/retention.md)；不可一律保存七年。
 - [ ] 分開 migrate 與 runtime 的 DB 角色：Compose 已讓 migrate 以 owner role 執行並對 `APP_DB_ROLE` 套用 `GrantRuntime`，server／`staffadmin` 以僅 DML 的 `tojima_app` 連線。正式環境仍須建立角色、套用並驗證同樣分離。
 - [ ] 確認 ingress abuse controls、HTTPS/cookie/origin、secret 儲存與輪替、監控／告警、安全日誌保存及事故聯絡人。
 - [ ] **[Owner]** 審閱已知缺口並明確核准開始試營運。範圍限一間店，記錄停止條件及升級聯絡人。

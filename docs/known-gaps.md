@@ -12,7 +12,7 @@ As of 2026-10-27 JST, main `db13a8e`; MVP done does not mean pilot approval.
 
 ## Staff sign-in (ADR-0008)
 
-- Passkey journey F2 is not yet accepted; password + OTP F1 is accepted.
+- Passkey journey F2 is not accepted and is post-pilot (D19); password + OTP F1 is accepted.
 - Back-channel logout is a supplementary feed: a lost notice leaves the session until its 30-day absolute expiry. Operators revoke with `staffadmin revoke-sessions` / `hold`, never by disabling the user in Keycloak.
 - `--import-realm` does not update an existing realm; changes on an existing Keycloak database need `kcadm.sh` ([containers](ops/containers.md)).
 - Staff sign-in fails closed until OIDC discovery succeeds once per process.
@@ -46,7 +46,7 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 
 ### 店員 sign-in（ADR-0008）
 
-- Passkey 経路 F2 は未受入。password + OTP の F1 は受入済み。
+- Passkey 経路 F2 は未受入で試店後（D19）。password + OTP の F1 は受入済み。
 - back-channel logout は補助 feed。通知を失うと session は絶対期限の 30 日まで残る。運用者は `staffadmin revoke-sessions` / `hold` で失効し、Keycloak のユーザー無効化では行わない。
 - `--import-realm` は既存 realm を更新しない。既存 Keycloak database の realm 変更には `kcadm.sh` が必要（[containers](ops/containers.md)）。
 - staff sign-in は process ごとに OIDC discovery が一度成功するまで fail-closed。
@@ -80,7 +80,7 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 
 ### 員工 sign-in（ADR-0008）
 
-- Passkey 流程 F2 尚未驗收；password + OTP 的 F1 已驗收。
+- Passkey 流程 F2 尚未驗收，延至試營運後（D19）；password + OTP 的 F1 已驗收。
 - back-channel logout 是補充 feed：通知遺失時 session 保留至 30 天絕對期限。操作員須以 `staffadmin revoke-sessions` / `hold` 撤銷，切勿只在 Keycloak 停用使用者。
 - `--import-realm` 不會更新既有 realm；既有 Keycloak database 的 realm 變更須使用 `kcadm.sh`（[containers](ops/containers.md)）。
 - 每個 process 的 OIDC discovery 首次成功前，staff sign-in fail-closed。
