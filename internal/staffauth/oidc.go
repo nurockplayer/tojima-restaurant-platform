@@ -8,6 +8,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
@@ -386,6 +387,13 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	fresh, err := h.applyBackchannelLogout(r.Context(), r.PostForm.Get("logout_token"), time.Now())
+	if err != nil && !errors.Is(err, errInvalidLogoutToken) {
+		// A valid token we could not apply (JWKS fetch, DB) is not the sender's fault.
+		// Keycloak does not retry; operators revoke with staffadmin (ADR-0008 decision 6).
+		log.Print("staff back-channel logout not applied; revoke the subject with staffadmin if the IdP logout must hold")
+		authJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "logout_not_applied"})
+		return
+	}
 	if err != nil || !fresh {
 		invalid()
 		return

@@ -150,6 +150,13 @@ caching; APIs use `no-store`, with `nosniff` and `no-referrer` headers.
    over the Compose network. If the BFF runs elsewhere, set this URL to an
    endpoint reachable from the Keycloak container; browser redirects continue
    to use `APP_PUBLIC_ORIGIN`.
+   `--import-realm` skips a realm that already exists, so on an existing
+   Keycloak database apply the URL (and any other realm change) explicitly:
+   `docker compose exec keycloak /opt/keycloak/bin/kcadm.sh` (log in with the
+   bootstrap admin, then `update clients/<id> -r tojima -s
+   'attributes."backchannel.logout.url"=<url>'`). A back-channel notice the BFF
+   cannot apply (503 `logout_not_applied`, logged) is not retried by Keycloak;
+   revoke with `staffadmin revoke-sessions` or `hold` when it must hold.
 3. Run `docker compose --profile staff up -d --build --wait`. The profile adds
    Keycloak 26.8.1 pinned by digest, roughly **700 MB** of memory, a separate
    `keycloak` DB/role in the same PostgreSQL, and a read-only realm import.
@@ -343,6 +350,10 @@ app origin の HTTP 例外は `http://127.0.0.1:<port>` のみ。Keycloak の
 `KEYCLOAK_BACKCHANNEL_LOGOUT_URL` は既定で Compose 内の
 `http://server:8080/staff/auth/backchannel-logout`。BFF が別の場所なら Keycloak container
 から到達可能な URL に変更する（ブラウザ redirect は引き続き `APP_PUBLIC_ORIGIN`）。
+既存の Keycloak DB では `--import-realm` が realm を上書きしないため、URL などの realm 変更は
+`kcadm.sh` で明示的に適用する。BFF が適用できなかった back-channel 通知（503
+`logout_not_applied`、ログ出力）は Keycloak が再送しないので、確実に失効させる場合は
+`staffadmin revoke-sessions` / `hold` を使う。
 IdP 未起動でも server は起動し1秒→30秒で再試行する。初回 discovery 成功前は全 staff auth
 route（session 参照と logout を含む）が no-store 503、既存 session も fail-closed。
 この間に受信した back-channel logout は bounded memory queue に置き、session を有効化する前に
@@ -453,7 +464,10 @@ local 的公開 issuer `http://127.0.0.1:8081/realms/tojima` 必須設定為 `ST
 `http://127.0.0.1:<port>` 的 HTTP 例外。Keycloak 的
 `KEYCLOAK_BACKCHANNEL_LOGOUT_URL` 預設為 Compose 網路中的
 `http://server:8080/staff/auth/backchannel-logout`；若 BFF 在其他位置，須改為 Keycloak
-container 可到達的 URL（瀏覽器 redirect 仍使用 `APP_PUBLIC_ORIGIN`）。IdP 停機時 server
+container 可到達的 URL（瀏覽器 redirect 仍使用 `APP_PUBLIC_ORIGIN`）。既有 Keycloak DB 上
+`--import-realm` 不會覆寫已存在的 realm，URL 等 realm 變更須以 `kcadm.sh` 明確套用。BFF 無法套用的
+back-channel 通知（503 `logout_not_applied` 並記錄）Keycloak 不會重送，必須確實撤銷時請用
+`staffadmin revoke-sessions` / `hold`。IdP 停機時 server
 仍可啟動並每1秒至30秒重試。此程序首次 discovery 成功前，所有 staff auth route（含 session
 查詢與 logout）回 no-store 503，既有 session 也 fail-closed。期間收到的 back-channel logout
 會放入有界記憶體佇列，在任何 session 恢復使用前先驗證並套用；驗證鍵或 DB 暫時失敗時會阻止

@@ -859,8 +859,8 @@ func TestOIDCBackchannelRetryAfterDatabaseFailure(t *testing.T) {
 		FOR EACH ROW WHEN (NEW.revoked_reason = 'backchannel_logout') EXECUTE FUNCTION reject_backchannel()`); err != nil {
 		t.Fatal(err)
 	}
-	if w := post(); w.Code != 400 {
-		t.Fatalf("failed revocation returned %d", w.Code)
+	if w := post(); w.Code != http.StatusServiceUnavailable || strings.TrimSpace(w.Body.String()) != `{"error":"logout_not_applied"}` {
+		t.Fatalf("failed revocation must not look like an invalid token: status=%d", w.Code)
 	}
 	_ = x.actor(t, cookie)
 	var count int
