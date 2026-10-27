@@ -237,6 +237,8 @@ else
                 sub(/^max-age=/, ""); sub(/[[:space:]].*$/, ""); print; exit }')
         if [ -z "$max_age" ]; then
             report FAIL hsts 'missing max-age'
+        elif ! printf '%s' "$max_age" | grep -Eq '^[0-9]{1,15}$'; then
+            report FAIL hsts 'malformed max-age'
         elif [ "$max_age" -lt "$HSTS_MIN_MAX_AGE" ]; then
             report FAIL hsts "max-age $max_age below $HSTS_MIN_MAX_AGE"
         else
@@ -275,10 +277,10 @@ else
         fi
     fi
     if [ -z "$spa_reason" ]; then
-        # The effective policy is the first token; a weaker policy such as
-        # no-referrer-when-downgrade must not pass.
+        # Browsers apply the last recognized token; requiring the last token to
+        # be no-referrer is stricter (an unknown trailing token also fails).
         referrer=$(lower "$(header_value "$WORK/root.headers" Referrer-Policy)")
-        referrer=${referrer%%,*}
+        referrer=${referrer##*,}
         if [ "$(printf '%s' "$referrer" | sed 's/^[[:space:]]*//; s/[[:space:]]*$//')" != no-referrer ]; then
             spa_reason='missing Referrer-Policy: no-referrer'
         fi
@@ -331,8 +333,11 @@ done
 LOGIN_CODE=$HTTP_CODE
 
 # 8. staff-origin: a cross-origin logout must be rejected.
-if [ "$LOGIN_CODE" = 404 ]; then
+if [ "$LOGIN_CODE" = 404 ] && [ "$MODE" != https ]; then
     report WARN staff-origin 'staff auth disabled'
+elif [ "$LOGIN_CODE" = 404 ]; then
+    # The pilot needs staff sign-in; a deployed origin without it is not ready.
+    report FAIL staff-origin 'staff auth disabled (GET /staff/auth/login 404)'
 else
     fetch "$WORK/logout" POST "$BASE/staff/auth/logout" \
         -H 'Origin: https://evil.invalid' --data ''
@@ -390,7 +395,7 @@ else
                 httponly) has_httponly=true ;;
                 'path=/') has_path=true ;;
                 samesite=lax) has_samesite=true ;;
-                samesite=*) bad_samesite=$(lower "$attr") ;;
+                samesite*) bad_samesite=$(lower "$attr") ;;
                 domain=*) has_domain=true ;;
             esac
         done <"$WORK/attrs"
@@ -401,7 +406,7 @@ else
         [ "$has_samesite" = true ] || missing="$missing SameSite=Lax"
         if [ "$has_domain" = true ]; then
             cookie_reason='cookie sets Domain'
-        elif [ -n "${bad_samesite:-}" ] && [ "$has_samesite" != true ]; then
+        elif [ -n "${bad_samesite:-}" ]; then
             cookie_reason='cookie SameSite is not Lax'
         elif [ -n "$missing" ]; then
             cookie_reason="cookie missing$missing"
@@ -416,26 +421,18 @@ fi
 
 # 10. db-port: the database must not be reachable from the public internet.
 if [ -n "$OPT_DB_HOST" ]; then
-    if command -v nc >/dev/null 2>&1; then
-        if nc -z -w 3 "$OPT_DB_HOST" 5432 >/dev/null 2>&1; then
-            report FAIL db-port "$OPT_DB_HOST:5432 is reachable"
-        else
-            report PASS db-port "$OPT_DB_HOST:5432 closed"
-        fi
-    else
-        # Better than telnet:// here: an HTTP probe fails with exit 7 only when
-        # the TCP connect was refused. A connected-but-silent port (PostgreSQL
-        # itself) answers with a non-HTTP reply, which must never read as PASS.
-        curl -q -sS --connect-timeout 3 --max-time 3 -o /dev/null \
-            "http://$OPT_DB_HOST:5432/" >/dev/null 2>&1
-        db_rc=$?
-        case $db_rc in
-            7) report PASS db-port "$OPT_DB_HOST:5432 closed (connection refused)" ;;
-            6) report WARN db-port "unverified: no nc and host did not resolve" ;;
-            28) report WARN db-port "unverified: no nc and no answer in 3s" ;;
-            *) report FAIL db-port "$OPT_DB_HOST:5432 answered (curl exit $db_rc)" ;;
-        esac
-    fi
+    # nc exit codes cannot tell refused from DNS/other errors, so always use
+    # curl: exit 7 is only a refused TCP connect. A connected PostgreSQL port
+    # gives a non-HTTP reply, which must never read as PASS.
+    curl -q -sS --connect-timeout 3 --max-time 3 -o /dev/null \
+        "http://$OPT_DB_HOST:5432/" >/dev/null 2>&1
+    db_rc=$?
+    case $db_rc in
+        7) report PASS db-port "$OPT_DB_HOST:5432 closed (connection refused)" ;;
+        28) report WARN db-port "$OPT_DB_HOST:5432 no answer in 3s (filtered?); confirm the host firewall" ;;
+        6) report FAIL db-port "unverified: $OPT_DB_HOST did not resolve" ;;
+        *) report FAIL db-port "$OPT_DB_HOST:5432 answered or unverified (curl exit $db_rc)" ;;
+    esac
 fi
 
 # The D8 rate limits are a separate, deliberate burst probe.
