@@ -146,4 +146,22 @@ smoke_guest=$(curl --fail --silent --show-error --max-time 5 \
 [ "$smoke_guest" = '{"store_display_name":"Compose smoke store","mode":"DIRECT_SCAN","open":false}' ] \
     || fail "unexpected guest table response: $smoke_guest"
 echo "guest API: migrated table read succeeded"
+
+# /storeadmin provisions a cash-only store as the DML-only runtime role.
+smoke_store_json='{"tenant":{"id":"smoke-co","name":"Smoke Co"},"store":{"id":"main","name":"Smoke main","guest_display_name":"Smoke shop","qr_entry_mode":"STAFF_OPEN","cash":{"enabled":true,"mode":"PAY_LATER"}},"tables":[{"id":"t01","name":"Table 1"}]}'
+smoke_apply=$(printf '%s' "$smoke_store_json" | compose run --rm --no-deps -T --entrypoint /storeadmin server \
+    apply -f /dev/stdin) || fail "storeadmin apply"
+smoke_locator=$(printf '%s\n' "$smoke_apply" | awk '$1 == "table" && $2 == "t01" {print $(NF-2)}')
+[ -n "$smoke_locator" ] || fail "storeadmin printed no locator for t01"
+smoke_store_guest=$(curl --fail --silent --show-error --max-time 5 \
+    "http://$smoke_addr/v1/guest/tables/$smoke_locator") || fail "guest table API for provisioned store"
+[ "$smoke_store_guest" = '{"store_display_name":"Smoke shop","mode":"STAFF_OPEN","open":false}' ] \
+    || fail "unexpected provisioned table response: $smoke_store_guest"
+smoke_reapply=$(printf '%s' "$smoke_store_json" | compose run --rm --no-deps -T --entrypoint /storeadmin server \
+    apply -f /dev/stdin) || fail "storeadmin re-apply"
+printf '%s\n' "$smoke_reapply" | grep -q "$smoke_locator .*unchanged" || fail "storeadmin re-apply changed the locator"
+smoke_cash_audit=$(compose exec -T postgres psql -X -U "$smoke_user" -d "$smoke_db" -At \
+    -c "SELECT count(*) FROM store_cash_settings_audit WHERE tenant_id='smoke-co'") || fail "cash audit query"
+[ "$smoke_cash_audit" = "1" ] || fail "storeadmin re-apply wrote cash settings again: $smoke_cash_audit"
+echo "storeadmin: provisioned STAFF_OPEN cash store as $smoke_app_user; re-apply unchanged"
 echo "RESULT: PASS"
