@@ -345,7 +345,7 @@ fetch "$WORK/login" GET "$BASE/staff/auth/login"
 # The BFF answers 503 staff_auth_unavailable until OIDC discovery loads; that
 # is documented readiness, not a failure. Poll briefly, never in a burst.
 tries=0
-while [ "$HTTP_CODE" = 503 ] && [ "$tries" -lt 15 ]; do
+while [ "$HTTP_CODE" = 503 ] && [ "$tries" -lt 30 ]; do
     sleep 2
     tries=$((tries + 1))
     fetch "$WORK/login" GET "$BASE/staff/auth/login"
