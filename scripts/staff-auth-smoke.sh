@@ -40,7 +40,7 @@ for smoke_key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD KEYCLOAK_DB_PASSWOR
     STRIPE_MODE STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_ACCOUNT_ID STRIPE_CREDENTIAL_REF STRIPE_API_VERSION \
     STRIPE_SUCCESS_URL STRIPE_CANCEL_URL STRIPE_MAX_AMOUNT_JPY APP_PUBLIC_ORIGIN CHECKOUT_PROOF_TTL CHECKOUT_SIGNING_KEYS \
     STAFF_AUTH_MODE STAFF_OIDC_ISSUER STAFF_OIDC_CLIENT_ID STAFF_OIDC_CLIENT_SECRET STAFF_OIDC_DISCOVERY_URL \
-    KEYCLOAK_PORT KEYCLOAK_PUBLIC_URL KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD TOJIMA_STAFF_CLIENT_SECRET \
+    KEYCLOAK_PORT KEYCLOAK_PUBLIC_URL KEYCLOAK_BACKCHANNEL_LOGOUT_URL KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD TOJIMA_STAFF_CLIENT_SECRET \
     COMPOSE_PROFILES; do unset "$smoke_key"; done
 # Reserve two distinct loopback ports while selecting them; Compose binds them
 # immediately below (a competing host process can still cause a clean failure).
@@ -65,6 +65,7 @@ APP_BIND=127.0.0.1
 APP_PORT=$smoke_app_port
 KEYCLOAK_PORT=$smoke_kc_port
 KEYCLOAK_PUBLIC_URL=http://127.0.0.1:$smoke_kc_port
+KEYCLOAK_BACKCHANNEL_LOGOUT_URL=http://server:8080/staff/auth/backchannel-logout
 KC_BOOTSTRAP_ADMIN_USERNAME=smoke-admin
 KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -hex 32)
 TOJIMA_STAFF_CLIENT_SECRET=$smoke_client_secret
@@ -115,10 +116,13 @@ import json, sys
 with open(sys.argv[1]) as f: print('Authorization: Bearer '+json.load(f)['access_token'])
 PY
 curl --fail --silent --show-error --max-time 10 -H @"$smoke_tmp/admin-header" "$smoke_kc_url/admin/realms/tojima/clients?clientId=tojima-staff" >"$smoke_tmp/clients.json" || fail 'client lookup'
-smoke_client_id=$(python3 - "$smoke_tmp/clients.json" <<'PY'
+smoke_client_id=$(python3 - "$smoke_tmp/clients.json" "$smoke_tmp/.env" <<'PY'
 import json, sys, uuid
 with open(sys.argv[1]) as f: clients = json.load(f)
+with open(sys.argv[2]) as f: env = dict(line.rstrip('\n').split('=',1) for line in f if '=' in line)
 assert len(clients) == 1 and clients[0]['clientId'] == 'tojima-staff'
+expected = env['KEYCLOAK_BACKCHANNEL_LOGOUT_URL']
+assert clients[0].get('attributes', {}).get('backchannel.logout.url') == expected, clients[0].get('attributes', {}).get('backchannel.logout.url')
 print(uuid.UUID(clients[0]['id']))
 PY
 ) || fail 'client identity'
@@ -158,6 +162,12 @@ q = urllib.parse.parse_qs(u.query)
 for k,v in {'code_challenge_method':'S256','prompt':'login','acr_values':'basic'}.items(): assert q.get(k) == [v], k
 assert q.get('code_challenge'), 'PKCE challenge missing'
 PY
+compose exec -T keycloak /bin/bash -ec '
+    exec 3<>/dev/tcp/server/8080
+    printf "POST /staff/auth/backchannel-logout HTTP/1.1\r\nHost: server:8080\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" >&3
+    IFS= read -r status <&3
+    [[ "$status" == *" 400 "* ]] || { printf "unexpected BFF response: %s\n" "$status" >&2; exit 1; }
+' || fail 'Keycloak cannot reach BFF back-channel URL'
 smoke_staff_path=/v1/staff/tenants/x/stores/y/operations/access
 smoke_status=$(curl --silent --show-error --max-time 10 -o /dev/null -w '%{http_code}' "$smoke_app_url$smoke_staff_path") || fail 'anonymous staff request'
 [ "$smoke_status" = 403 ] || fail "anonymous staff status $smoke_status"

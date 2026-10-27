@@ -11,7 +11,7 @@ acceptance (F) is a pilot go-live gate. Builds on
 Keycloak 26.8.1 を自前運用し、パスワード・OTP・Passkey などの認証処理はすべて
 Keycloak に任せる（自作しない）。Go は BFF としてスタッフ session を
 PostgreSQL に保持し、各リクエストは Keycloak を呼ばずに Tojima DB で検証する
-（D17: IdP 障害時も既存 session は継続、新規ログインと step-up は停止）。
+（D17: 初回 discovery 前の起動時障害では revoke を検証・適用できないため全 staff session を fail-closed。初回成功後の IdP 障害では DB session を継続し、新規 login と step-up は停止）。
 店長・管理者・経理は password+OTP の strong 認証が必須。停止・復帰・撤権は
 Tojima DB に同期 commit する。
 
@@ -19,14 +19,14 @@ Tojima DB に同期 commit する。
 
 自架 Keycloak 26.8.1，密碼、OTP、Passkey 等驗證全部交給 Keycloak（不自行開發）。
 Go 作為 BFF，員工 session 存於 PostgreSQL，每個請求只查 Tojima DB、不呼叫
-Keycloak（D17：IdP 故障時既有 session 照常，新登入與 step-up 失敗關閉）。
+Keycloak（D17：程序啟動後首次 discovery 成功前若 IdP 故障，因無法驗證並套用撤銷而拒絕所有 staff session；首次成功後的 IdP 故障仍沿用 DB session，新登入與 step-up 失敗關閉）。
 店長、管理者、財務須 password+OTP 強認證。停權、復權、撤銷皆同步提交 Tojima DB。
 
 
 ## Context
 - `internal/authz` already defines the seam: `Actor{SubjectID, MFA}`, `Authorizer`, `Memberships.Current(ctx, subject, tenant)` (must read current data every call), `PolicyAuthorizer`, roles STAFF_CASHIER / STORE_MANAGER / KITCHEN / TENANT_ADMIN / FINANCE_VIEWER. `internal/httpapi.IdentityResolver.Resolve(ctx, *http.Request) (authz.Actor, error)` is the port; production currently uses DenyIdentity/DenyMemberships.
 - Requirements (P-17/P-58, R01–R13): email+password, optional Passkey (Web; Flutter via system browser), invitation-only, fixed roles, MFA for manager/finance, single-use recovery codes, immediate revocation + current membership per request, 30-day absolute session, 300 s fixed step-up, safe email/factor change, 90-day security log, platform-only account disable/restore, no resurrection of old sessions/tokens after restore.
-- D17: during an IdP outage, established sessions keep working against Tojima PostgreSQL; new login and expired step-up fail closed; revocation is a synchronous Tojima DB commit.
+- D17: after discovery has succeeded once in the current process, established sessions keep working against Tojima PostgreSQL during an IdP outage; new login and expired step-up fail closed; revocation is a synchronous Tojima DB commit. Before that first discovery succeeds, staff access fails closed because back-channel revocations cannot yet be verified and applied.
 - Keycloak 26.x self-hosted is the preferred IdP (PoC 12/13). Never hand-roll password/Passkey/MFA.
 
 ## Decision
@@ -52,7 +52,7 @@ Keycloak（D17：IdP 故障時既有 session 照常，新登入與 step-up 失�
 - `staff_auth_events(id bigserial pk, at timestamptz not null default now(), subject_id text, session_id uuid, kind text not null, detail jsonb not null default '{}')`.
 
 ## Consequences
-- An IdP outage stops new logins and step-up only. Accepted per D17.
+- If discovery fails at startup, staff sign-in and existing sessions stay blocked until discovery succeeds. Back-channel requests received in this window return 503 and their bounded request bodies are verified and applied before any session becomes usable; transient verification-key or DB failures keep activation blocked and retry. If the bounded queue overflows, the handler remains unpublished and all staff access stays blocked until operators reconcile the undelivered logout notices and revoke affected sessions before restarting. This trades availability for revocation safety, per Owner rule 2026-10-26 JST. After discovery has succeeded once in this process, existing DB sessions continue through later IdP outages; new login and step-up still fail closed.
 - The documented immediate path for disable is `staffadmin hold` (Tojima DB); Keycloak disable alone is supplementary.
 - No offline tokens and no persisted refresh tokens; R13 (no resurrection after restore) rests on Go's independently revocable sessions plus the auth epoch.
 - Keycloak runs in the same Compose stack, with its own database in the same PostgreSQL instance (separate DB and role).

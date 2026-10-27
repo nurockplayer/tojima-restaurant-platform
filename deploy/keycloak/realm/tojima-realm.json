@@ -202,7 +202,7 @@
       "webOrigins": [],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "backchannel.logout.url": "${APP_PUBLIC_ORIGIN}/staff/auth/backchannel-logout",
+        "backchannel.logout.url": "${KEYCLOAK_BACKCHANNEL_LOGOUT_URL}",
         "backchannel.logout.session.required": "true",
         "backchannel.logout.revoke.offline.tokens": "true",
         "post.logout.redirect.uris": "${APP_PUBLIC_ORIGIN}/staff/",

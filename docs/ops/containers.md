@@ -145,6 +145,11 @@ caching; APIs use `no-store`, with `nosniff` and `no-referrer` headers.
    URL as the public issuer.** For HTTPS deployments use the external HTTPS
    origins instead. The issuer accepts HTTP only on `keycloak`, `localhost` or
    `127.0.0.1`; the app origin accepts HTTP only on `127.0.0.1:<port>`.
+   Keycloak sends back-channel logout to
+   `KEYCLOAK_BACKCHANNEL_LOGOUT_URL=http://server:8080/staff/auth/backchannel-logout`
+   over the Compose network. If the BFF runs elsewhere, set this URL to an
+   endpoint reachable from the Keycloak container; browser redirects continue
+   to use `APP_PUBLIC_ORIGIN`.
 3. Run `docker compose --profile staff up -d --build --wait`. The profile adds
    Keycloak 26.8.1 pinned by digest, roughly **700 MB** of memory, a separate
    `keycloak` DB/role in the same PostgreSQL, and a read-only realm import.
@@ -177,12 +182,19 @@ select that discovery address, explicitly checks the discovered issuer against
 `STAFF_OIDC_ISSUER`, and leaves ID/logout token issuer/signature/audience checks
 on. Omit this override when the public issuer is reachable inside the server
 container. No TLS verification is disabled. If discovery fails, the server still
-starts, retries after 1, 2, 4, …, 30 seconds, and login, callback, step-up and
-back-channel logout return no-store 503 until ready. Session inspection and
-Origin-protected local logout stay available even before first discovery; local
-logout revokes the DB session and clears cookies, then returns to `/staff/`
-without the optional IdP logout redirect. Existing session resolution
-and current membership checks use Tojima DB only. `/healthz` is still liveness.
+starts and retries after 1, 2, 4, …, 30 seconds. Until discovery has succeeded
+once in this process, all staff auth routes, including session inspection and
+logout, return no-store 503, and existing staff sessions fail closed: the BFF
+cannot yet verify and apply Keycloak back-channel revocations. Received logout
+requests are kept in a bounded in-memory queue and verified/applied before any
+session becomes usable; transient verification-key or database failures keep
+activation blocked and retry. If that queue overflows, the handler stays
+unpublished and all staff access remains blocked. Operators must reconcile
+undelivered logout notices and revoke affected sessions before restarting the
+server, since the pending queue is held in memory. This trades availability for
+revocation safety, per Owner rule 2026-10-26 JST. After first discovery, session
+resolution and current membership checks use Tojima DB only and survive later
+IdP outages. `/healthz` remains liveness.
 
 The explicit `tojima-browser` forms flow has conditional LoA 1 password and
 LoA 2 OTP, both max age 0; no Cookie or Passkey alternative. Required actions
@@ -327,10 +339,18 @@ local は公開 issuer `http://127.0.0.1:8081/realms/tojima` を `STAFF_OIDC_ISS
 `KC_HOSTNAME` と一致させる。内部 `http://keycloak:8080/realms/tojima` は
 `STAFF_OIDC_DISCOVERY_URL` 専用。dynamic backchannel と discovery URL context は接続先
 だけを変え、公開 issuer の完全一致検証を維持。到達可能なら override は不要。
-app origin の HTTP 例外は `http://127.0.0.1:<port>` のみ。IdP 未起動でも server は起動、
-1秒→30秒で再試行し、準備前の login/callback/step-up/back-channel は no-store 503。session 参照と
-Origin 保護付き local logout は discovery 前も使え、DB 失効・cookie 削除後 `/staff/` へ戻る。
-既存 session は DB のみで解決。
+app origin の HTTP 例外は `http://127.0.0.1:<port>` のみ。Keycloak の
+`KEYCLOAK_BACKCHANNEL_LOGOUT_URL` は既定で Compose 内の
+`http://server:8080/staff/auth/backchannel-logout`。BFF が別の場所なら Keycloak container
+から到達可能な URL に変更する（ブラウザ redirect は引き続き `APP_PUBLIC_ORIGIN`）。
+IdP 未起動でも server は起動し1秒→30秒で再試行する。初回 discovery 成功前は全 staff auth
+route（session 参照と logout を含む）が no-store 503、既存 session も fail-closed。
+この間に受信した back-channel logout は bounded memory queue に置き、session を有効化する前に
+検証・適用する。検証鍵または DB の一時障害では activation を保留して再試行する。queue overflow
+時は handler を未公開のまま保ち、operator が未配信 logout を照合し対象 session を失効するまで
+staff access を止める。queue は memory 上にあるため、reconcile 前に server を再起動しない。
+back-channel revoke を検証できない間の停止を許容する Owner rule 2026-10-26 JST に基づく。
+初回成功後の IdP 障害時は既存 DB session を継続し、新規 login/step-up は失敗閉鎖。
 
 既存 volume は initdb を再実行しない。backup 後、上の一回限りの SQL で専用 role/DB
 を作る。`.env` 追加後 postgres container を再作成して env を反映（volume は保持）。
@@ -430,10 +450,17 @@ local 的公開 issuer `http://127.0.0.1:8081/realms/tojima` 必須設定為 `ST
 與 `KC_HOSTNAME` 一致。內部 URL `http://keycloak:8080/realms/tojima` 只用於
 `STAFF_OIDC_DISCOVERY_URL`；dynamic backchannel 與 discovery URL context 僅變更連線位址，
 仍精確驗證公開 issuer。公開位址可從 server 存取時省略 override。app origin 只允許
-`http://127.0.0.1:<port>` 的 HTTP 例外。IdP 停機時 server 仍可啟動，1秒→30秒重試；
-準備前 login/callback/step-up/back-channel 回 no-store 503；session 查詢及 Origin
-保護的本地 logout 仍可使用，撤銷 DB session 並清除 cookie 後回 `/staff/`。既有 session
-僅由 Tojima DB 驗證。
+`http://127.0.0.1:<port>` 的 HTTP 例外。Keycloak 的
+`KEYCLOAK_BACKCHANNEL_LOGOUT_URL` 預設為 Compose 網路中的
+`http://server:8080/staff/auth/backchannel-logout`；若 BFF 在其他位置，須改為 Keycloak
+container 可到達的 URL（瀏覽器 redirect 仍使用 `APP_PUBLIC_ORIGIN`）。IdP 停機時 server
+仍可啟動並每1秒至30秒重試。此程序首次 discovery 成功前，所有 staff auth route（含 session
+查詢與 logout）回 no-store 503，既有 session 也 fail-closed。期間收到的 back-channel logout
+會放入有界記憶體佇列，在任何 session 恢復使用前先驗證並套用；驗證鍵或 DB 暫時失敗時會阻止
+activation 並重試。佇列溢位時 handler 保持未公開、staff access 持續封鎖。operator 須先核對未送達
+的 logout 並撤銷受影響 session，再重啟 server；pending queue 存在記憶體中，核對前不可重啟。
+依 Owner rule 2026-10-26 JST，以可用性換取無法驗證 back-channel revoke 時的安全。
+首次成功後，後續 IdP 停機仍沿用 DB session，新 login/step-up 失敗關閉。
 
 既有 volume 不重跑 initdb。先備份，再執行上方一次性 SQL 建立獨立 role/DB；新增 `.env`
 後須重建 postgres container 以載入 env，保留 volume。空密碼時 initdb 會 skip，不可用

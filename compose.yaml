@@ -116,6 +116,7 @@ services:
         : "$${KC_BOOTSTRAP_ADMIN_PASSWORD:?set KC_BOOTSTRAP_ADMIN_PASSWORD in .env}"
         : "$${TOJIMA_STAFF_CLIENT_SECRET:?set TOJIMA_STAFF_CLIENT_SECRET in .env}"
         : "$${APP_PUBLIC_ORIGIN:?set APP_PUBLIC_ORIGIN in .env}"
+        : "$${KEYCLOAK_BACKCHANNEL_LOGOUT_URL:?set KEYCLOAK_BACKCHANNEL_LOGOUT_URL in .env}"
         exec /opt/keycloak/bin/kc.sh "$$@"
       - --
     command: [start, --import-realm]
@@ -134,6 +135,7 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-}
       TOJIMA_STAFF_CLIENT_SECRET: ${TOJIMA_STAFF_CLIENT_SECRET:-}
       APP_PUBLIC_ORIGIN: ${APP_PUBLIC_ORIGIN:-}
+      KEYCLOAK_BACKCHANNEL_LOGOUT_URL: ${KEYCLOAK_BACKCHANNEL_LOGOUT_URL:-http://server:8080/staff/auth/backchannel-logout}
     volumes:
       - ./deploy/keycloak/realm:/opt/keycloak/data/import:ro
     ports:

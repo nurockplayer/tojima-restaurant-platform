@@ -28,6 +28,8 @@ const (
 	BackchannelLogoutEvent = "http://schemas.openid.net/event/backchannel-logout"
 )
 
+var errInvalidLogoutToken = errors.New("invalid logout token")
+
 type Config struct {
 	IssuerURL    string
 	DiscoveryURL string
@@ -383,10 +385,29 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 		invalid()
 		return
 	}
-	id, err := h.logoutVerifier.Verify(oidc.ClientContext(r.Context(), h.cfg.HTTPClient), r.PostForm.Get("logout_token"))
-	if err != nil {
+	fresh, err := h.applyBackchannelLogout(r.Context(), r.PostForm.Get("logout_token"), time.Now())
+	if err != nil || !fresh {
 		invalid()
 		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+func (h *Handler) applyBackchannelLogout(ctx context.Context, rawToken string, receivedAt time.Time) (bool, error) {
+	verifyCtx := oidc.ClientContext(ctx, h.cfg.HTTPClient)
+	id, err := h.logoutVerifier.Verify(verifyCtx, rawToken)
+	if err != nil {
+		var expired *oidc.TokenExpiredError
+		if errors.As(err, &expired) && !expired.Expiry.Before(receivedAt) {
+			verifier := h.provider.Verifier(&oidc.Config{ClientID: h.cfg.ClientID, Now: func() time.Time { return receivedAt }})
+			id, err = verifier.Verify(verifyCtx, rawToken)
+		}
+		if err != nil {
+			if strings.Contains(err.Error(), "fetching keys") {
+				return false, err
+			}
+			return false, errInvalidLogoutToken
+		}
 	}
 	var claims struct {
 		IAT    *int64                     `json:"iat"`
@@ -397,8 +418,7 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 	}
 	var raw map[string]json.RawMessage
 	if id.Claims(&claims) != nil || id.Claims(&raw) != nil {
-		invalid()
-		return
+		return false, errInvalidLogoutToken
 	}
 	_, nonce := raw["nonce"]
 	event, present := claims.Events[BackchannelLogoutEvent]
@@ -407,16 +427,14 @@ func (h *Handler) backchannelLogout(w http.ResponseWriter, r *http.Request) {
 	validEvent := present && json.Unmarshal(event, &payload) == nil && payload != nil && len(payload) == 0
 	// Replay records are retained for 24 hours. Never accept a token that
 	// could still be valid after its record has been cleaned up.
-	if claims.IAT == nil || claims.JTI == "" || !validEvent || nonce || (claims.SID == "" && claims.Sub == "") || id.Expiry.After(time.Now().Add(24*time.Hour)) {
-		invalid()
-		return
+	if claims.IAT == nil || claims.JTI == "" || !validEvent || nonce || (claims.SID == "" && claims.Sub == "") || id.Expiry.After(receivedAt.Add(24*time.Hour)) {
+		return false, errInvalidLogoutToken
 	}
-	fresh, err := h.store.ApplyIDPLogout(r.Context(), claims.JTI, claims.SID, claims.Sub)
-	if err != nil || !fresh {
-		invalid()
-		return
+	fresh, err := h.store.ApplyIDPLogout(ctx, claims.JTI, claims.SID, claims.Sub)
+	if err != nil {
+		return false, err
 	}
-	w.WriteHeader(http.StatusOK)
+	return fresh, nil
 }
 
 func (h *Handler) Resolve(ctx context.Context, r *http.Request) (authz.Actor, error) {
