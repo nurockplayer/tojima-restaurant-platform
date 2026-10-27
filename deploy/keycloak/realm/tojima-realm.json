@@ -26,20 +26,21 @@
   "webAuthnPolicyPasswordlessPasskeysEnabled": false,
   "defaultRole": {
     "name": "default-roles-tojima",
-    "composite": true
+    "composite": false
   },
   "roles": {
     "realm": [
       {
         "name": "default-roles-tojima",
-        "composite": true,
-        "composites": {
-          "realm": [],
-          "client": {}
-        }
+        "composite": false
       },
       {
         "name": "offline_access",
+        "composite": false
+      },
+      {
+        "name": "uma_authorization",
+        "description": "Defined explicitly so import does not add it to default-roles-tojima; never granted.",
         "composite": false
       }
     ]

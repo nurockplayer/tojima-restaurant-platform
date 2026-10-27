@@ -134,7 +134,8 @@ curl --fail --silent --show-error --max-time 10 -H @"$smoke_tmp/admin-header" \
     "$smoke_kc_url/admin/realms/tojima/roles/default-roles-tojima/composites" >"$smoke_tmp/default-roles.json" || fail 'default role lookup'
 python3 - "$smoke_tmp/default-roles.json" <<'PYROLES' || fail 'unsafe default role composite'
 import json, sys
-with open(sys.argv[1]) as f: assert json.load(f) == [], 'default role must have no composites'
+with open(sys.argv[1]) as f: roles = json.load(f)
+assert roles == [], 'default role must have no composites: ' + ', '.join(sorted(r.get('name', '?') for r in roles))
 PYROLES
 echo 'Keycloak: strong ACR advertised; no offline_access client scope'
 # BFF liveness is independent of discovery; allow its bounded retry to finish.
