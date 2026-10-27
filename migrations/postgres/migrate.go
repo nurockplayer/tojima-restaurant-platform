@@ -96,6 +96,11 @@ func GrantRuntime(ctx context.Context, conn *pgx.Conn, role string) error {
 		return errors.New("no current schema for runtime grants")
 	}
 	s := pgx.Identifier{*schema}.Sanitize()
+	var dbName string
+	if err = tx.QueryRow(ctx, "SELECT current_database()").Scan(&dbName); err != nil {
+		return err
+	}
+	db := pgx.Identifier{dbName}.Sanitize()
 	for _, stmt := range []string{
 		"GRANT USAGE ON SCHEMA " + s + " TO " + r,
 		"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA " + s + " TO " + r,
@@ -104,6 +109,9 @@ func GrantRuntime(ctx context.Context, conn *pgx.Conn, role string) error {
 		"REVOKE INSERT, UPDATE, DELETE ON " + s + ".schema_migrations FROM " + r,
 		"REVOKE CREATE ON SCHEMA " + s + " FROM PUBLIC",
 		"REVOKE CREATE ON SCHEMA " + s + " FROM " + r,
+		// Temporary tables are DDL too; the server never creates them.
+		"REVOKE TEMPORARY ON DATABASE " + db + " FROM PUBLIC",
+		"REVOKE TEMPORARY ON DATABASE " + db + " FROM " + r,
 	} {
 		if _, err = tx.Exec(ctx, stmt); err != nil {
 			return fmt.Errorf("%s: %w", stmt, err)

@@ -295,9 +295,13 @@ server and `staffadmin` connect as that role through `PGUSER`/`PGPASSWORD`.
 initdb never reruns on an existing `pgdata` volume, so the role and its grants
 must be created once by hand, then applied by rerunning `/migrate` (back up
 first; omit `CREATE ROLE` if it already exists and use an approved password
-rotation instead):
+rotation instead). Set `APP_DB_USER`/`APP_DB_PASSWORD` in `.env` first and
+recreate the postgres container so it carries them (the data volume is kept;
+`docker compose exec postgres printenv APP_DB_USER` must print the role name):
 
 ```sh
+docker compose up -d --force-recreate --wait postgres
+docker compose exec postgres printenv APP_DB_USER
 docker compose exec -T postgres psql -X -v ON_ERROR_STOP=1 -U tojima -d tojima <<'SQL'
 \getenv app_password APP_DB_PASSWORD
 \getenv app_user APP_DB_USER

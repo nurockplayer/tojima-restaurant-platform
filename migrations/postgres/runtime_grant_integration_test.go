@@ -120,6 +120,7 @@ func TestGrantRuntimeDMLOnly(t *testing.T) {
 	assertDenied("ledger insert", "INSERT INTO schema_migrations(version) VALUES (999)")
 	assertDenied("create table", "CREATE TABLE rt_ddl_probe(i int)")
 	assertDenied("truncate ledger", "TRUNCATE schema_migrations")
+	assertDenied("temp table", "CREATE TEMP TABLE runtime_tmp(i int)")
 
 	if err = postgres.GrantRuntime(ctx, target, ""); err == nil {
 		t.Fatal("empty runtime role name must be rejected")
