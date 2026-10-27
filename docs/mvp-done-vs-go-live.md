@@ -41,7 +41,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 
 - [ ] **[Owner]** 東島さんの 2026-11-02 の反応後に hosting provider を決定し、固定月額 ¥0 と課金境界を確認する。有料 plan／課金資源は事前に Owner が明示承認する。
 - [ ] host、ingress、DNS/domain、本番相当 runtime を用意し、quota、課金境界、監視、アクセス制御、復元権限を確認して platform operator を指名する。
-- [ ] session 失効後に非同期 Checkout 作成が始まる別途追跡中の gap を閉じ、exact-head の受入証跡を記録する。
+- [ ] session 失効後に非同期 Checkout 作成が始まる別途追跡中の gap を閉じ、exact-head の受入証跡を記録する。 — PR #54 で解消済み（2026-10-26 JST）。exact-head の受入証跡は未記録。
 - [ ] **[Owner]** IdP と MOD-08 証跡を受入。Keycloak R01 漏えいパスワード検査、スタッフ Passkey/MFA、現所属確認、即時失効、復旧動作を含む。
 - [ ] 配備先 backup から restore drill を行い、整合性確認と復元時間を記録する。RPO 5分／RTO 1時間は将来の本番目標であり、試店要件ではない。
 - [ ] P-84 7f 支援技術経路と 7g iPhone/iOS Safari、Android/Chrome 実機確認を完了。端末／OS／browser、zone付き日付、証跡を記録し、desktop 試験を PASS の代用にしない。
@@ -67,7 +67,7 @@ Use these as separate gates. MVP done means engineering is complete enough to de
 
 - [ ] **[Owner]** 待東島先生 2026-11-02 回饋後決定 hosting provider，確認固定月費 ¥0 與計費邊界。付費方案或計費資源須事先由 Owner 明確核准。
 - [ ] 建置 host、ingress、DNS/domain 及正式相當 runtime；確認 quota、計費邊界、監控、存取控制及還原權限，並指定平台營運者。
-- [ ] 關閉另行追蹤的 session 到期後才非同步建立 Checkout 缺口，並記錄 exact-head 驗收證據。
+- [ ] 關閉另行追蹤的 session 到期後才非同步建立 Checkout 缺口，並記錄 exact-head 驗收證據。 — 已由 PR #54 關閉（2026-10-26 JST）；exact-head 驗收證據尚待記錄。
 - [ ] **[Owner]** 驗收 IdP 與 MOD-08 證據，包括 Keycloak R01 外洩密碼檢查完成、員工 Passkey/MFA、目前 membership 檢查、即時撤銷及復原行為。
 - [ ] 從實際 hosting 備份執行 restore drill，進行完整性檢查並記錄復原時間。RPO 5 分鐘／RTO 1 小時是未來正式環境目標，不是試營運要求。
 - [ ] 完成 P-84 7f 輔助科技流程及 7g iPhone/iOS Safari、Android/Chrome 實機測試。記錄裝置／OS/browser、含時區日期及證據；桌面測試不能代替實機 PASS。
