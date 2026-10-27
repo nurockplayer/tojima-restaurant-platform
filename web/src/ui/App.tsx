@@ -460,22 +460,26 @@ export function App({ demo = false }: DemoSurfaceProps) {
     // REVIEW_REQUIRED is a held state: P80 deliberately stops automated state
     // transitions there until a later staff-resolution workflow is available.
     const isTerminal = (state?: CheckoutState) => state === 'PAID' || state === 'FAILED' || state === 'EXPIRED' || state === 'REVIEW_REQUIRED';
-    const schedulePeriodic = () => {
+    // Checkout creation usually finishes within seconds; poll quickly until the
+    // continuation appears (bounded), then fall back to the slow cadence.
+    const isPreparing = (state?: CheckoutState) => state === 'CREATE_PENDING' || state === 'CREATING';
+    let fastPolls = 0;
+    const schedulePeriodic = (fast = false) => {
       if (!disposed && timer === undefined && document.visibilityState === 'visible') {
-        timer = window.setInterval(poll, 20_000);
+        timer = window.setTimeout(() => { timer = undefined; poll(); }, fast ? 2_000 : 20_000);
       }
     };
     const poll = () => {
       void refreshCheckoutStatus(entry, checkoutOrderID).then((latest) => {
         if (disposed) return;
         if (latest && isTerminal(latest.state)) {
-          window.clearInterval(timer);
+          window.clearTimeout(timer);
           timer = undefined;
-        } else schedulePeriodic();
+        } else schedulePeriodic(isPreparing(latest?.state) && fastPolls++ < 15);
       });
     };
     const onVisibilityChange = () => {
-      if (timer !== undefined) window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
       timer = undefined;
       if (document.visibilityState === 'visible') poll();
     };
@@ -484,7 +488,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     return () => {
       disposed = true;
       document.removeEventListener('visibilitychange', onVisibilityChange);
-      if (timer !== undefined) window.clearInterval(timer);
+      if (timer !== undefined) window.clearTimeout(timer);
       invalidateCheckoutRequests();
     };
   }, [checkoutOrderID, checkoutPollEpoch, entry, invalidateCheckoutRequests, refreshCheckoutStatus, tab]);

@@ -617,6 +617,29 @@ describe('guest app mount', () => {
     expect(document.body.textContent).toContain('金額を確認する');
   });
 
+  it('polls quickly while Checkout is being prepared, then slows down', async () => {
+    let reads = 0;
+    await mountCheckoutOrders([stripeOrder('order-prep')], async (url, init) => {
+      if (url.endsWith('/orders/order-prep/checkout') && init.method !== 'POST') {
+        reads++;
+        return json(checkoutStatus('order-prep', reads < 3 ? 'CREATE_PENDING' : 'OPEN', reads >= 3));
+      }
+      throw new Error(`Unexpected checkout API request: ${url}`);
+    });
+    vi.useFakeTimers();
+    await act(async () => { getButton(host!, '支払い状況を確認').click(); await Promise.resolve(); });
+    expect(reads).toBe(1);
+    const before = reads;
+    await act(async () => { await vi.advanceTimersByTimeAsync(4_100); });
+    expect(reads).toBeGreaterThanOrEqual(before + 2);
+    expect(host?.textContent).toContain('支払いを続ける');
+    const open = reads;
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_000); });
+    expect(reads).toBe(open);
+    await act(async () => { await vi.advanceTimersByTimeAsync(10_100); });
+    expect(reads).toBe(open + 1);
+  });
+
   it('checks one Stripe order on demand and navigates only to its private resume response', async () => {
     const order = stripeOrder('order-resume');
     const assign = vi.spyOn(checkoutNavigation, 'assign').mockImplementation(() => undefined);
