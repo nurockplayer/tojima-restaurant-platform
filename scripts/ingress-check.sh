@@ -302,29 +302,31 @@ else
     report PASS spa-headers 'html/nosniff/no-referrer'
 fi
 
-# 6. csp: the app sets none, so the deployed ingress must add one.
-csp=$(header_value "$WORK/root.headers" Content-Security-Policy)
-if [ -z "$csp" ] && [ "$MODE" != https ]; then
-    report WARN csp 'loopback http; the ingress must add CSP with frame-ancestors'
-elif [ -z "$csp" ]; then
-    report FAIL csp 'missing Content-Security-Policy (ingress must add frame-ancestors)'
-else
-    # Match the directive name, not a substring: connect-src https://frame-ancestors.example
-    # must not count as a frame-ancestors directive.
-    csp_ok=false
-    # frame-ancestors must restrict framing: only 'none' or 'self' sources.
-    header_all "$WORK/root.headers" Content-Security-Policy | tr ';,' '\n\n' |
+# 6. csp: the app sets none, so the deployed ingress must add one on every
+# page: the guest root and the staff surfaces (/staff, /kitchen).
+csp_missing= csp_weak=
+for csp_path in / /staff /kitchen; do
+    csp_file=$WORK/csp$(printf '%s' "$csp_path" | tr '/' '_')
+    fetch "$csp_file" GET "$BASE$csp_path"
+    if [ -z "$(header_value "$csp_file.headers" Content-Security-Policy)" ]; then
+        csp_missing="$csp_missing $csp_path"
+    elif ! header_all "$csp_file.headers" Content-Security-Policy | tr ';,' '\n\n' |
         awk '{ $0 = tolower($0) } NF && $1 == "frame-ancestors" {
                 found = 1
                 for (i = 2; i <= NF; i++) if ($i != "\047none\047" && $i != "\047self\047") bad = 1
-            } END { exit !(found && !bad) }' &&
-        csp_ok=true
-    if [ "$csp_ok" = true ]; then
-        report PASS csp 'frame-ancestors directive present'
-    elif [ "$MODE" != https ]; then
-        report WARN csp "CSP frame-ancestors missing or not 'none'/'self'"
+            } END { exit !(found && !bad) }'; then
+        # frame-ancestors must restrict framing: only 'none' or 'self' sources.
+        csp_weak="$csp_weak $csp_path"
+    fi
+done
+if [ -z "$csp_missing$csp_weak" ]; then
+    report PASS csp "frame-ancestors 'none'/'self' on / /staff /kitchen"
+else
+    csp_reason="missing CSP:${csp_missing:- none}; weak frame-ancestors:${csp_weak:- none}"
+    if [ "$MODE" != https ]; then
+        report WARN csp "loopback http; ingress must add CSP ($csp_reason)"
     else
-        report FAIL csp "CSP frame-ancestors missing or not 'none'/'self'"
+        report FAIL csp "$csp_reason"
     fi
 fi
 
@@ -447,7 +449,7 @@ if [ -n "$OPT_DB_HOST" ]; then
     # gives a non-HTTP reply, which must never read as PASS.
     # time_connect > 0 means the TCP handshake completed: the port is open
     # whatever happens next (a PostgreSQL or silent proxy never answers HTTP).
-    db_connect=$(curl -q -sS --connect-timeout 3 --max-time 5 -o /dev/null \
+    db_connect=$(curl -q -sS --noproxy '*' --connect-timeout 3 --max-time 5 -o /dev/null \
         -w '%{time_connect}' "http://$OPT_DB_HOST:5432/" 2>/dev/null)
     db_rc=$?
     if [ -n "$db_connect" ] && [ "$(printf '%s' "$db_connect" | tr -d '0.')" != "" ]; then
