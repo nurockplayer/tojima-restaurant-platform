@@ -28,7 +28,7 @@ As of 2026-10-27 JST, main `db13a8e`; MVP done does not mean pilot approval.
 See [MVP done vs go-live](mvp-done-vs-go-live.md).
 
 - Hosting provider decision follows 東島さん's feedback on 2026-11-02 JST; ¥0 target; no paid plan without **Owner** approval.
-- Compose uses one PostgreSQL superuser; production needs a least-privilege server role.
+- Compose now runs migrate as the owner role and applies `GrantRuntime` (DML only) to `APP_DB_ROLE`; server/`staffadmin` connect as `tojima_app`. Production still needs its own role, grants and secret split.
 - Restore drill against real hosting backups, P-84 7f/7g device and assistive-technology checks, retention policy confirmation, and named store/staff owners remain open.
 - RPO 5 min / RTO 1 h are future production targets, not pilot requirements.
 
@@ -62,7 +62,7 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 [MVP 完了と試店開始](mvp-done-vs-go-live.md)を参照。
 
 - hosting provider は東島さんの 2026-11-02 JST の反応後に決定。¥0 目標、有料 plan は **Owner** 承認なしに使わない。
-- Compose は PostgreSQL superuser 1つを使用。本番には最小権限の server role が必要。
+- Compose は migrate を owner role で実行し、`APP_DB_ROLE` に DML のみを付与（`GrantRuntime`）。server／`staffadmin` は `tojima_app` で接続する。本番は role 作成・grant・資格情報の分離が未対応。
 - 実 hosting backup の restore drill、P-84 7f/7g の支援技術・実機確認、保存期間方針の確認、店主／店員担当の指名は未完了。
 - RPO 5分／RTO 1時間は将来の本番目標であり、試店要件ではない。
 
@@ -96,6 +96,6 @@ See [MVP done vs go-live](mvp-done-vs-go-live.md).
 參閱 [MVP 完成與試營運](mvp-done-vs-go-live.md)。
 
 - hosting provider 待東島先生 2026-11-02 JST 回饋後決定；目標 ¥0；未經 **Owner** 核准不使用付費方案。
-- Compose 使用單一 PostgreSQL superuser；正式環境需要最小權限 server role。
+- Compose 已讓 migrate 使用 owner role，並對 `APP_DB_ROLE` 套用僅 DML 的 `GrantRuntime`；server／`staffadmin` 以 `tojima_app` 連線。正式環境仍須自行建立角色、套用 grant 並分離機密。
 - 實際 hosting 備份 restore drill、P-84 7f/7g 裝置及輔助科技檢查、保存政策確認、指名店主／店員負責人均未完成。
 - RPO 5 分鐘／RTO 1 小時是未來正式環境目標，非試營運要求。

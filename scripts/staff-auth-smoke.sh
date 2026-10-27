@@ -34,7 +34,7 @@ fail() { echo "RESULT: FAIL $*" >&2; exit 1; }
 for smoke_tool in docker curl python3 openssl; do command -v "$smoke_tool" >/dev/null 2>&1 || fail "$smoke_tool is required"; done
 # Environment overrides --env-file. Clear every Compose interpolation input,
 # retaining Docker's own connection/context environment.
-for smoke_key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD KEYCLOAK_DB_PASSWORD APP_BIND APP_PORT \
+for smoke_key in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD APP_DB_USER APP_DB_PASSWORD KEYCLOAK_DB_PASSWORD APP_BIND APP_PORT \
     SESSION_TTL GRANT_TTL GRANT_WINDOW GRANT_WINDOW_MAX PIN_TTL PIN_LOCKOUT PIN_MAX_ATTEMPTS PIN_LENGTH PIN_PEPPER \
     PAYMENT_CREATE_RETRY_WINDOW PAYMENT_CONTINUATION_TTL PAYMENT_WORK_LEASE_TTL \
     STRIPE_MODE STRIPE_SECRET_KEY STRIPE_WEBHOOK_SECRET STRIPE_ACCOUNT_ID STRIPE_CREDENTIAL_REF STRIPE_API_VERSION \
@@ -60,6 +60,8 @@ cat >"$smoke_tmp/.env" <<ENV
 POSTGRES_USER=tojima
 POSTGRES_DB=tojima
 POSTGRES_PASSWORD=$(openssl rand -hex 32)
+APP_DB_USER=tojima_app
+APP_DB_PASSWORD=$(openssl rand -hex 32)
 KEYCLOAK_DB_PASSWORD=$(openssl rand -hex 32)
 APP_BIND=127.0.0.1
 APP_PORT=$smoke_app_port

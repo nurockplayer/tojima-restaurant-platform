@@ -13,6 +13,9 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-tojima}
       POSTGRES_USER: ${POSTGRES_USER:-tojima}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      # DML-only login role for the server; initdb creates it on a fresh volume.
+      APP_DB_USER: ${APP_DB_USER:-tojima_app}
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env (see .env.example)}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - ./deploy/postgres/initdb:/docker-entrypoint-initdb.d:ro
@@ -39,6 +42,8 @@ services:
       PGUSER: ${POSTGRES_USER:-tojima}
       PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
       PGSSLMODE: disable
+      # Grants DML-only access to this role after Up; unset keeps old behaviour.
+      APP_DB_ROLE: ${APP_DB_USER:-tojima_app}
     depends_on:
       postgres:
         condition: service_healthy
@@ -52,8 +57,10 @@ services:
       PGHOST: postgres
       PGPORT: "5432"
       PGDATABASE: ${POSTGRES_DB:-tojima}
-      PGUSER: ${POSTGRES_USER:-tojima}
-      PGPASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env (see .env.example)}
+      # The server (and staffadmin, which reuses this service) runs as the
+      # DML-only runtime role; only migrate keeps the owner credentials.
+      PGUSER: ${APP_DB_USER:-tojima_app}
+      PGPASSWORD: ${APP_DB_PASSWORD:?set APP_DB_PASSWORD in .env (see .env.example)}
       PGSSLMODE: disable
       APP_WEB_DIST: /app/web/dist
       # Explicit guest policy. Values in .env.example are local examples only.

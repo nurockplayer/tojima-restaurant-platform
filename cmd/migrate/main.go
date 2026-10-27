@@ -41,6 +41,14 @@ func run(parent context.Context, dsn string) error {
 	if err := postgres.Up(ctx, conn); err != nil {
 		return err
 	}
+	// Optional least-privilege runtime role: migrations stay on the owner role,
+	// while the server connects as a DML-only login role granted here.
+	if role := os.Getenv("APP_DB_ROLE"); role != "" {
+		if err := postgres.GrantRuntime(ctx, conn, role); err != nil {
+			return err
+		}
+		log.Printf("runtime grants applied to %s", role)
+	}
 	var applied int
 	if err := conn.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&applied); err != nil {
 		return err
