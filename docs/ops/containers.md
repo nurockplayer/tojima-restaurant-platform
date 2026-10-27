@@ -373,6 +373,9 @@ order to SERVED; the cashier settles 2,000 against a 1,100 due with 900 change;
 the session closes and the table reports `open: false`.
 It prints `PASS <step> <time JST>` lines and `RESULT: PASS`, and its trap
 removes the project's containers, volumes and images.
+It drives the HTTP API, not the rendered page (the hidden card option is covered
+by the web tests), and it always builds its own stack, so it is not evidence for
+a deployed environment.
 
 ## 日本語
 
