@@ -61,7 +61,7 @@ func d1GuestBody(t *testing.T, w *httptest.ResponseRecorder, shape string) map[s
 		valid = ok && body["state"] != nil && body["state"] != ""
 	case "resume":
 		url, ok := body["url"].(string)
-		valid = ok && strings.HasPrefix(url, "https://checkout.example.invalid/") && body["expires_at"] != nil
+		valid = ok && strings.HasPrefix(url, "https://checkout.stripe.com/c/pay/") && body["expires_at"] != nil
 	case "read-grant":
 		valid = body["order_id"] != nil && body["order_id"] != "" && body["order_read_token"] != nil && body["order_read_token"] != "" && body["expires_at"] != nil
 	case "order-status":
@@ -132,7 +132,7 @@ func TestGuestDisplayNameEveryGuestRouteAllowlistPostgres(t *testing.T) {
 			session := map[string]any{
 				"id": id, "object": "checkout.session", "livemode": false, "mode": "payment",
 				"currency": "jpy", "amount_total": amount, "status": "open", "payment_status": "unpaid",
-				"expires_at": time.Now().Add(time.Hour).Unix(), "url": "https://checkout.example.invalid/" + id,
+				"expires_at": time.Now().Add(time.Hour).Unix(), "url": "https://checkout.stripe.com/c/pay/" + id + "#fidSynthetic",
 				"metadata": metadata,
 			}
 			sessions["/v1/checkout/sessions/"+id] = session

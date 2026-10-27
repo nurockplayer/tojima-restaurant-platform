@@ -93,7 +93,7 @@ func TestCreateCheckoutUsesScopedTestModeJPYAndStableIdempotency(t *testing.T) {
 		}
 		gotForm = r.Form
 		w.Header().Set("Content-Type", "application/json")
-		io.WriteString(w, `{"id":"cs_test_abc123","object":"checkout.session","livemode":false,"mode":"payment","currency":"jpy","amount_total":1500,"status":"open","payment_status":"unpaid","expires_at":1900000000,"url":"https://checkout.stripe.com/c/pay/cs_test_abc123","metadata":{"tenant_id":"tenant-1","store_id":"store-1","order_id":"order-1","attempt_id":"attempt-1"}}`)
+		io.WriteString(w, `{"id":"cs_test_abc123","object":"checkout.session","livemode":false,"mode":"payment","currency":"jpy","amount_total":1500,"status":"open","payment_status":"unpaid","expires_at":1900000000,"url":"https://checkout.stripe.com/c/pay/cs_test_abc123#fidkdWxOYHwnPyd1blpxYHZxWjA0","metadata":{"tenant_id":"tenant-1","store_id":"store-1","order_id":"order-1","attempt_id":"attempt-1"}}`)
 	})
 	ts := httptest.NewServer(server)
 	defer ts.Close()
@@ -574,5 +574,21 @@ func TestRefundStatusTransportIncludesPinnedEnumAndUnknown(t *testing.T) {
 				t.Fatalf("webhook=%+v err=%v", event, err)
 			}
 		})
+	}
+}
+
+func TestCheckoutURLAllowsStripeFragmentOnlyOnHostedCheckout(t *testing.T) {
+	for raw, want := range map[string]bool{
+		"https://checkout.stripe.com/c/pay/cs_test_abc123#fidkdWxOYHwnPyd1blpx": true,
+		"https://checkout.stripe.com/c/pay/cs_test_abc123":                      true,
+		"http://checkout.stripe.com/c/pay/cs_test_abc123":                       false,
+		"https://evil.example/c/pay/cs_test_abc123#fid":                         false,
+		"https://checkout.stripe.com.evil.example/c/pay/cs_test_abc123":         false,
+		"https://user@checkout.stripe.com/c/pay/cs_test_abc123":                 false,
+		"https://checkout.stripe.com:8443/c/pay/cs_test_abc123":                 false,
+	} {
+		if got := trustedCheckoutURL(raw); got != want {
+			t.Errorf("trustedCheckoutURL(%q)=%v want %v", raw, got, want)
+		}
 	}
 }

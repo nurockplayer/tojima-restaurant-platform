@@ -194,6 +194,14 @@ func trustedHTTPSURL(raw string) bool {
 	return err == nil && u.Scheme == "https" && u.Host != "" && u.User == nil && u.Fragment == ""
 }
 
+// trustedCheckoutURL accepts the hosted Checkout page only. Unlike our own
+// configured return URLs, Stripe's Checkout URL carries a client-side
+// fragment (…/c/pay/cs_test_…#fid…), so a fragment is allowed here.
+func trustedCheckoutURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "https" && u.Host == "checkout.stripe.com" && u.User == nil && u.Opaque == ""
+}
+
 func (p *Provider) validateAccount(a AccountContext) error {
 	if p == nil || p.client == nil || p.mode != ModeConnectedDirectFixture || a.Mode != ModeConnectedDirectFixture || !accountIDPattern.MatchString(a.StripeAccountID) {
 		return ErrUnconfigured
@@ -384,7 +392,7 @@ func checkoutResult(s *stripe.CheckoutSession, requestedAccount string) (Checkou
 	if s == nil || !validStripeObjectID(s.ID, "cs") || s.Mode != stripe.CheckoutSessionModePayment || s.ExpiresAt <= 0 || s.Livemode || s.Currency != stripe.Currency(CurrencyJPY) || s.AmountTotal <= 0 || s.AutomaticTax != nil && s.AutomaticTax.Enabled || s.Status != stripe.CheckoutSessionStatusOpen && s.Status != stripe.CheckoutSessionStatusComplete && s.Status != stripe.CheckoutSessionStatusExpired || s.PaymentStatus != stripe.CheckoutSessionPaymentStatusUnpaid && s.PaymentStatus != stripe.CheckoutSessionPaymentStatusPaid && s.PaymentStatus != stripe.CheckoutSessionPaymentStatusNoPaymentRequired {
 		return CheckoutResult{}, ErrUnsafeResponse
 	}
-	if s.URL != "" && !trustedHTTPSURL(s.URL) {
+	if s.URL != "" && !trustedCheckoutURL(s.URL) {
 		return CheckoutResult{}, ErrUnsafeResponse
 	}
 	piID := ""
