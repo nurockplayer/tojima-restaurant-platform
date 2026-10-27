@@ -86,3 +86,18 @@ Amounts are planning estimates, not quotes. See the report for assumptions and r
 ### 繁體中文
 
 **D12–D17（2026-10-26 JST）：**D12：採用 EXT-4 TTL：session 4 小時、`TABLE_JOIN` grant 1 小時、PIN 15 分鐘、Checkout proof 30 分鐘、`ORDER_READ` 24 小時。已由合併 PR #51 驗證；session 到期後才非同步建立 Checkout 的缺口正另行修復，試營運前須關閉。詳見 [EXT-4](deploy-runbook.md#ext-4-pilot-ttls--ext-4-試店-ttl--ext-4-試店有效期限)。D13：RPO 5 分鐘／RTO 1 小時是未來正式環境目標，不是開發、DEMO、staging 或單店試營運條件。平台營運者負責建置與保護 hosting/IdP、容量和安全日誌監控、備份及金鑰維護、還原與服務狀態溝通；店員／店主負責故障時停止或切換接單方式、依現金／付款與 KDS 流程處理、通報事件、核對訂單／退款及決定業務恢復。D14：開發、DEMO、staging、單店試營運以固定月費 ¥0 為目標；未經 Owner 核准不得啟用付費方案、計費資源或升級。免費試用不算免費。可接受較低可用性，但不得降低公司／店舖隔離、MFA、Passkey、撤銷與付款正確性；不得自行開發密碼、Passkey 或 MFA。容器是部署單位，單節點 k3s 是之後的學習路徑。D15：暫定建議為一台 OCI Always Free A1（2 OCPU/12 GB）以 Docker Compose 執行 PostgreSQL、Keycloak、Go API/worker；Vite SPA 使用 Cloudflare Pages，入口使用 Cloudflare Tunnel。待東島先生 2026-11-02 回饋後才決定 provider。容量、閒置回收、無 SLA 與額外費用見上表及[完整報告](research/2026-10-26-free-hosting-idp.md)。D16：優先考慮自管 Keycloak，保留 ZITADEL 作成本基準，Flutter Passkey 使用系統瀏覽器。PoC 為12/13，R01 外洩密碼檢查仍為 PARTIAL；審查 Keycloak Pwned Passwords policy extension 或維護良好的 offline denylist，測試建立／變更／重設流程，檢查不可用時 fail-closed。extension 尚非核准依賴。完成 MOD-08 驗收後再供員工使用。D17：IdP 中斷時，以 Tojima PostgreSQL 授權狀態驗證既有 session；新登入與已過期 step-up 必須 fail-closed。即時撤銷需要同步提交 Tojima DB，僅依賴 Keycloak events 不足。
+
+## Owner decisions 2026-10-28 (D18–D21) / Owner 決定 / Owner 決定
+
+| ID | Decision | Notes |
+| --- | --- | --- |
+| D18 | Phase-1 pilot takes payment through the store's existing register (cash / pay-later, `STRIPE_MODE` disabled). Stripe online payment is phase 2. | EXT-1 Sandbox work continues for phase 2; Stripe live mode stays unauthorised. Phase 1 needs the cash-only journey accepted on the provisioned store (`/storeadmin`). |
+| D19 | Staff sign-in for the pilot is password + OTP (F1, accepted). Passkey (F2) is post-pilot. | D14's "never hand-roll" rule still applies; Passkey stays a Keycloak feature to enable later. |
+| D20 | Run the pilot on the draft retention schedule ([ops/retention.md](ops/retention.md)); a 税理士 confirms it before phase 2. | Phase 1 still records cash payments (settlement snapshots, receipts, allocations) as financial records; nothing except expired security logs is deleted before confirmation, so the draft's 10-year financial retention is met by default. |
+| D21 | Store setup uses an idempotent operator CLI (`/storeadmin`), not ad-hoc SQL or an admin screen. | See [containers](ops/containers.md). |
+
+Still open with the Owner (2026-10-28): R01 breached-password PARTIAL acceptance; named store/staff owners and training.
+
+日本語: D18 第1段階の試店は店舗既存レジで精算（現金／後払い、Stripe 無効）、Stripe は第2段階。D19 試店のスタッフ認証は password + OTP（F1）、Passkey は試店後。D20 保存期間は草案で運用し、第2段階前に税理士が確認（第1段階も現金精算・領収の財務記録は残る。期限切れの安全ログ以外は削除しない）。D21 店舗設定は `/storeadmin` CLI。未決: R01 PARTIAL の受入、店主・店員担当と訓練。
+
+繁體中文：D18 第一階段試營運使用店家原有收銀（現金／後付，Stripe 停用），Stripe 為第二階段。D19 試營運員工登入為密碼＋OTP（F1），Passkey 於試營運後。D20 依草案保存期限營運，第二階段前由稅理士確認（第一階段仍會留下現金結帳、收據等財務紀錄；除過期安全日誌外一律不刪）。D21 開店設定使用 `/storeadmin` CLI。未決：R01 PARTIAL 是否接受、店主／店員負責人與訓練。
