@@ -308,6 +308,12 @@ csp_missing= csp_weak=
 for csp_path in / /staff /kitchen; do
     csp_file=$WORK/csp$(printf '%s' "$csp_path" | tr '/' '_')
     fetch "$csp_file" GET "$BASE$csp_path"
+    # Only a rendered page counts: a redirect or error carrying CSP says nothing
+    # about the page the browser finally shows.
+    case "$HTTP_CODE:$(lower "$(header_value "$csp_file.headers" Content-Type)")" in
+        200:text/html*) ;;
+        *) csp_missing="$csp_missing $csp_path(not a 200 html page: ${HTTP_CODE:-no answer})"; continue ;;
+    esac
     if [ -z "$(header_value "$csp_file.headers" Content-Security-Policy)" ]; then
         csp_missing="$csp_missing $csp_path"
     elif ! header_all "$csp_file.headers" Content-Security-Policy | tr ';,' '\n\n' |
