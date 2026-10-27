@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/base32"
 	"encoding/json"
@@ -55,6 +56,25 @@ type storeSpec struct {
 type cashSpec struct {
 	Enabled bool                `json:"enabled"`
 	Mode    operations.CashMode `json:"mode"`
+}
+
+// UnmarshalJSON requires both fields: an omitted "enabled" must not silently
+// become false and switch cash acceptance off.
+func (c *cashSpec) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Enabled *bool               `json:"enabled"`
+		Mode    operations.CashMode `json:"mode"`
+	}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.Enabled == nil {
+		return errors.New("store.cash.enabled is required")
+	}
+	c.Enabled, c.Mode = *raw.Enabled, raw.Mode
+	return nil
 }
 
 type tableSpec struct {

@@ -167,6 +167,7 @@ func TestParseUsageErrorsDoNotCallStore(t *testing.T) {
 		{"apply without -f", []string{"apply"}},
 		{"apply missing file", []string{"apply", "-f", filepath.Join(t.TempDir(), "absent.json")}},
 		{"apply invalid json", []string{"apply", "-f", writeSpec(t, `{"tenant":`)}},
+		{"apply cash without enabled", []string{"apply", "-f", writeSpec(t, `{"tenant":{"id":"tojima","name":"東島"},"store":{"id":"main","name":"本店","qr_entry_mode":"STAFF_OPEN","cash":{"mode":"PREPAID"}}}`)}},
 		{"apply unknown field", []string{"apply", "-f", writeSpec(t, `{"tenant":{"id":"tojima","name":"東島"},"store":{"id":"main","name":"本店","qr_entry_mode":"STAFF_OPEN"},"extra":true}`)}},
 		{"apply invalid tenant id", []string{"apply", "-f", writeSpec(t, strings.Replace(validSpec, `"id":"tojima"`, `"id":"Tojima"`, 1))}},
 		{"apply blank tenant name", []string{"apply", "-f", writeSpec(t, strings.Replace(validSpec, `"name":"東島"`, `"name":"   "`, 1))}},
