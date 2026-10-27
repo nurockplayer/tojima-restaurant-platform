@@ -98,7 +98,7 @@ func TestStripeSandboxURLAndHostBoundaries(t *testing.T) {
 			t.Fatal("unsafe return accepted")
 		}
 	}
-	if !sandboxCheckoutURL("https://checkout.stripe.com/c/pay/cs_test_example") {
+	if !sandboxCheckoutURL("https://checkout.stripe.com/c/pay/cs_test_example") || !sandboxCheckoutURL("https://checkout.stripe.com/c/pay/cs_test_example#fidkdWxOYHwnPyd1blpx") {
 		t.Fatal("Stripe hosted URL rejected")
 	}
 	for _, raw := range []string{"http://checkout.stripe.com/pay", "https://checkout.stripe.com.attacker.invalid/pay", "https://checkout.stripe.com:444/pay", "https://user@checkout.stripe.com/pay"} {

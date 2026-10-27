@@ -62,12 +62,13 @@ func sandboxTenantSuffix(tenant string) string {
 // changing the keyless fake adapter or production provider contract.
 type sandboxProvider struct{ *stripeprovider.Provider }
 
+// Stripe Checkout URLs carry a client-side fragment (#fid…); it is allowed.
 func sandboxCheckoutURL(raw string) bool {
 	if raw == "" {
 		return true
 	}
 	u, err := url.Parse(raw)
-	return err == nil && u.Scheme == "https" && u.Host == "checkout.stripe.com" && u.User == nil && u.Fragment == "" && u.Opaque == ""
+	return err == nil && u.Scheme == "https" && u.Host == "checkout.stripe.com" && u.User == nil && u.Opaque == ""
 }
 
 func (p sandboxProvider) CreateCheckout(ctx context.Context, req stripeprovider.CreateCheckoutRequest) (stripeprovider.CheckoutResult, error) {
