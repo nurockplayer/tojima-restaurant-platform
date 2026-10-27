@@ -1,5 +1,8 @@
 #!/bin/sh
-# Read-only ingress/security check for a deployed public origin (go-live gate).
+# Ingress/security check for a deployed public origin (go-live gate). It sends
+# no credentials and changes no business data; the only write it causes is the
+# server's short-lived staff login transaction from GET /staff/auth/login,
+# which expires unused like any abandoned sign-in.
 #
 # Usage: sh scripts/ingress-check.sh [--allow-loopback-http] [--db-host HOST] <public-origin>
 #
@@ -204,10 +207,13 @@ else
                         location_auth=${location_auth%%\#*}
                         host_l=$(lower "$HOST")
                         redirect_ok=false
+                        # The redirect must land on the configured origin's port.
+                        want_port=443
+                        [ -n "$PORT" ] && want_port=$PORT_NUMBER
                         case $location_auth in
                             *@*) ;;
-                            "$host_l"|"$host_l:443") redirect_ok=true ;;
-                            *) [ -n "$PORT" ] && [ "$location_auth" = "$host_l:$PORT_NUMBER" ] && redirect_ok=true ;;
+                            "$host_l:$want_port") redirect_ok=true ;;
+                            "$host_l") [ "$want_port" = 443 ] && redirect_ok=true ;;
                         esac
                         if [ "$redirect_ok" = true ]; then
                             report PASS http-redirect "redirects to https://$location_auth"
@@ -431,15 +437,21 @@ if [ -n "$OPT_DB_HOST" ]; then
     # nc exit codes cannot tell refused from DNS/other errors, so always use
     # curl: exit 7 is only a refused TCP connect. A connected PostgreSQL port
     # gives a non-HTTP reply, which must never read as PASS.
-    curl -q -sS --connect-timeout 3 --max-time 3 -o /dev/null \
-        "http://$OPT_DB_HOST:5432/" >/dev/null 2>&1
+    # time_connect > 0 means the TCP handshake completed: the port is open
+    # whatever happens next (a PostgreSQL or silent proxy never answers HTTP).
+    db_connect=$(curl -q -sS --connect-timeout 3 --max-time 5 -o /dev/null \
+        -w '%{time_connect}' "http://$OPT_DB_HOST:5432/" 2>/dev/null)
     db_rc=$?
-    case $db_rc in
-        7) report PASS db-port "$OPT_DB_HOST:5432 closed (connection refused)" ;;
-        28) report WARN db-port "$OPT_DB_HOST:5432 no answer in 3s (filtered?); confirm the host firewall" ;;
-        6) report FAIL db-port "unverified: $OPT_DB_HOST did not resolve" ;;
-        *) report FAIL db-port "$OPT_DB_HOST:5432 answered or unverified (curl exit $db_rc)" ;;
-    esac
+    if [ -n "$db_connect" ] && [ "$(printf '%s' "$db_connect" | tr -d '0.')" != "" ]; then
+        report FAIL db-port "$OPT_DB_HOST:5432 accepted a TCP connection"
+    else
+        case $db_rc in
+            7) report PASS db-port "$OPT_DB_HOST:5432 closed (connection refused)" ;;
+            28) report WARN db-port "$OPT_DB_HOST:5432 no TCP answer in 3s (filtered?); confirm the host firewall" ;;
+            6) report FAIL db-port "unverified: $OPT_DB_HOST did not resolve" ;;
+            *) report FAIL db-port "unverified (curl exit $db_rc)" ;;
+        esac
+    fi
 fi
 
 # The D8 rate limits are a separate, deliberate burst probe.
