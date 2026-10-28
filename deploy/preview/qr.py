@@ -1,7 +1,10 @@
 """Render tables.csv (storeadmin tables -csv) as a printable QR page."""
 import csv
 import html
+import os
 import sys
+
+os.umask(0o077)  # the page embeds live table locators
 
 rows = list(csv.DictReader(open(sys.argv[1])))
 cards = ''.join(

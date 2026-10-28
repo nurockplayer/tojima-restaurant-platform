@@ -35,7 +35,11 @@ python3 deploy/preview/qr.py deploy/preview/tables.csv deploy/preview/tables.htm
 a temporary MFA seed user (held and deleted afterwards), and creates Keycloak user
 `owner` with a temporary password and `UPDATE_PASSWORD` + `CONFIGURE_TOTP`. It
 writes `tables.csv` and `owner-credentials.txt` (0600) next to `.env`; never paste
-them into chat or commits. Stop with `preview.sh stop`, resume with `preview.sh start`;
+them into chat or commits. Seeding is one-shot and refuses to run twice.
+
+**Re-seed** (also after a failed seed, which can leave Keycloak users behind):
+`preview.sh down -v`, delete `tables.*` and `owner-credentials.txt`, then
+`preview.sh up -d --build --wait` and run `seed.py` again. All preview data is lost. Stop with `preview.sh stop`, resume with `preview.sh start`;
 `preview.sh down -v` deletes all data.
 
 ## Frontend

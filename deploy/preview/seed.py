@@ -15,6 +15,7 @@ from html.parser import HTMLParser
 from http.cookies import SimpleCookie
 import io
 import json
+import os
 from pathlib import Path
 import re
 import secrets
@@ -27,6 +28,12 @@ import urllib.parse
 import urllib.request
 
 ROOT, ENV_FILE, PROJECT = sys.argv[1:]
+# Every output (table locators, owner password) is private to this user.
+os.umask(0o077)
+# One-shot: a partial run leaves Keycloak users behind, so a retry needs a fresh
+# volume (README "Re-seed"). Refuse instead of failing halfway with HTTP 409.
+if (Path(ENV_FILE).parent / 'owner-credentials.txt').exists():
+    sys.exit('already seeded; reset the volume to re-seed (see README)')
 ENV = dict(line.split('=', 1) for line in Path(ENV_FILE).read_text().splitlines() if '=' in line)
 APP = ENV['APP_PUBLIC_ORIGIN']
 KC = ENV['KEYCLOAK_PUBLIC_URL']
