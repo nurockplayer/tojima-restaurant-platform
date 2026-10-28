@@ -147,7 +147,14 @@ async function shot(page, file) {
   // TOTP secret QR, so they are never captured.
   if (onIdp(page)) return null;
   try {
-    await page.screenshot({ path: file, fullPage: false });
+    // The staff notice can carry the table PIN and the guest entry card the
+    // token; pixels cannot be redacted afterwards, so they are masked.
+    const mask = [];
+    for (const selector of ['.notice', 'input[data-control="guest-entry"]']) {
+      const locator = page.locator(selector);
+      if (await locator.count()) mask.push(locator);
+    }
+    await page.screenshot({ path: file, fullPage: false, mask });
     return file;
   } catch {
     return null;
@@ -344,6 +351,13 @@ async function settleCash(page) {
   if (await register.count()) await register.fill(`E2E-${Date.now().toString(36)}`);
   const tendered = dialog.getByLabel('お預かり金額');
   if (await tendered.count() && !(await tendered.inputValue())) await tendered.fill('99999');
+  if (await settle.isDisabled()) {
+    // The control is always on the detail screen; with nothing unpaid the
+    // dialog only offers 精算対象の現金注文はありません。
+    const due = await text(page, dialog);
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    return { settled: false, reason: due.slice(0, 120) || 'settle control disabled' };
+  }
   await settle.click();
   const receipt = await poll(async () => (await text(page, dialog)).includes('精算済み'), 25000);
   if (!receipt) throw new Error('cash settlement did not confirm');
@@ -365,7 +379,9 @@ async function closeTable(page) {
     throw new Error(`table not closable: ${blockers.slice(0, 120)}`);
   }
   await confirm.click();
-  await poll(async () => !(await page.locator('.staff-detail').count()), 25000);
+  if (!(await poll(async () => !(await page.locator('.staff-detail').count()), 25000))) {
+    throw new Error(`4番卓 did not close: ${(await text(page, page.locator('.staff-detail'))).slice(0, 120)}`);
+  }
   return { closed: true };
 }
 
@@ -572,7 +588,7 @@ async function runEngine(engine, result) {
   try {
     await step(1, 'Staff signs in on /staff/ (password, OTP, step-up) and reaches the tables screen', async () => {
       await staffSignIn(staff, state.run);
-      await waitVisible(staffCard(staff), 30000);
+      if (!(await waitVisible(staffCard(staff), 30000))) throw new Error('4番卓 is not on the tables screen after sign-in');
       return { enrolled: state.run.enrolled === true, stepUp: state.run.stepUp === true, screen: await text(staff, staff.locator('h2')) };
     });
 
@@ -613,7 +629,10 @@ async function runEngine(engine, result) {
       const sync = Date.now() - at;
       const names = await text(guestB, guestB.locator('[role="dialog"]'));
       await guestB.keyboard.press('Escape');
-      return { guestBJoin: joined, lines, syncMs: sync, sawDish: names.includes(DISH), sawBeer: names.includes(BEER) };
+      if (!names.includes(DISH) || !names.includes(BEER)) {
+        throw new Error(`Guest B cart does not show both products: ${names.slice(0, 160)}`);
+      }
+      return { guestBJoin: joined, lines, syncMs: sync, sawDish: true, sawBeer: true };
     }, guestB);
 
     await step(5, 'Guest A submits the cash order and sees 店員の受付待ち · 未払い', async () => {
@@ -666,6 +685,7 @@ async function runEngine(engine, result) {
     await step(8, 'Staff settles the cash and closes 4番卓; Guest A sees the session ended after reload', async () => {
       await staffEnterTable(staff);
       const settled = await settleCash(staff);
+      if (!settled.settled) throw new Error(`cash settlement not offered: ${settled.reason ?? 'unknown'}`);
       await staffRefresh(staff);
       await closeTable(staff);
       state.tableOpen = false;
@@ -720,6 +740,7 @@ async function runEngine(engine, result) {
         name: (button.getAttribute('aria-label') || button.textContent || '').trim(),
         disabled: button.disabled,
       })));
+      if (!labels.length) throw new Error('no add control on the menu');
       const unnamed = labels.filter((item) => !item.name || !item.product || !item.name.includes(item.product));
       const target = labels.findIndex((item) => !item.disabled);
       let focus = null;
@@ -802,6 +823,7 @@ async function runEngine(engine, result) {
       });
       await sleep(5000);
       const whileHidden = calls.filter((call) => call.at >= hiddenAt).length;
+      if (whileHidden) throw new Error(`the app kept polling while hidden: ${whileHidden} /v1/ requests`);
       const shownAt = Date.now();
       await guestA.evaluate(() => {
         Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
@@ -854,6 +876,12 @@ const engines = [
   { name: 'webkit-iphone15', device: 'iPhone 15', launch: () => webkit.launch() },
 ].filter((engine) => !process.env.E2E_ONLY || engine.name.includes(process.env.E2E_ONLY));
 
+if (!engines.length) {
+  writeFileSync(join(outDir, 'report.json'), `${JSON.stringify({ base: BASE, table: TABLE_ID, startedAt: stamp(), engines: [], result: 'FAIL', error: `E2E_ONLY="${process.env.E2E_ONLY ?? ''}" matches no engine` }, null, 2)}\n`);
+  console.log(`RESULT: FAIL 1 steps (E2E_ONLY="${process.env.E2E_ONLY ?? ''}" matches no engine)`);
+  process.exit(1);
+}
+
 const report = { base: BASE, table: TABLE_ID, startedAt: stamp(), enrolled: false, engines: [], result: 'FAIL' };
 
 for (const engine of engines) {
@@ -872,7 +900,8 @@ for (const engine of engines) {
 }
 
 report.enrolled = Boolean(creds.totpSecret);
-const failed = report.engines.reduce((sum, entry) => sum + entry.steps.filter((step) => step.status === 'FAIL').length + (entry.fatal ? 1 : 0), 0);
+const failed = report.engines.reduce((sum, entry) => sum + entry.steps.filter((step) => step.status === 'FAIL').length + (entry.fatal ? 1 : 0)
+  + (entry.cleanup ?? []).filter((item) => !item.ok).length, 0);
 report.result = failed === 0 ? 'PASS' : 'FAIL';
 report.finishedAt = stamp();
 writeFileSync(join(outDir, 'report.json'), `${JSON.stringify(report, null, 2)}\n`);
