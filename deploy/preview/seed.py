@@ -541,6 +541,7 @@ try:
     out = Path(ENV_FILE).parent
     listing = storeadmin('tables', '-tenant', TENANT, '-store', STORE, '-public-origin', APP, '-csv')
     (out / 'tables.csv').write_text(listing)
+    (out / 'tables.csv').chmod(0o600)  # umask does not narrow an existing file
     (out / 'owner-credentials.txt').write_text(
         'Staff URL: ' + APP + '/staff/\nUsername: owner\nTemporary password: ' + owner_password + '\n')
     (out / 'owner-credentials.txt').chmod(0o600)

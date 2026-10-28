@@ -19,3 +19,5 @@ page = (
     "<script>document.querySelectorAll('.qr').forEach(function(e){"
     "var q=qrcode(0,'M');q.addData(e.dataset.url);q.make();e.innerHTML=q.createSvgTag(6);});</script>")
 open(sys.argv[2], 'w').write(page)
+# umask does not narrow a file that already existed.
+os.chmod(sys.argv[2], 0o600)
