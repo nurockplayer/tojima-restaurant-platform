@@ -42,3 +42,20 @@ them into chat or commits. Stop with `preview.sh stop`, resume with `preview.sh 
 
 `sh deploy/preview/deploy-pages.sh` builds the SPA in Docker and deploys it with
 the Function to Pages project `tojima-preview` (custom domain `tojima.jabiko.app`).
+
+## Current deployment (2026-10-29 JST)
+
+| Item | Value |
+|---|---|
+| Cloudflare account | `6ad170220aed1f2e19a535b093750331`, zone `jabiko.app` (Free) |
+| Pages project | `tojima-preview` → custom domain `tojima.jabiko.app` (DNS CNAME `tojima` → `tojima-preview.pages.dev`), var `API_ORIGIN=https://tojima-api.jabiko.app` |
+| Named tunnel | `tojima-preview` (`84535fc0-6bd1-42b4-8d55-b990480051e7`), remotely managed; CNAMEs `tojima-api`, `tojima-id` → `<id>.cfargotunnel.com` |
+| Backend host | Owner's Synology NAS (`ssh TachiNAS`, DSM 7.x x86_64), checkout `~/tojima-preview`, compose project `tojima-preview`; user in the `docker` group, socket group restored at boot by `/usr/local/etc/rc.d/docker-sock-group.sh` |
+| Secrets | NAS `~/tojima-preview/deploy/preview/.env` (0600; DB, Keycloak, PIN pepper, tunnel token) |
+| Seed outputs | NAS `deploy/preview/{tables.csv,owner-credentials.txt}`; Owner's Mac copy `~/.tojima-preview-nas/` (0600) |
+| Staff account | Keycloak user `owner` (TENANT_ADMIN, STORE_MANAGER, KITCHEN, STAFF_CASHIER on `preview-co/main`) |
+
+Update: copy the new checkout to the NAS (keep `deploy/preview/.env`), run
+`preview.sh up -d --build --wait`, and `deploy-pages.sh` for frontend changes.
+Retire: `preview.sh down -v --rmi local` on the NAS, then delete the Pages
+project, the tunnel and the three DNS records in Cloudflare.
