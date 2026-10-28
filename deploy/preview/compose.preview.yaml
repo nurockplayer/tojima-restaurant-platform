@@ -1,0 +1,20 @@
+# Internal preview overlay: adds the Cloudflare named tunnel in front of the
+# server and Keycloak. Use with the root compose.yaml and --profile staff:
+#   docker compose -f compose.yaml -f deploy/preview/compose.preview.yaml \
+#     --env-file deploy/preview/.env -p tojima-preview --profile staff up -d --build --wait
+# Tunnel ingress is managed in Cloudflare: tojima-api -> http://server:8080
+# (Host rewritten to the Pages origin), tojima-id -> http://keycloak:8080.
+services:
+  tunnel:
+    profiles: [staff]
+    image: cloudflare/cloudflared:2026.9.1
+    command: [tunnel, --no-autoupdate, run]
+    environment:
+      # Empty until set-token.sh runs; cloudflared then exits and restarts.
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:-}
+    depends_on:
+      server:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
