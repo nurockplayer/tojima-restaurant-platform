@@ -1,0 +1,6 @@
+name = "tojima-preview"
+pages_build_output_dir = "dist"
+compatibility_date = "2026-10-01"
+
+[vars]
+API_ORIGIN = "https://tojima-api.jabiko.app"

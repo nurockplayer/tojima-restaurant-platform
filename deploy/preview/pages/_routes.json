@@ -1,0 +1,1 @@
+{"version":1,"include":["/v1/*","/staff/auth/*","/healthz"],"exclude":[]}

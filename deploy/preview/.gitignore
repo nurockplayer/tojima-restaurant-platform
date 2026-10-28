@@ -1,0 +1,5 @@
+.env
+.env.new
+tables.csv
+tables.html
+owner-credentials.txt
