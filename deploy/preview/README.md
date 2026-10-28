@@ -47,6 +47,42 @@ them into chat or commits. Seeding is one-shot and refuses to run twice.
 `sh deploy/preview/deploy-pages.sh` builds the SPA in Docker and deploys it with
 the Function to Pages project `tojima-preview` (custom domain `tojima.jabiko.app`).
 
+## Phone-journey E2E
+
+`sh deploy/preview/e2e.sh` runs the Owner's 12-step phone checklist against
+`https://tojima.jabiko.app` with no human input, once per engine and
+sequentially: Playwright Chromium with the `Pixel 7` descriptor, then Playwright
+WebKit with `iPhone 15`. Staff and the two guests are separate browser contexts.
+
+The staff account is `e2e-bot` signing in through the real Keycloak realm
+(password, then OTP; the secret is enrolled on the first run and written back to
+`~/.tojima-preview-nas/e2e-credentials.json`, 0600), followed by a step-up so
+manager actions are allowed. The journey uses `4番卓` only, and leaves it closed
+and カレーライス on sale afterwards, even after a failure.
+
+Covered: staff sign-in and step-up; open and close a table; guest menu; cart
+sync between two guests; cash order submit showing 店員の受付待ち · 未払い;
+accept on `/staff/`; start and finish cooking on `/kitchen/`; served, and the
+guest status updating without a reload; cash settle and close; a sold-out
+カレーライス that cannot be ordered; Traditional Chinese text with the 1,100
+price; add-control accessible names and where focus lands after adding;
+landscape rotation without horizontal overflow; a refetch after returning from
+the background.
+
+Results: `deploy/preview/e2e/out/report.json` plus a screenshot per failed step,
+a table on stdout and a last line of `RESULT: PASS` or `RESULT: FAIL <n> steps`
+(exit 0/1). `E2E_ONLY=webkit sh deploy/preview/e2e.sh` runs a single engine.
+
+Two gaps are reported, not hidden. The store catalog console (`/catalog/`)
+connects only with a staff access token, never with the Keycloak session, so the
+sold-out step drives the same admin endpoint the console uses and the report says
+so. The kitchen board starts and finishes cooking but has no "served" action, so
+the order is served from `/staff/` after the board.
+
+Not covered: real iOS Safari and Android Chrome on physical devices,
+VoiceOver/TalkBack speech output, the Safari dynamic toolbar, and table entry
+modes other than the preview's `STAFF_OPEN`.
+
 ## Current deployment (2026-10-29 JST)
 
 | Item | Value |
