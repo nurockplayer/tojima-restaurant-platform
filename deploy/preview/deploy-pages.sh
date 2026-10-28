@@ -9,6 +9,8 @@ cid=$(docker create tojima-preview-web)
 trap 'docker rm -f "$cid" >/dev/null 2>&1 || true; rm -rf "$P/dist"' EXIT
 rm -rf "$P/dist"
 docker cp "$cid:/src/web/dist" "$P/dist"
+# Never deploy a site without the SPA (a failed copy once shipped an empty one).
+[ -f "$P/dist/index.html" ] && [ -d "$P/dist/assets" ] || { echo "SPA build output missing" >&2; exit 1; }
 cp "$P/_routes.json" "$P/_headers" "$P/dist/"
 cd "$P"
 wrangler pages deploy dist --project-name tojima-preview --branch main --commit-dirty=true
