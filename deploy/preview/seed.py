@@ -492,7 +492,10 @@ try:
         'expected_version': draft_version, 'preview_fingerprint': preview['preview_fingerprint'],
     })
     menu = call(STAFF_HTTP, ADMIN + '/stores/' + STORE + '/menu')
-    for product in [p for c in menu.get('categories', []) for p in c.get('products', [])]:
+    products = [p for c in menu.get('categories', []) for p in c.get('products', [])]
+    check(sorted(p.get('key') for p in products) == sorted(pk for _, _, items in MENU for pk, _, _ in items),
+          'store menu does not carry exactly the published products')
+    for product in products:
         available = call(STAFF_HTTP, ADMIN + '/stores/' + STORE + '/menu/availability', 'PUT', {
             'target': {'kind': 'PRODUCT', 'product_key': product['key']},
             'status': 'AVAILABLE',
