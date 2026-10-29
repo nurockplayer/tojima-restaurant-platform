@@ -65,6 +65,8 @@ function saveTotpSecret(secret) {
 
 // 4番卓 is reserved for this journey, but a session someone else opened there
 // must not be settled and closed by accident: only reset the one we opened.
+// One run at a time per credentials directory (the README says so): the record
+// belongs to the directory, not to a run.
 const statePath = join(credsDir, 'e2e-state.json');
 function readState() {
   try { return JSON.parse(readFileSync(statePath, 'utf8')); } catch { return {}; }
@@ -600,6 +602,8 @@ async function submitCashOrder(page) {
   const commit = await response.json();
   const orderId = commit?.order?.order_id;
   if (typeof orderId !== 'string' || !/^[a-f0-9]{32}$/.test(orderId)) throw new Error('order commit response has no valid order id');
+  // Record it before anything else can fail, so the reset knows the order is ours.
+  saveState({ ...readState(), orderIds: [...(readState().orderIds ?? []), orderId].slice(-20) });
   await poll(async () => !(await dialog.isVisible().catch(() => false)), 30000);
   if (!(await poll(async () => (await page.locator(`[data-order-card="${orderId}"] [data-order-status]`).count()) > 0, 30000))) {
     throw new Error('new order status did not appear');
@@ -780,7 +784,6 @@ async function runEngine(engine, result) {
 
     await step(5, 'Guest A submits the cash order and sees an unpaid order status', async () => {
       state.orderId = await submitCashOrder(guestA);
-      saveState({ ...readState(), orderIds: [...(readState().orderIds ?? []), state.orderId].slice(-20) });
       const status = await poll(async () => {
         const value = await orderStatus(guestA, state.orderId);
         return (value.includes('店員の受付待ち') || value.includes('受付済み')) && value.includes('未払い') ? value : 0;

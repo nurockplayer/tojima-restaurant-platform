@@ -66,7 +66,8 @@ default (else `~/.tojima-preview-nas/`, or `E2E_CREDS=<dir>`), next to
 The journey uses `4番卓` only, and leaves it closed and カレーライス on sale
 afterwards, even after a failure. It resets only sessions it opened itself
 (recorded in `e2e-state.json` next to the credentials); a 4番卓 session opened by
-anyone else stops the run. `E2E_FORCE_RESET=1` overrides that.
+anyone else, or an order it did not place, stops the run. `E2E_FORCE_RESET=1`
+overrides that. Run one journey at a time per credentials directory.
 
 Covered: staff sign-in and step-up; open and close a table; guest menu; cart
 sync between two guests; cash order submit showing 店員の受付待ち · 未払い or
