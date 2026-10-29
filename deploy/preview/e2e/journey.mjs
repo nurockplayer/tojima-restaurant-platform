@@ -12,7 +12,7 @@
 // secret, no table URL or token, no cookies, and never a screenshot of the
 // Keycloak sign-in or OTP-enrolment page.
 import { createHmac } from 'node:crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, chownSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, devices, webkit } from 'playwright-core';
 
@@ -55,8 +55,11 @@ const creds = JSON.parse(readFileSync(credsPath, 'utf8'));
 function saveTotpSecret(secret) {
   creds.totpSecret = secret;
   const tmp = join(credsDir, `.e2e-credentials.${process.pid}.tmp`);
+  // The container runs as root: keep the file owned by the host user.
+  const { uid, gid } = statSync(credsPath);
   writeFileSync(tmp, `${JSON.stringify(creds, null, 2)}\n`, { mode: 0o600 });
   chmodSync(tmp, 0o600);
+  chownSync(tmp, uid, gid);
   renameSync(tmp, credsPath);
 }
 
@@ -239,7 +242,7 @@ async function keycloakFlow(page, run) {
       await page.locator('input[name="totp"]').fill(await otpCode());
       const device = page.locator('input[name="userLabel"]');
       if (await device.count() && !(await device.first().inputValue())) await device.first().fill('e2e-bot');
-      await page.locator('input[name="saveTOTP"]').click({ timeout: 10000 });
+      await submitKeycloak(page);
       await page.waitForLoadState('domcontentloaded');
       continue;
     }
@@ -260,7 +263,12 @@ async function keycloakFlow(page, run) {
       continue;
     }
     if (await otp.count()) {
-      await otp.first().fill(await otpCode());
+      const code = await otpCode();
+      // The code may have waited for a fresh window; a stale page cannot take it.
+      if (!(await otp.first().fill(code, { timeout: 10000 }).then(() => true, () => false))) {
+        await page.reload({ waitUntil: 'domcontentloaded' });
+        continue;
+      }
       await submitKeycloak(page);
       await page.waitForLoadState('domcontentloaded');
       continue;
@@ -445,7 +453,8 @@ async function addProduct(page, name) {
   if (!(await waitVisible(row, 15000))) throw new Error(`menu row missing: ${name}`);
   const add = row.locator('[data-add-product]');
   if (!(await add.count())) throw new Error(`add control missing: ${name}`);
-  if (await add.isDisabled()) throw new Error(`add control disabled: ${name}`);
+  // The button is disabled while a cart write is in flight; wait it out.
+  if (!(await poll(async () => !(await add.isDisabled()), 10000))) throw new Error(`add control disabled: ${name}`);
   await add.click();
   return finishOptionSheet(page);
 }
