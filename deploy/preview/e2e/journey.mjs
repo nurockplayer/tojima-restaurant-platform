@@ -1001,6 +1001,11 @@ async function runEngine(engine, result) {
       await staffGrid(staff);
       if (await staffCard(staff).getByRole('button', { name: '詳細' }).count()) {
         await staffEnterTable(staff);
+        // Same ownership rule as step 2: never close a session this journey did not open.
+        const marker = await sessionMarker(staff);
+        if (marker !== readState().t04Session && process.env.E2E_FORCE_RESET !== '1') {
+          throw new Error(`4番卓 session not opened by this journey left open (${marker.slice(0, 60)})`);
+        }
         await resetTable(staff, kitchen);
       }
       if (!(await waitVisible(staffCard(staff).getByRole('button', { name: '開卓' }), 10000))) {
