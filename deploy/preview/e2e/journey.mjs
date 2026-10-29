@@ -449,6 +449,15 @@ async function closeTable(page) {
 // Finish all actionable orders before retrying the close blockers. The loop is
 // bounded so an unrelated payment or review hold remains visible as a failure.
 async function resetTable(page, kitchen) {
+  // Only drive orders this journey placed: a foreign order (someone scanned the
+  // 4番卓 QR meanwhile) stops the reset instead of being served and settled.
+  if (process.env.E2E_FORCE_RESET !== '1') {
+    await staffRefresh(page);
+    const ours = new Set(readState().orderIds ?? []);
+    const heads = await page.locator('.staff-detail .staff-order-head small').allInnerTexts();
+    const foreign = heads.filter((head) => ![...ours].some((id) => head.includes(id)));
+    if (foreign.length) throw new Error(`4番卓 has ${foreign.length} order(s) this journey did not place; rerun with E2E_FORCE_RESET=1 after checking them`);
+  }
   let blockers = '';
   for (let round = 0; round < 60; round += 1) {
     await staffRefresh(page);
@@ -771,6 +780,7 @@ async function runEngine(engine, result) {
 
     await step(5, 'Guest A submits the cash order and sees an unpaid order status', async () => {
       state.orderId = await submitCashOrder(guestA);
+      saveState({ ...readState(), orderIds: [...(readState().orderIds ?? []), state.orderId].slice(-20) });
       const status = await poll(async () => {
         const value = await orderStatus(guestA, state.orderId);
         return (value.includes('店員の受付待ち') || value.includes('受付済み')) && value.includes('未払い') ? value : 0;
