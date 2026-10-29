@@ -1013,7 +1013,8 @@ for (const engine of engines) {
     log(`engine ${engine.name} failed to run: ${entry.fatal}`);
   }
   entry.finishedAt = stamp();
-  entry.result = entry.steps.length > 0 && entry.steps.every((step) => step.status === 'PASS') && !entry.fatal ? 'PASS' : 'FAIL';
+  entry.result = entry.steps.length > 0 && entry.steps.every((step) => step.status === 'PASS') && !entry.fatal
+    && (entry.cleanup ?? []).every((item) => item.ok) ? 'PASS' : 'FAIL';
   log(`engine ${engine.name} ${entry.result}`);
 }
 
