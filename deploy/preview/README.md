@@ -56,9 +56,17 @@ WebKit with `iPhone 15`. Staff and the two guests are separate browser contexts.
 
 The staff account is `e2e-bot` signing in through the real Keycloak realm
 (password, then OTP; the secret is enrolled on the first run and written back to
-`~/.tojima-preview-nas/e2e-credentials.json`, 0600), followed by a step-up so
-manager actions are allowed. The journey uses `4番卓` only, and leaves it closed
-and カレーライス on sale afterwards, even after a failure.
+`e2e-credentials.json`, 0600), followed by a step-up so manager actions are
+allowed. Create the account once on the docker host with
+`python3 deploy/preview/e2e-user.py . deploy/preview/.env tojima-preview`; it
+writes `deploy/preview/e2e-credentials.json`, which `e2e.sh` reads there by
+default (else `~/.tojima-preview-nas/`, or `E2E_CREDS=<dir>`), next to
+`tables.csv`. Run it on the docker host so the credentials stay there.
+
+The journey uses `4番卓` only, and leaves it closed and カレーライス on sale
+afterwards, even after a failure. It resets only sessions it opened itself
+(recorded in `e2e-state.json` next to the credentials); a 4番卓 session opened by
+anyone else stops the run. `E2E_FORCE_RESET=1` overrides that.
 
 Covered: staff sign-in and step-up; open and close a table; guest menu; cart
 sync between two guests; cash order submit showing 店員の受付待ち · 未払い or

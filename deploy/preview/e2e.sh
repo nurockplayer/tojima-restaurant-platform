@@ -4,14 +4,19 @@
 #   sh deploy/preview/e2e.sh            # both engines, sequential
 #   E2E_ONLY=webkit sh deploy/preview/e2e.sh
 #
-# Needs Docker and ~/.tojima-preview-nas/e2e-credentials.json (0600); the first
+# Needs Docker and e2e-credentials.json + tables.csv (0600) in deploy/preview/
+# (the docker host) or ~/.tojima-preview-nas (a copy elsewhere); the first
 # run enrolls the OTP secret and writes it back there. The image is the pinned
 # playwright release, so the browser builds match the pinned playwright-core.
 set -eu
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
 out=${E2E_OUT:-"$repo/deploy/preview/e2e/out"}
-creds=${E2E_CREDS:-"$HOME/.tojima-preview-nas"}
+# On the docker host e2e-user.py and seed.py leave their outputs next to .env;
+# elsewhere (the Mac) they are copied to ~/.tojima-preview-nas.
+if [ -n "${E2E_CREDS:-}" ]; then creds=$E2E_CREDS
+elif [ -f "$repo/deploy/preview/e2e-credentials.json" ]; then creds="$repo/deploy/preview"
+else creds="$HOME/.tojima-preview-nas"; fi
 
 [ -f "$creds/e2e-credentials.json" ] || { echo "missing $creds/e2e-credentials.json" >&2; exit 2; }
 [ -f "$creds/tables.csv" ] || { echo "missing $creds/tables.csv" >&2; exit 2; }
