@@ -63,6 +63,23 @@ function saveTotpSecret(secret) {
   renameSync(tmp, credsPath);
 }
 
+// 4番卓 is reserved for this journey, but a session someone else opened there
+// must not be settled and closed by accident: only reset the one we opened.
+const statePath = join(credsDir, 'e2e-state.json');
+function readState() {
+  try { return JSON.parse(readFileSync(statePath, 'utf8')); } catch { return {}; }
+}
+function saveState(value) {
+  const { uid, gid } = statSync(credsDir);
+  const tmp = join(credsDir, `.e2e-state.${process.pid}.tmp`);
+  writeFileSync(tmp, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+  // An inherited ACL (Synology) can widen the mode given at creation.
+  chmodSync(tmp, 0o600);
+  chownSync(tmp, uid, gid);
+  renameSync(tmp, statePath);
+}
+const sessionMarker = async (page) => text(page, page.locator('.staff-detail-meta'));
+
 const tablesCsv = readFileSync(join(credsDir, 'tables.csv'), 'utf8').trim().split('\n').slice(1)
   .map((line) => line.split(','));
 const tableRow = tablesCsv.find((row) => row[0] === TABLE_ID);
@@ -293,9 +310,11 @@ async function keycloakFlow(page, run) {
 async function connectStaff(page) {
   const form = page.locator('form.staff-entry');
   const tabs = page.locator('nav.staff-tabs');
-  if (!(await waitVisible(form, 30000))) {
+  // Already connected (the workspace is up), or the form shows first.
+  if (!(await waitVisible(form.or(tabs), 30000))) {
     throw new Error(`staff connect form missing (${safePath(page)})`);
   }
+  if (await tabs.isVisible()) return;
   // A tab with a stored store context reconnects by itself: the form shows
   // for a moment and then gives way to the workspace.
   await page.waitForTimeout(1500);
@@ -481,6 +500,8 @@ async function openTable(page) {
   }
   await open.click();
   await waitVisible(page.locator('.staff-detail'), 25000);
+  // Every session this journey opens (step 2 and the reopen in step 9) is ours to reset.
+  saveState({ ...readState(), t04Session: await sessionMarker(page) });
   const notice = await text(page, page.locator('.notice'));
   const pin = /PIN/.test(notice) ? (notice.match(/(\d{4,8})/) ?? [])[1] : undefined;
   return { pin };
@@ -707,6 +728,10 @@ async function runEngine(engine, result) {
       let reset = false;
       if (await staffCard(staff).getByRole('button', { name: '詳細' }).count()) {
         await staffEnterTable(staff);
+        const marker = await sessionMarker(staff);
+        if (marker !== readState().t04Session && process.env.E2E_FORCE_RESET !== '1') {
+          throw new Error(`4番卓 has a session this journey did not open (${marker.slice(0, 60)}); close it by hand or rerun with E2E_FORCE_RESET=1`);
+        }
         await resetTable(staff, kitchen);
         reset = true;
       }
@@ -858,15 +883,20 @@ async function runEngine(engine, result) {
       })));
       if (!labels.length) throw new Error('no add control on the menu');
       const unnamed = labels.filter((item) => !item.name || !item.product || !item.name.includes(item.product));
-      const target = labels.findIndex((item) => !item.disabled);
+      // The add buttons are disabled while a cart write is in flight.
+      await poll(async () => guestA.locator('[data-add-product]:not([disabled])').count(), 10000);
+      const target = await guestA.evaluate(() => [...document.querySelectorAll('[data-add-product]')].findIndex((button) => !button.disabled));
       if (target < 0) throw new Error('no enabled add control for focus check');
       let focus = null;
       if (target >= 0) {
         const buttons = guestA.locator('[data-add-product]');
         await buttons.nth(target).focus();
+        const write = guestA.waitForRequest((request) => request.method() !== 'GET' && /\/v1\/.*cart/.test(request.url()), { timeout: 5000 }).then(() => true, () => false);
         await guestA.keyboard.press('Enter');
         await guestA.waitForTimeout(1200);
         const inSheet = await guestA.locator('[role="dialog"]').isVisible().catch(() => false);
+        // Enter must actually act: either a cart write or the options sheet.
+        if (!(await write) && !inSheet) throw new Error('Enter on the add control neither added to the cart nor opened options');
         focus = await guestA.evaluate(() => {
           const active = document.activeElement;
           return {

@@ -19,7 +19,7 @@ mkdir -p "$out"
 
 set +e
 docker run --rm --init --ipc=host \
-  -e E2E_ONLY="${E2E_ONLY:-}" \
+  -e E2E_ONLY="${E2E_ONLY:-}" -e E2E_FORCE_RESET="${E2E_FORCE_RESET:-}" \
   -v "$repo/deploy/preview/e2e:/src:ro" \
   -v "$creds:/creds" \
   -v "$out:/out" \
