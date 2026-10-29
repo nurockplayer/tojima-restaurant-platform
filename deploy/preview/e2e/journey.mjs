@@ -292,17 +292,23 @@ async function keycloakFlow(page, run) {
 
 async function connectStaff(page) {
   const form = page.locator('form.staff-entry');
+  const tabs = page.locator('nav.staff-tabs');
   if (!(await waitVisible(form, 30000))) {
     throw new Error(`staff connect form missing (${safePath(page)})`);
   }
+  // A tab with a stored store context reconnects by itself: the form shows
+  // for a moment and then gives way to the workspace.
+  await page.waitForTimeout(1500);
+  if (await tabs.isVisible()) return;
   for (const [label, value] of [['企業ID', TENANT], ['店舗ID', STORE]]) {
     try {
       await page.getByLabel(label).fill(value, { timeout: 10000 });
     } catch (cause) {
+      if (await tabs.isVisible()) return;
       throw new Error(`staff connect ${label} fill failed at ${safePath(page)}: ${String(cause.message).split('\n')[0]}`);
     }
   }
-  await page.getByRole('button', { name: '接続' }).click();
+  await page.getByRole('button', { name: '接続', exact: true }).click({ timeout: 10000 }).catch(() => undefined);
   if (!(await waitVisible(page.locator('nav.staff-tabs'), 30000))) {
     throw new Error(`staff workspace did not open (${safePath(page)})`);
   }
@@ -337,7 +343,9 @@ const orderCard = (cards, id) => cards.filter({ has: cards.page().locator('.staf
 
 async function namedAction(name, fn) {
   try { return await fn(); } catch (cause) {
-    throw new Error(`${name}: ${String(cause?.message ?? cause).split('\n')[0]}`);
+    const lines = String(cause?.message ?? cause).split('\n');
+    const waiting = lines.filter((line) => /waiting for|intercepts|not enabled|not stable/.test(line)).slice(-2).map((line) => line.trim()).join(' ');
+    throw new Error(`${name}: ${lines[0]} ${waiting}`);
   }
 }
 
@@ -438,7 +446,13 @@ async function resetTable(page, kitchen) {
     await staffRefresh(page);
     const serve = page.locator('.staff-detail').getByRole('button', { name: '提供済みにする' });
     if (await serve.count()) { await namedAction('reset 提供済みにする', () => serve.first().click()); continue; }
-    await namedAction('reset cash settlement', () => settleCash(page));
+    // A paid-up session can leave the cash dialog without a settle button and
+    // its cancel busy; dismiss it and let the close blockers decide.
+    await namedAction('reset cash settlement', () => settleCash(page)).catch(async () => {
+      await page.keyboard.press('Escape');
+      await ensureStaff(page);
+      await staffEnterTable(page);
+    });
     await namedAction('reset refresh', () => staffRefresh(page));
     await namedAction('reset open close dialog', () => page.getByRole('button', { name: 'テーブルを閉じる' }).click());
     const dialog = closeDialog(page);
@@ -653,7 +667,13 @@ async function runEngine(engine, result) {
     try {
       detail = (await fn()) ?? {};
     } catch (cause) {
-      error = `step ${n} ${name}: ${String(cause?.message ?? cause).split('\n')[0]}`.slice(0, 300);
+      {
+        // Keep Playwright's "waiting for locator(...)" line: it names what timed out.
+        const lines = String(cause?.message ?? cause).split('\n');
+        const waiting = lines.find((line) => /waiting for locator/.test(line)) ?? '';
+        const blocked = String(cause?.stack ?? '').split('\n').filter((line) => line.includes('journey.mjs')).slice(0, 3).map((line) => line.trim().replace(/.*journey\.mjs:/, '@')).join(' ');
+        error = `step ${n} ${name}: ${lines[0]} ${waiting.trim()} ${blocked.trim()}`.slice(0, 600);
+      }
     }
     const entry = { n, name, at, ms: Date.now() - started, status: error ? 'FAIL' : 'PASS', ...(error ? { error: redact(error) } : {}), detail: redactDeep(detail) };
     if (error) {
@@ -699,10 +719,13 @@ async function runEngine(engine, result) {
     }, guestA);
 
     await step(4, 'Guest A adds 日替わり定食 and 生ビール; Guest B sees both lines within 5 s', async () => {
+      // B is at the table first, so this measures sync, not B's first load.
+      const joined = await joinTable(guestB, TABLE_URL, state.pin);
       await addProduct(guestA, DISH);
       await addProduct(guestA, BEER);
+      // Start the clock once A's own writes have landed.
+      await poll(async () => !(await guestA.locator('[data-add-product]').first().isDisabled()), 10000);
       const at = Date.now();
-      const joined = await joinTable(guestB, TABLE_URL, state.pin);
       await openCart(guestB);
       const lines = await poll(async () => {
         const count = await cartLines(guestB);
@@ -775,7 +798,12 @@ async function runEngine(engine, result) {
       await closeTable(staff);
       state.tableOpen = false;
       await guestA.reload({ waitUntil: 'domcontentloaded' });
-      const closed = await poll(async () => (await text(guestA, guestA.locator('main'))).includes('ご利用いただけません'), 30000);
+      // After a close the link falls back to the join screen (参加する) or says the
+      // table is unavailable; either way the old session's menu is gone.
+      const closed = await poll(async () => {
+        const body = await text(guestA, guestA.locator('main'));
+        return body.includes('ご利用いただけません') || (await guestA.getByRole('button', { name: '参加する' }).count() > 0 && !(await guestA.locator('[data-add-product]').count()));
+      }, 30000);
       if (!closed) throw new Error(`guest page after close: ${(await text(guestA, guestA.locator('main'))).slice(0, 160)}`);
       return { settled: settled.settled, guestClosed: true };
     }, guestA);
