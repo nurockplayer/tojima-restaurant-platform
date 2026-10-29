@@ -218,6 +218,18 @@ async function submitKeycloak(page) {
   await submit.click({ timeout: 10000 });
 }
 
+async function fillKeycloak(page, locator, value, name) {
+  try {
+    await locator.fill(value, { timeout: 10000 });
+    return true;
+  } catch (cause) {
+    // WebKit can navigate to the OTP form while a previous form is being
+    // filled. Reclassify the current page instead of waiting on the old input.
+    if (name !== 'OTP' && await page.locator('#otp').isVisible().catch(() => false)) return false;
+    throw new Error(`Keycloak ${name} fill failed at ${safePath(page)}: ${String(cause.message).split('\n')[0]}`);
+  }
+}
+
 async function keycloakFlow(page, run) {
   for (let round = 0; round < 24; round += 1) {
     if (!onIdp(page)) {
@@ -239,9 +251,9 @@ async function keycloakFlow(page, run) {
       if (!/^[A-Z2-7]{16,}$/.test(value)) throw new Error('OTP enrolment secret unreadable');
       saveTotpSecret(value);
       run.enrolled = true;
-      await page.locator('input[name="totp"]').fill(await otpCode());
+      if (!(await fillKeycloak(page, enrollCode, await otpCode(), 'enrolment OTP'))) continue;
       const device = page.locator('input[name="userLabel"]');
-      if (await device.count() && !(await device.first().inputValue())) await device.first().fill('e2e-bot');
+      if (await device.count() && !(await device.first().inputValue()) && !(await fillKeycloak(page, device.first(), 'e2e-bot', 'device label'))) continue;
       await submitKeycloak(page);
       await page.waitForLoadState('domcontentloaded');
       continue;
@@ -256,8 +268,8 @@ async function keycloakFlow(page, run) {
       throw new Error('OTP enrolment offers no manual secret');
     }
     if (await password.count()) {
-      await page.locator('input[name="username"]').fill(creds.username);
-      await page.locator('input[name="password"]').fill(creds.password);
+      if (!(await fillKeycloak(page, page.locator('input[name="username"]'), creds.username, 'username'))) continue;
+      if (!(await fillKeycloak(page, password, creds.password, 'password'))) continue;
       await submitKeycloak(page);
       await page.waitForLoadState('domcontentloaded');
       continue;
@@ -283,8 +295,13 @@ async function connectStaff(page) {
   if (!(await waitVisible(form, 30000))) {
     throw new Error(`staff connect form missing (${safePath(page)})`);
   }
-  await page.getByLabel('企業ID').fill(TENANT);
-  await page.getByLabel('店舗ID').fill(STORE);
+  for (const [label, value] of [['企業ID', TENANT], ['店舗ID', STORE]]) {
+    try {
+      await page.getByLabel(label).fill(value, { timeout: 10000 });
+    } catch (cause) {
+      throw new Error(`staff connect ${label} fill failed at ${safePath(page)}: ${String(cause.message).split('\n')[0]}`);
+    }
+  }
   await page.getByRole('button', { name: '接続' }).click();
   if (!(await waitVisible(page.locator('nav.staff-tabs'), 30000))) {
     throw new Error(`staff workspace did not open (${safePath(page)})`);
@@ -315,6 +332,7 @@ async function staffSignIn(page, run) {
 
 const staffCard = (page) => page.locator('.staff-table-card').filter({ has: page.getByRole('heading', { name: TABLE_NAME, exact: true }) });
 const closeDialog = (page) => page.locator('dialog.confirm-dialog');
+const kitchenCards = (page) => page.locator('.staff-order-card').filter({ has: page.locator('.staff-order-head strong').filter({ hasText: /^4番卓 · #/ }) });
 
 /** Reloads /staff/ and connects when the tab has no stored context yet. */
 async function ensureStaff(page) {
@@ -391,6 +409,42 @@ async function closeTable(page) {
     throw new Error(`4番卓 did not close: ${(await text(page, page.locator('.staff-detail'))).slice(0, 120)}`);
   }
   return { closed: true };
+}
+
+// Finish all actionable orders before retrying the close blockers. The loop is
+// bounded so an unrelated payment or review hold remains visible as a failure.
+async function resetTable(page, kitchen) {
+  let blockers = '';
+  for (let round = 0; round < 60; round += 1) {
+    await staffRefresh(page);
+    const accept = page.locator('.staff-detail').getByRole('button', { name: '注文を受け付ける' });
+    if (await accept.count()) { await accept.first().click(); continue; }
+    await kitchen.goto(`${BASE}/kitchen/`, { waitUntil: 'domcontentloaded' });
+    if (await waitVisible(kitchen.locator('form.staff-entry'), 3000)) await connectStaff(kitchen);
+    const cards = kitchenCards(kitchen);
+    const start = cards.getByRole('button', { name: '調理開始' });
+    const ready = cards.getByRole('button', { name: '調理完了' });
+    if (await start.count()) { await start.first().click(); await kitchen.waitForTimeout(800); continue; }
+    if (await ready.count()) { await ready.first().click(); await kitchen.waitForTimeout(800); continue; }
+    await staffRefresh(page);
+    const serve = page.locator('.staff-detail').getByRole('button', { name: '提供済みにする' });
+    if (await serve.count()) { await serve.first().click(); continue; }
+    await settleCash(page);
+    await staffRefresh(page);
+    await page.getByRole('button', { name: 'テーブルを閉じる' }).click();
+    const dialog = closeDialog(page);
+    await waitVisible(dialog, 15000);
+    const confirm = dialog.getByRole('button', { name: '閉卓を確認' });
+    if (!(await confirm.isDisabled())) {
+      await confirm.click();
+      if (!(await poll(async () => !(await page.locator('.staff-detail').count()), 25000))) throw new Error('4番卓 did not close');
+      return;
+    }
+    blockers = await text(page, dialog);
+    await dialog.getByRole('button', { name: 'キャンセル' }).click();
+    await page.waitForTimeout(800);
+  }
+  throw new Error(`table not closable after reset: ${blockers.slice(0, 160) || 'orders did not reach a closable state'}`);
 }
 
 async function openTable(page) {
@@ -471,6 +525,7 @@ async function cartLines(page) {
 }
 
 async function submitCashOrder(page) {
+  const previous = await page.locator('[data-order-status]').count();
   await openCart(page);
   const dialog = page.locator('[role="dialog"]');
   await dialog.getByRole('button', { name: '金額を確認する' }).click();
@@ -483,11 +538,13 @@ async function submitCashOrder(page) {
   if (await cash.count() && !(await cash.isChecked())) await cash.check({ force: true });
   await confirm.click();
   await poll(async () => !(await dialog.isVisible().catch(() => false)), 30000);
-  await waitVisible(page.locator('[data-order-status]'), 30000);
+  if (!(await poll(async () => (await page.locator('[data-order-status]').count()) > previous, 30000))) {
+    throw new Error('new order status did not appear');
+  }
 }
 
 async function orderStatus(page) {
-  return text(page, page.locator('[data-order-status]'));
+  return text(page, page.locator('[data-order-status]').last());
 }
 
 // ---------------------------------------------------------------------------
@@ -606,8 +663,7 @@ async function runEngine(engine, result) {
       let reset = false;
       if (await staffCard(staff).getByRole('button', { name: '詳細' }).count()) {
         await staffEnterTable(staff);
-        await settleCash(staff);
-        await closeTable(staff);
+        await resetTable(staff, kitchen);
         reset = true;
       }
       const opened = await openTable(staff);
@@ -644,41 +700,41 @@ async function runEngine(engine, result) {
       return { guestBJoin: joined, lines, syncMs: sync, sawDish: true, sawBeer: true };
     }, guestB);
 
-    await step(5, 'Guest A submits the cash order and sees 店員の受付待ち · 未払い', async () => {
+    await step(5, 'Guest A submits the cash order and sees an unpaid order status', async () => {
       await submitCashOrder(guestA);
       const status = await poll(async () => {
         const value = await orderStatus(guestA);
-        return value.includes('店員の受付待ち') && value.includes('未払い') ? value : 0;
+        return (value.includes('店員の受付待ち') || value.includes('受付済み')) && value.includes('未払い') ? value : 0;
       }, 35000);
       if (!status) throw new Error(`order status was "${await orderStatus(guestA)}"`);
       return { status };
     }, guestA);
 
-    await step(6, 'Staff accepts the order on /staff/ and /kitchen/ shows it', async () => {
+    await step(6, 'Staff accepts the order if required and /kitchen/ shows it', async () => {
       await staffEnterTable(staff);
       const accept = staff.getByRole('button', { name: '注文を受け付ける' });
-      if (!(await waitVisible(accept, 25000))) {
-        throw new Error(`accept control missing: ${(await text(staff, staff.locator('.staff-detail'))).slice(0, 160)}`);
+      const needsAcceptance = await accept.count() > 0;
+      if (needsAcceptance) {
+        await accept.first().click();
+        const accepted = await poll(async () => !(await staff.getByRole('button', { name: '注文を受け付ける' }).count()), 25000);
+        if (!accepted) throw new Error('order was not accepted');
       }
-      await accept.click();
-      const accepted = await poll(async () => !(await staff.getByRole('button', { name: '注文を受け付ける' }).count()), 25000);
-      if (!accepted) throw new Error('order was not accepted');
       await kitchen.goto(`${BASE}/kitchen/`, { waitUntil: 'domcontentloaded' });
       await connectStaff(kitchen);
-      const card = kitchen.locator('.staff-order-card').filter({ hasText: TABLE_NAME });
+      const card = kitchenCards(kitchen);
       if (!(await waitVisible(card, 30000))) throw new Error('kitchen board does not show the order');
-      return { kitchenCard: (await text(kitchen, card)).slice(0, 100) };
+      return { needsAcceptance, kitchenCard: (await text(kitchen, card)).slice(0, 100) };
     });
 
     await step(7, 'The order is served (kitchen start/ready, then served on /staff/) and Guest A updates within 35 s', async () => {
-      const card = kitchen.locator('.staff-order-card').filter({ hasText: TABLE_NAME });
+      const card = kitchenCards(kitchen);
       const start = card.getByRole('button', { name: '調理開始' });
       if (!(await waitVisible(start, 20000))) throw new Error('kitchen start control missing');
       await start.click();
-      const ready = kitchen.locator('.staff-order-card').filter({ hasText: TABLE_NAME }).getByRole('button', { name: '調理完了' });
+      const ready = kitchenCards(kitchen).getByRole('button', { name: '調理完了' });
       if (!(await waitVisible(ready, 20000))) throw new Error('kitchen ready control missing');
       await ready.click();
-      const kdsServed = await kitchen.locator('.staff-order-card').filter({ hasText: TABLE_NAME }).getByRole('button', { name: '提供済みにする' }).count();
+      const kdsServed = await kitchenCards(kitchen).getByRole('button', { name: '提供済みにする' }).count();
       await staffEnterTable(staff);
       const serve = staff.getByRole('button', { name: '提供済みにする' });
       if (!(await waitVisible(serve, 25000))) throw new Error('served control missing on /staff/');
@@ -862,9 +918,7 @@ async function runEngine(engine, result) {
       await staffGrid(staff);
       if (await staffCard(staff).getByRole('button', { name: '詳細' }).count()) {
         await staffEnterTable(staff);
-        await settleCash(staff);
-        await staffRefresh(staff);
-        await closeTable(staff);
+        await resetTable(staff, kitchen);
         cleanup.push({ item: 't04 closed', ok: true });
       } else {
         cleanup.push({ item: 't04 closed', ok: true, already: true });

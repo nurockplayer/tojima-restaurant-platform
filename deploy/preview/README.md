@@ -61,8 +61,8 @@ manager actions are allowed. The journey uses `4番卓` only, and leaves it clos
 and カレーライス on sale afterwards, even after a failure.
 
 Covered: staff sign-in and step-up; open and close a table; guest menu; cart
-sync between two guests; cash order submit showing 店員の受付待ち · 未払い;
-accept on `/staff/`; start and finish cooking on `/kitchen/`; served, and the
+sync between two guests; cash order submit showing 店員の受付待ち · 未払い or
+受付済み · 未払い; accept on `/staff/` when required; start and finish cooking on `/kitchen/`; served, and the
 guest status updating without a reload; cash settle and close; a sold-out
 カレーライス that cannot be ordered; Traditional Chinese text with the 1,100
 price; add-control accessible names and where focus lands after adding;
