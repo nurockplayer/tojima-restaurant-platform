@@ -225,7 +225,7 @@ async function fillKeycloak(page, locator, value, name) {
   } catch (cause) {
     // WebKit can navigate to the OTP form while a previous form is being
     // filled. Reclassify the current page instead of waiting on the old input.
-    if (name !== 'OTP' && await page.locator('#otp').isVisible().catch(() => false)) return false;
+    if (!onIdp(page) || name !== 'OTP' && await page.locator('#otp').isVisible().catch(() => false)) return false;
     throw new Error(`Keycloak ${name} fill failed at ${safePath(page)}: ${String(cause.message).split('\n')[0]}`);
   }
 }
@@ -320,6 +320,7 @@ async function staffSignIn(page, run) {
   const login = page.getByRole('link', { name: 'ログイン' });
   if (await waitVisible(login, 30000)) {
     await login.click();
+    await page.waitForURL((url) => url.origin === IDP, { timeout: 30000 });
     await keycloakFlow(page, run);
   } else if (!(await waitVisible(page.locator('form.staff-entry'), 15000))) {
     throw new Error(`staff sign-in screen not recognised (${safePath(page)})`);
@@ -353,14 +354,14 @@ async function namedAction(name, fn) {
 async function ensureStaff(page) {
   await page.goto(`${BASE}/staff/`, { waitUntil: 'domcontentloaded' });
   if (await waitVisible(page.locator('form.staff-entry'), 3000)) await connectStaff(page);
-  else await waitVisible(page.locator('nav.staff-tabs'), 30000);
+  else if (!(await waitVisible(page.locator('nav.staff-tabs'), 30000))) throw new Error(`staff workspace missing (${safePath(page)})`);
   return page;
 }
 
 async function staffGrid(page) {
   const back = page.getByRole('button', { name: '一覧に戻る' });
   if (await back.count() && await back.first().isVisible()) await back.first().click();
-  await waitVisible(staffCard(page), 20000);
+  if (!(await waitVisible(staffCard(page), 20000))) throw new Error('4番卓 card missing from staff grid');
 }
 
 async function staffRefresh(page) {
@@ -474,7 +475,10 @@ async function openTable(page) {
   await staffGrid(page);
   const card = staffCard(page);
   const open = card.getByRole('button', { name: '開卓' });
-  if (!(await open.count())) throw new Error('no 開卓 control on 4番卓');
+  if (!(await waitVisible(open, 3000))) {
+    await staffRefresh(page);
+    if (!(await waitVisible(open, 25000))) throw new Error('no 開卓 control on 4番卓 after refresh');
+  }
   await open.click();
   await waitVisible(page.locator('.staff-detail'), 25000);
   const notice = await text(page, page.locator('.notice'));
@@ -558,9 +562,10 @@ async function submitCashOrder(page) {
   }
   const cash = dialog.getByRole('radio', { name: '店頭で現金' });
   if (await cash.count() && !(await cash.isChecked())) await cash.check({ force: true });
-  const responsePromise = page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/cart/commit'), { timeout: 30000 });
-  await namedAction('confirm order', () => confirm.click());
-  const response = await responsePromise;
+  const [response] = await namedAction('confirm order', () => Promise.all([
+    page.waitForResponse((response) => response.request().method() === 'POST' && new URL(response.url()).pathname.endsWith('/cart/commit'), { timeout: 30000 }),
+    confirm.click(),
+  ]));
   if (!response.ok()) throw new Error(`order commit returned HTTP ${response.status()}`);
   const commit = await response.json();
   const orderId = commit?.order?.order_id;
@@ -635,6 +640,7 @@ async function resumeCurry(page) {
   if (state.availability === 'AVAILABLE') return { ...state, changed: false };
   const result = await setCurry(page, state.key, 'AVAILABLE', state.version, undefined);
   if (result.status !== 200) throw new Error(`resume failed: ${result.status} ${JSON.stringify(result.body).slice(0, 120)}`);
+  if ((await curryState(page)).availability !== 'AVAILABLE') throw new Error('カレーライス was not available after resume');
   return { ...state, changed: true };
 }
 
@@ -722,23 +728,20 @@ async function runEngine(engine, result) {
       // B is at the table first, so this measures sync, not B's first load.
       const joined = await joinTable(guestB, TABLE_URL, state.pin);
       await addProduct(guestA, DISH);
+      await openCart(guestB);
       await addProduct(guestA, BEER);
       // Start the clock once A's own writes have landed.
-      await poll(async () => !(await guestA.locator('[data-add-product]').first().isDisabled()), 10000);
+      if (!(await poll(async () => !(await guestA.locator('[data-add-product]').first().isDisabled()), 10000))) throw new Error('Guest A cart write did not finish');
       const at = Date.now();
-      await openCart(guestB);
-      const lines = await poll(async () => {
+      const synced = await poll(async () => {
         const count = await cartLines(guestB);
-        return count >= 2 ? count : 0;
-      }, 5000);
-      if (!lines) throw new Error(`Guest B did not show both cart lines within 5 s (${await cartLines(guestB)})`);
+        const names = await text(guestB, guestB.locator('[role="dialog"]'));
+        return count >= 2 && names.includes(DISH) && names.includes(BEER) ? { count } : false;
+      }, 5000, 100);
       const sync = Date.now() - at;
-      const names = await text(guestB, guestB.locator('[role="dialog"]'));
+      if (!synced || sync > 5000) throw new Error(`Guest B did not show both cart lines within 5 s (${sync} ms)`);
       await guestB.keyboard.press('Escape');
-      if (!names.includes(DISH) || !names.includes(BEER)) {
-        throw new Error(`Guest B cart does not show both products: ${names.slice(0, 160)}`);
-      }
-      return { guestBJoin: joined, lines, syncMs: sync, sawDish: true, sawBeer: true };
+      return { guestBJoin: joined, lines: synced.count, syncMs: sync, sawDish: true, sawBeer: true };
     }, guestB);
 
     await step(5, 'Guest A submits the cash order and sees an unpaid order status', async () => {
@@ -856,6 +859,7 @@ async function runEngine(engine, result) {
       if (!labels.length) throw new Error('no add control on the menu');
       const unnamed = labels.filter((item) => !item.name || !item.product || !item.name.includes(item.product));
       const target = labels.findIndex((item) => !item.disabled);
+      if (target < 0) throw new Error('no enabled add control for focus check');
       let focus = null;
       if (target >= 0) {
         const buttons = guestA.locator('[data-add-product]');
@@ -874,6 +878,7 @@ async function runEngine(engine, result) {
         });
         if (inSheet) { await guestA.keyboard.press('Escape'); await guestA.waitForTimeout(600); }
         if (!focus || focus.isBody) throw new Error(`focus after add landed on ${focus?.tag ?? 'nothing'}`);
+        if (inSheet && !focus.inDialog) throw new Error('focus remained outside the options dialog');
       }
       if (unnamed.length) {
         // App bug, not a test bug: MenuList puts one constant aria-label
@@ -967,10 +972,12 @@ async function runEngine(engine, result) {
       if (await staffCard(staff).getByRole('button', { name: '詳細' }).count()) {
         await staffEnterTable(staff);
         await resetTable(staff, kitchen);
-        cleanup.push({ item: 't04 closed', ok: true });
-      } else {
-        cleanup.push({ item: 't04 closed', ok: true, already: true });
       }
+      if (!(await waitVisible(staffCard(staff).getByRole('button', { name: '開卓' }), 10000))) {
+        await staffRefresh(staff);
+        if (!(await waitVisible(staffCard(staff).getByRole('button', { name: '開卓' }), 20000))) throw new Error('4番卓 closed state not confirmed');
+      }
+      cleanup.push({ item: 't04 closed', ok: true });
     } catch (cause) {
       cleanup.push({ item: 't04 closed', ok: false, error: String(cause?.message ?? cause).slice(0, 160) });
     }
