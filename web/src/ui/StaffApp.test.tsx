@@ -6,6 +6,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StaffOrder } from '../api/operations';
 import { StaffApp } from './StaffApp';
+import { navigate } from './navigate';
+
+vi.mock('./navigate', () => ({ navigate: vi.fn() }));
 
 let root: Root | undefined;
 let host: HTMLDivElement | undefined;
@@ -1366,12 +1369,12 @@ describe('staff operations', () => {
       throw new Error(`Unexpected request ${url}`);
     };
     await mountStaff(routes);
-    const { assign, restore } = stubAssign();
+    const assign = vi.mocked(navigate); assign.mockClear();
     try {
       expect(host?.textContent).toContain('注文を入力');
       await click(host!, '注文を入力');
       expect(assign).toHaveBeenCalledWith('/?session=session-1&via=staff&label=T1');
-    } finally { restore(); }
+    } finally { assign.mockClear(); }
   });
 
   it('opens an idle table and goes straight to its ordering screen', async () => {
@@ -1389,13 +1392,13 @@ describe('staff operations', () => {
       throw new Error(`Unexpected request ${url}`);
     };
     await mountStaff(routes);
-    const { assign, restore } = stubAssign();
+    const assign = vi.mocked(navigate); assign.mockClear();
     try {
       expect(host?.textContent).toContain('開卓して注文');
       await click(host!, '開卓して注文');
       expect(opened).toBe(true);
       expect(assign).toHaveBeenCalledWith('/?session=session-2&via=staff&label=T1');
-    } finally { restore(); }
+    } finally { assign.mockClear(); }
   });
 
   it('keeps the order action off a SESSION_PIN table', async () => {
@@ -1458,13 +1461,6 @@ function deferred<T>() {
 }
 
 // jsdom has no navigation, so the guest-screen entry point is observed through a stubbed assign().
-function stubAssign() {
-  const assign = vi.fn();
-  const descriptor = Object.getOwnPropertyDescriptor(window, 'location');
-  Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign } });
-  return { assign, restore: () => { if (descriptor) Object.defineProperty(window, 'location', descriptor); } };
-}
-
 async function setField(container: Element, label: string, value: string) {
   const field = [...container.querySelectorAll('label.field')].find((item) => item.textContent?.includes(label));
   const input = field?.querySelector('input');

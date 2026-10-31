@@ -10,6 +10,7 @@ import { createReplayOperation } from './cart-state';
 import { StaffDialog } from './StaffDialog';
 import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
+import { navigate } from './navigate';
 
 type Locale = 'ja' | 'zh';
 type View = 'tables' | 'kds' | 'reviews';
@@ -477,14 +478,14 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
     } else setDetail(null);
   };
 
-  const openTable = (item: StaffTable, navigate = false) => startWrite<Record<string, never>, OpenedSession>({}, (_payload, key) => operationsClient.openSession(context, token, item.table_id, key), async (opened) => {
+  const openTable = (item: StaffTable, thenOrder = false) => startWrite<Record<string, never>, OpenedSession>({}, (_payload, key) => operationsClient.openSession(context, token, item.table_id, key), async (opened) => {
     const updated = await loadTables(context, token);
     if (!updated) return;
     setSelectedTableID(item.table_id);
     const selected = updated.find((row) => row.table_id === item.table_id);
     const sessionID = selected?.session_id ?? opened.session.id;
     // A STAFF_OPEN session needs no PIN, so staff can go straight to the guest ordering screen.
-    if (navigate && (selected?.mode ?? opened.session.mode) === 'STAFF_OPEN') { window.location.assign(staffOrderURL(sessionID, item.name)); return; }
+    if (thenOrder && (selected?.mode ?? opened.session.mode) === 'STAFF_OPEN') { navigate(staffOrderURL(sessionID, item.name)); return; }
     const loadedDetail = await loadDetail(context, token, item.table_id, sessionID);
     if (!loadedDetail) return;
     setNotice(opened.pin ? `${locale === 'ja' ? 'テーブル PIN' : '桌次 PIN'}: ${opened.pin}` : '');
@@ -693,7 +694,7 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
             {tables.length === 0 ? <div className="empty-state"><p>{t.noTables}</p></div> : <div className="staff-table-grid">{tables.map((item) => <article className="staff-table-card" key={item.table_id}>
               <div className="staff-table-card-head"><div><h3>{item.name}</h3><span className={`status-chip status-${item.status.toLowerCase()}`}>{tableStatus(item.status, t)}</span></div><span className="table-mode">{modeLabel(item.mode, locale)}</span></div>
               <div className="staff-table-metrics"><span>{t.unpaid}<strong>{amountJPY(item.unpaid_cash_jpy)}</strong></span><span>{t.count}<strong>{item.order_count}</strong></span></div>
-              <div className="staff-table-actions">{item.session_id && item.mode === 'STAFF_OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => window.location.assign(staffOrderURL(item.session_id!, item.name))}>{t.takeOrder}</button>}{item.session_id && <button className="button quiet" disabled={busy || uncertain} onClick={() => void enterTable(item)}>{t.enter}</button>}{!item.session_id && item.status !== 'OPEN' && capabilities.can_serve && <><button className="button primary" disabled={busy || uncertain} onClick={() => openAndOrder(item)}>{t.openAndOrder}</button><button className="button small quiet" disabled={busy || uncertain} onClick={() => openTable(item)}>{t.openTable}</button></>}</div>
+              <div className="staff-table-actions">{item.session_id && item.mode === 'STAFF_OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => navigate(staffOrderURL(item.session_id!, item.name))}>{t.takeOrder}</button>}{item.session_id && <button className="button quiet" disabled={busy || uncertain} onClick={() => void enterTable(item)}>{t.enter}</button>}{!item.session_id && item.status !== 'OPEN' && capabilities.can_serve && <><button className="button primary" disabled={busy || uncertain} onClick={() => openAndOrder(item)}>{t.openAndOrder}</button><button className="button small quiet" disabled={busy || uncertain} onClick={() => openTable(item)}>{t.openTable}</button></>}</div>
             </article>)}</div>}
             {capabilities?.can_manage && settings && <section className="cash-settings-card"><div className="section-heading"><div><div className="eyebrow">MANAGER</div><h2>{t.cashSettings}</h2></div></div>
               <label className="settings-check"><input type="checkbox" checked={settings.enabled} disabled={busy || uncertain} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} />{t.enabled}</label>
@@ -701,7 +702,7 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
               <button className="button primary" disabled={busy || uncertain} onClick={saveSettings}>{t.save}</button>
             </section>}
           </section>}
-          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><div className="staff-detail-actions">{detail.session.mode === 'STAFF_OPEN' && detail.session.status === 'OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => window.location.assign(staffOrderURL(detail.session.id, table.name))}>{t.takeOrder}</button>}<button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div></div>
+          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><div className="staff-detail-actions">{detail.session.mode === 'STAFF_OPEN' && detail.session.status === 'OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => navigate(staffOrderURL(detail.session.id, table.name))}>{t.takeOrder}</button>}<button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
             <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; void openCashPreview(); }}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
             {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} canManage={capabilities.can_approve_fulfillment === true} onVoid={(button) => openVoidDialog(order, button)} onStopRequest={(button) => { openerRef.current = button; setStopOrder(order); setStopMode('request'); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setDialog('stop'); }} onStopAction={(id, action, button) => openStopAction(order, id, action, button)} onAdjust={() => { invalidateAdjustmentPreview(); setAdjustOrder(order); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setCashHandback(false); setError(''); setDialog('adjust'); }} onRetryRefund={(refundID) => retryRefund(order, refundID)} onAcknowledgeUpdate={() => acknowledgeUpdatedOrder(order)} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}
