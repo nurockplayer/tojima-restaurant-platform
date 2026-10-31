@@ -555,13 +555,14 @@ export function App({ demo = false }: DemoSurfaceProps) {
           }
         } else if (query.sessionID) {
           const saved = sessionStorage.getItem(storageKey(query.sessionID));
-          if (saved) {
-            const grant = { table_join_token: saved, expires_at: '', session: { id: query.sessionID } };
-            await activate(grant);
-          } else if (query.staff) {
-            // Staff opened this table themselves, so no PIN is needed and the entry is not a guest tap.
+          if (query.staff) {
+            // Staff opened this table themselves, so no PIN is needed. Join afresh every time: a saved
+            // grant outlives its 1 h TTL while the table stays open, and the cart is shared per table.
             const grant = await cartClient.joinSession(query.sessionID, query.sessionID, '');
             if (active) await activate(grant);
+          } else if (saved) {
+            const grant = { table_join_token: saved, expires_at: '', session: { id: query.sessionID } };
+            await activate(grant);
           }
         }
       } catch (cause) {

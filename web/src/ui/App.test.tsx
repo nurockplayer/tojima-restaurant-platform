@@ -1352,6 +1352,33 @@ describe('staff entry into the guest screen', () => {
     expect(requests.every((request) => !request.authorization.includes('old-token-s1'))).toBe(true);
     expect(host.textContent).toContain('お品書き');
   });
+
+  it('joins afresh from the staff list instead of reusing an expired saved grant for the same table', async () => {
+    window.history.replaceState({}, '', '/?session=s1&via=staff&label=1番卓');
+    sessionStorage.setItem('tojima.table-join.s1', 'expired-token-s1');
+    const requests: Array<{ url: string; authorization: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      const authorization = new Headers(init.headers).get('authorization') ?? '';
+      requests.push({ url, authorization });
+      if (authorization.includes('expired-token-s1')) return json({ error: 'forbidden' }, 403);
+      if (url === '/v1/guest/sessions/s1/join') return json({ table_join_token: 'fresh-s1', expires_at: '', session: { id: 's1', mode: 'STAFF_OPEN' } });
+      if (url === '/v1/guest/sessions/s1/menu?amounts=string') return json(guestMenu);
+      if (url === '/v1/guest/sessions/s1/cart') return json({ session_id: 's1', generation: 1, version: 0, lines: [] });
+      if (url === '/v1/guest/sessions/s1/orders') return json({ orders: [] });
+      if (url === '/v1/guest/sessions/s1/operations') return json({ orders: [], cash_enabled: true, card_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(requests.some((request) => request.url === '/v1/guest/sessions/s1/join')).toBe(true);
+    expect(requests.every((request) => !request.authorization.includes('expired-token-s1'))).toBe(true);
+    expect(sessionStorage.getItem('tojima.table-join.s1')).toBe('fresh-s1');
+    expect(host.textContent).toContain('お品書き');
+  });
 });
 
 async function mountGuestStatus(
