@@ -1359,6 +1359,56 @@ describe('staff operations', () => {
     expect(host?.textContent).not.toContain('order-a');
   });
 
+  it('sends staff from an open STAFF_OPEN table to the guest ordering screen', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [{ ...table, mode: 'STAFF_OPEN' }] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const { assign, restore } = stubAssign();
+    try {
+      expect(host?.textContent).toContain('注文を入力');
+      await click(host!, '注文を入力');
+      expect(assign).toHaveBeenCalledWith('/?session=session-1&via=staff&label=T1');
+    } finally { restore(); }
+  });
+
+  it('opens an idle table and goes straight to its ordering screen', async () => {
+    const idle = { table_id: 'table-1', name: 'T1', status: 'IDLE' as const, mode: 'SESSION_PIN' as const, unpaid_cash_jpy: '0', order_count: 0 };
+    let opened = false;
+    const routes: Route = async (url, init) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [opened ? { ...idle, session_id: 'session-2', status: 'OPEN', mode: 'STAFF_OPEN' } : idle] });
+      if (url === `${base}/tables/table-1/sessions`) {
+        expect(String(init.body)).toBe('{}');
+        expect(new Headers(init.headers).get('Idempotency-Key')).toBeTruthy();
+        opened = true;
+        return json({ session: { id: 'session-2', status: 'OPEN', mode: 'STAFF_OPEN' }, pin: '' });
+      }
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    const { assign, restore } = stubAssign();
+    try {
+      expect(host?.textContent).toContain('開卓して注文');
+      await click(host!, '開卓して注文');
+      expect(opened).toBe(true);
+      expect(assign).toHaveBeenCalledWith('/?session=session-2&via=staff&label=T1');
+    } finally { restore(); }
+  });
+
+  it('keeps the order action off a SESSION_PIN table', async () => {
+    const routes: Route = async (url) => {
+      if (url === `${base}/operations/access`) return json({ can_cash: false, can_serve: true, can_kitchen: false, can_manage: false });
+      if (url === `${base}/operations/tables`) return json({ tables: [{ ...table, mode: 'SESSION_PIN' }] });
+      throw new Error(`Unexpected request ${url}`);
+    };
+    await mountStaff(routes);
+    expect(within(host!).queryByRole('button', { name: '注文を入力' })).toBeNull();
+    expect(within(host!).queryByRole('button', { name: '詳細' })).not.toBeNull();
+  });
+
   it('clears the authenticated view and ignores a pending detail response after disconnect', async () => {
     const response = deferred<Response>();
     const routes: Route = async (url) => {
@@ -1405,6 +1455,14 @@ function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => { resolve = done; });
   return { promise, resolve };
+}
+
+// jsdom has no navigation, so the guest-screen entry point is observed through a stubbed assign().
+function stubAssign() {
+  const assign = vi.fn();
+  const descriptor = Object.getOwnPropertyDescriptor(window, 'location');
+  Object.defineProperty(window, 'location', { configurable: true, value: { ...window.location, assign } });
+  return { assign, restore: () => { if (descriptor) Object.defineProperty(window, 'location', descriptor); } };
 }
 
 async function setField(container: Element, label: string, value: string) {

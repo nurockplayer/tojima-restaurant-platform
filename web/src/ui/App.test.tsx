@@ -1288,6 +1288,72 @@ describe('guest payment method availability', () => {
   });
 });
 
+describe('staff entry into the guest screen', () => {
+  it('auto-joins a staff-shared session with no PIN and shows the staff bar', async () => {
+    window.history.replaceState({}, '', '/?session=s1&via=staff&label=1番卓');
+    const joinBodies: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      if (url === '/v1/guest/sessions/s1/join') { joinBodies.push(String(init.body)); return json({ table_join_token: 'grant-s1', expires_at: '', session: { id: 's1', mode: 'STAFF_OPEN' } }); }
+      if (url === '/v1/guest/sessions/s1/menu?amounts=string') return json(guestMenu);
+      if (url === '/v1/guest/sessions/s1/cart') return json({ session_id: 's1', generation: 1, version: 0, lines: [] });
+      if (url === '/v1/guest/sessions/s1/orders') return json({ orders: [] });
+      if (url === '/v1/guest/sessions/s1/operations') return json({ orders: [], cash_enabled: true, card_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(joinBodies).toHaveLength(1);
+    expect(JSON.parse(joinBodies[0]!)).toEqual({ expected_session_id: 's1' });
+    expect(host.textContent).toContain('お品書き');
+    const bar = host.querySelector('a[href="/staff/"]');
+    expect(bar?.textContent).toBe('テーブル一覧へ');
+    expect(bar?.closest('div')?.textContent).toContain('1番卓');
+  });
+
+  it('still shows the join card and does not auto-join without via=staff', async () => {
+    window.history.replaceState({}, '', '/?session=s1');
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => { throw new Error(`Unexpected API request: ${String(input)}`); });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(getButton(host, '参加する')).toBeTruthy();
+    expect(host.textContent).toContain('テーブルのご案内に従って参加してください。');
+    expect(host.querySelector('a[href="/staff/"]')).toBeNull();
+    expect(fetchMock.mock.calls.some(([input]) => String(input).includes('/join'))).toBe(false);
+  });
+
+  it('joins the session from the URL and never sends a saved grant from another table', async () => {
+    window.history.replaceState({}, '', '/?session=s2&via=staff&label=2番卓');
+    sessionStorage.setItem('tojima.table-join.s1', 'old-token-s1');
+    const requests: Array<{ url: string; authorization: string }> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const url = String(input);
+      requests.push({ url, authorization: new Headers(init.headers).get('authorization') ?? '' });
+      if (url === '/v1/guest/sessions/s2/join') return json({ table_join_token: 'grant-s2', expires_at: '', session: { id: 's2', mode: 'STAFF_OPEN' } });
+      if (url === '/v1/guest/sessions/s2/menu?amounts=string') return json(guestMenu);
+      if (url === '/v1/guest/sessions/s2/cart') return json({ session_id: 's2', generation: 1, version: 0, lines: [] });
+      if (url === '/v1/guest/sessions/s2/orders') return json({ orders: [] });
+      if (url === '/v1/guest/sessions/s2/operations') return json({ orders: [], cash_enabled: true, card_enabled: true });
+      throw new Error(`Unexpected API request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true);
+    host = document.createElement('div'); document.body.append(host); root = createRoot(host);
+    await act(async () => { root?.render(<App />); await new Promise((resolve) => setTimeout(resolve, 0)); });
+
+    expect(requests.some((request) => request.url === '/v1/guest/sessions/s2/join')).toBe(true);
+    expect(requests.every((request) => !request.url.includes('/sessions/s1'))).toBe(true);
+    expect(requests.every((request) => !request.authorization.includes('old-token-s1'))).toBe(true);
+    expect(host.textContent).toContain('お品書き');
+  });
+});
+
 async function mountGuestStatus(
   mode: 'STAFF_OPEN' | 'SESSION_PIN' | 'DIRECT_SCAN',
   order: unknown,
