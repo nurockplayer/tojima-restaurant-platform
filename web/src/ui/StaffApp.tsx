@@ -10,6 +10,7 @@ import { createReplayOperation } from './cart-state';
 import { StaffDialog } from './StaffDialog';
 import { DemoBanner } from './DemoBanner';
 import type { DemoSurfaceProps } from './DemoBanner';
+import { navigate } from './navigate';
 
 type Locale = 'ja' | 'zh';
 type View = 'tables' | 'kds' | 'reviews';
@@ -19,11 +20,16 @@ const TOKEN_KEY = 'tojima.staff.access-token';
 // The HTTP client has no timeout, so a hung KDS poll is aborted (and the board marked stale) after this.
 const KDS_POLL_TIMEOUT_MS = 10000;
 
+// Staff enter orders through the guest screen; a STAFF_OPEN session joins by id without a PIN.
+function staffOrderURL(sessionID: string, tableName: string): string {
+  return `/?${new URLSearchParams({ session: sessionID, via: 'staff', label: tableName }).toString()}`;
+}
+
 const copy = {
   ja: {
     brand: '東島', subtitle: 'STAFF OPERATIONS', tenant: '企業ID', store: '店舗ID', token: 'スタッフアクセストークン', connect: '接続', disconnect: '切断', login: 'ログイン', logout: 'ログアウト', loginIntro: '店舗アカウントでログインしてください。', stepUpNotice: 'この操作には再認証が必要です。', stepUp: '再認証',
     tables: 'テーブル', kds: '厨房看板', refresh: '最新状態に更新', loading: '確認中…', noAccess: 'この店舗で利用できる操作がありません。',
-    idle: '空席', open: '利用中', closed: '終了', openTable: '開卓', enter: '詳細', unpaid: '未収現金', count: '注文',
+    idle: '空席', open: '利用中', closed: '終了', openTable: '開卓', takeOrder: '注文を入力', openAndOrder: '開卓して注文', enter: '詳細', unpaid: '未収現金', count: '注文',
     noTables: 'テーブルがありません。', detail: 'テーブル詳細', back: '一覧に戻る', orders: '注文', receipts: '現金領収', noOrders: '注文はありません。',
     accepted: '受付済み', preparing: '調理中', ready: '配膳待ち', served: '提供済み', waiting: '受付確認中', cancelled: '取消済み',
     paid: '支払済み', refunded: '返金済み', refundPending: '返金処理中', unpaidStatus: '未収', pending: '処理中', unknown: '確認中', stripe: 'クレジットカード', cash: '現金',
@@ -46,7 +52,7 @@ const copy = {
   zh: {
     brand: '東島', subtitle: '店員作業台', tenant: '企業 ID', store: '分店 ID', token: '店員存取權杖', connect: '連線', disconnect: '登出', login: '登入', logout: '登出', loginIntro: '請使用店舗帳號登入。', stepUpNotice: '此操作需要重新驗證。', stepUp: '重新驗證',
     tables: '桌次', kds: '廚房看板', refresh: '更新最新狀態', loading: '確認中…', noAccess: '此分店目前沒有可用的操作權限。',
-    idle: '空桌', open: '用餐中', closed: '已結束', openTable: '開桌', enter: '查看', unpaid: '待收現金', count: '筆訂單',
+    idle: '空桌', open: '用餐中', closed: '已結束', openTable: '開桌', takeOrder: '點餐', openAndOrder: '開桌並點餐', enter: '查看', unpaid: '待收現金', count: '筆訂單',
     noTables: '目前沒有桌次。', detail: '桌次內容', back: '返回桌次', orders: '訂單', receipts: '現金收據', noOrders: '目前沒有訂單。',
     accepted: '待製作', preparing: '製作中', ready: '待送餐', served: '已送達', waiting: '待店員確認', cancelled: '已取消',
     paid: '已付款', refunded: '已退款', refundPending: '退款處理中', unpaidStatus: '未收款', pending: '處理中', unknown: '確認中', stripe: '信用卡', cash: '現金',
@@ -472,16 +478,19 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
     } else setDetail(null);
   };
 
-  const openTable = (item: StaffTable) => startWrite<Record<string, never>, OpenedSession>({}, (_payload, key) => operationsClient.openSession(context, token, item.table_id, key), async (opened) => {
+  const openTable = (item: StaffTable, thenOrder = false) => startWrite<Record<string, never>, OpenedSession>({}, (_payload, key) => operationsClient.openSession(context, token, item.table_id, key), async (opened) => {
     const updated = await loadTables(context, token);
     if (!updated) return;
     setSelectedTableID(item.table_id);
     const selected = updated.find((row) => row.table_id === item.table_id);
     const sessionID = selected?.session_id ?? opened.session.id;
+    // A STAFF_OPEN session needs no PIN, so staff can go straight to the guest ordering screen.
+    if (thenOrder && (selected?.mode ?? opened.session.mode) === 'STAFF_OPEN') { navigate(staffOrderURL(sessionID, item.name)); return; }
     const loadedDetail = await loadDetail(context, token, item.table_id, sessionID);
     if (!loadedDetail) return;
     setNotice(opened.pin ? `${locale === 'ja' ? 'テーブル PIN' : '桌次 PIN'}: ${opened.pin}` : '');
   }, async () => { await loadTables(context, token); });
+  const openAndOrder = (item: StaffTable) => openTable(item, true);
 
   const saveSettings = () => {
     if (!settings) return;
@@ -685,7 +694,7 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
             {tables.length === 0 ? <div className="empty-state"><p>{t.noTables}</p></div> : <div className="staff-table-grid">{tables.map((item) => <article className="staff-table-card" key={item.table_id}>
               <div className="staff-table-card-head"><div><h3>{item.name}</h3><span className={`status-chip status-${item.status.toLowerCase()}`}>{tableStatus(item.status, t)}</span></div><span className="table-mode">{modeLabel(item.mode, locale)}</span></div>
               <div className="staff-table-metrics"><span>{t.unpaid}<strong>{amountJPY(item.unpaid_cash_jpy)}</strong></span><span>{t.count}<strong>{item.order_count}</strong></span></div>
-              <div className="staff-table-actions">{item.session_id && <button className="button quiet" disabled={busy || uncertain} onClick={() => void enterTable(item)}>{t.enter}</button>}{!item.session_id && item.status !== 'OPEN' && capabilities.can_serve && <button className="button small primary" disabled={busy || uncertain} onClick={() => openTable(item)}>{t.openTable}</button>}</div>
+              <div className="staff-table-actions">{item.session_id && item.mode === 'STAFF_OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => navigate(staffOrderURL(item.session_id!, item.name))}>{t.takeOrder}</button>}{item.session_id && <button className="button quiet" disabled={busy || uncertain} onClick={() => void enterTable(item)}>{t.enter}</button>}{!item.session_id && item.status !== 'OPEN' && capabilities.can_serve && (item.mode === 'STAFF_OPEN' ? <><button className="button primary" disabled={busy || uncertain} onClick={() => openAndOrder(item)}>{t.openAndOrder}</button><button className="button small quiet" disabled={busy || uncertain} onClick={() => openTable(item)}>{t.openTable}</button></> : <button className="button small primary" disabled={busy || uncertain} onClick={() => openTable(item)}>{t.openTable}</button>)}</div>
             </article>)}</div>}
             {capabilities?.can_manage && settings && <section className="cash-settings-card"><div className="section-heading"><div><div className="eyebrow">MANAGER</div><h2>{t.cashSettings}</h2></div></div>
               <label className="settings-check"><input type="checkbox" checked={settings.enabled} disabled={busy || uncertain} onChange={(event) => setSettings({ ...settings, enabled: event.target.checked })} />{t.enabled}</label>
@@ -693,7 +702,7 @@ export function StaffApp({ demo = false, initialView = 'tables', staffAuth = { k
               <button className="button primary" disabled={busy || uncertain} onClick={saveSettings}>{t.save}</button>
             </section>}
           </section>}
-          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div>
+          {detail && table && <section className="staff-detail"><div className="section-heading"><div><div className="eyebrow">{t.session}</div><h2>{table.name}</h2></div><div className="staff-detail-actions">{detail.session.mode === 'STAFF_OPEN' && detail.session.status === 'OPEN' && capabilities.can_serve && <button className="button primary" disabled={busy || uncertain} onClick={() => navigate(staffOrderURL(detail.session.id, table.name))}>{t.takeOrder}</button>}<button className="text-button" disabled={busy || uncertain} onClick={() => { clearPaymentView(); setDetail(null); setSelectedTableID(''); }}>{t.back}</button></div></div>
             <div className="staff-detail-meta"><span>{detail.session.status}</span><span>{modeLabel(detail.session.mode, locale)}</span><span>{table.expires_at ? new Date(table.expires_at).toLocaleString(locale === 'ja' ? 'ja-JP' : 'zh-TW') : ''}</span></div>
             <div className="staff-section-title"><h3>{t.orders}</h3>{capabilities.can_cash && <button className="button small primary" disabled={busy || uncertain} onClick={(event) => { openerRef.current = event.currentTarget; void openCashPreview(); }}>{demo ? t.demoCash : t.cashSettle}</button>}</div>
             {detail.orders.length === 0 ? <div className="empty-state"><p>{t.noOrders}</p></div> : detail.orders.map((order) => <StaffOrderCard key={order.id} order={order} locale={locale} t={t} demo={demo} canServe={capabilities.can_serve} busy={busy || uncertain} paymentStatus={orderPayment?.orderID === order.id ? orderPayment.status : undefined} paymentBusy={paymentBusyOrderID === order.id} paymentError={paymentErrorOrderID === order.id ? paymentError : ''} canCheckPayment={capabilities.can_cash || capabilities.can_serve} canManage={capabilities.can_approve_fulfillment === true} onVoid={(button) => openVoidDialog(order, button)} onStopRequest={(button) => { openerRef.current = button; setStopOrder(order); setStopMode('request'); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setDialog('stop'); }} onStopAction={(id, action, button) => openStopAction(order, id, action, button)} onAdjust={() => { invalidateAdjustmentPreview(); setAdjustOrder(order); setAdjustReason(''); setCancelQty(order.lines.map(() => 0)); setCashHandback(false); setError(''); setDialog('adjust'); }} onRetryRefund={(refundID) => retryRefund(order, refundID)} onAcknowledgeUpdate={() => acknowledgeUpdatedOrder(order)} onCheckPayment={() => void inspectPayment(order)} onReconcilePayment={() => void inspectPayment(order, true)} onAccept={() => acceptOrder(order)} onServe={() => advanceOrder(order, 'SERVED')} />)}

@@ -31,7 +31,7 @@ const ja = {
     synced: 'テーブルで共有中', syncWaiting: '同期待ち', syncAt: '時点', syncUnstable: '通信が不安定です',
     syncReason: '表示は {time} 時点の内容です。再接続まで注文の確定はできません。カートは保持されます。',
     table: 'テーブル', committed: '注文履歴',
-    join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する',
+    join: 'ご注文を始める', joinHint: 'テーブルのご案内に従って参加してください。', pin: 'テーブル PIN', enter: '参加する', staffInput: 'スタッフ入力モード', staffTables: 'テーブル一覧へ',
     loading: '確認しています…', closed: 'このテーブルは現在ご利用いただけません。スタッフにお声がけください。',
     menu: 'お品書き',
     remove: '削除', latest: '共有カートを確認しました', tableActive: 'こちらのテーブルで注文中', directMode: 'テーブルの QR から参加', pinMode: 'テーブル PIN で参加', staffMode: 'スタッフが開始したテーブル',
@@ -54,7 +54,7 @@ const copy: Record<Locale, Record<keyof typeof ja, string>> = { ja, zh: {
     synced: '同桌共用中', syncWaiting: '等待同步', syncAt: '的內容', syncUnstable: '網路連線不穩',
     syncReason: '目前顯示 {time} 的內容。恢復連線前無法送出訂單，購物車內容會保留。',
     table: '桌次', committed: '已送出訂單',
-    join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次',
+    join: '開始點餐', joinHint: '請依桌邊指示加入本桌。', pin: '桌次 PIN', enter: '加入桌次', staffInput: '店員點餐模式', staffTables: '回到桌次',
     loading: '正在確認…', closed: '目前無法使用此桌，請洽服務人員。',
     menu: '菜單',
     remove: '移除', latest: '已確認共用購物車', tableActive: '正在此桌點餐', directMode: '透過桌邊 QR 加入', pinMode: '透過桌次 PIN 加入', staffMode: '由服務人員開啟桌次',
@@ -82,11 +82,13 @@ interface Entry {
 }
 interface Replay { origin: SyncOrigin; key: string; run: () => Promise<Cart | import('../api/types').CommitResult>; }
 
-function entryFromURL(): { locator?: string; sessionID?: string } {
+function entryFromURL(): { locator?: string; sessionID?: string; staff?: boolean; label?: string } {
   const query = new URLSearchParams(window.location.search);
   const locator = query.get('table')?.trim();
   const sessionID = query.get('session')?.trim();
-  return { ...(locator ? { locator } : {}), ...(sessionID ? { sessionID } : {}) };
+  const label = query.get('label')?.trim().slice(0, 40);
+  // `via=staff` marks a staff-owned entry into the guest screen; it only changes what is displayed.
+  return { ...(locator ? { locator } : {}), ...(sessionID ? { sessionID } : {}), ...(query.get('via') === 'staff' ? { staff: true } : {}), ...(label ? { label } : {}) };
 }
 
 export function displayTableLocator(locator: string, demo: boolean): string {
@@ -553,7 +555,12 @@ export function App({ demo = false }: DemoSurfaceProps) {
           }
         } else if (query.sessionID) {
           const saved = sessionStorage.getItem(storageKey(query.sessionID));
-          if (saved) {
+          if (query.staff) {
+            // Staff opened this table themselves, so no PIN is needed. Join afresh every time: a saved
+            // grant outlives its 1 h TTL while the table stays open, and the cart is shared per table.
+            const grant = await cartClient.joinSession(query.sessionID, query.sessionID, '');
+            if (active) await activate(grant);
+          } else if (saved) {
             const grant = { table_join_token: saved, expires_at: '', session: { id: query.sessionID } };
             await activate(grant);
           }
@@ -569,7 +576,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
     };
     void init();
     return () => { active = false; };
-  }, [activate, invalidateGrant, query.locator, query.sessionID]);
+  }, [activate, invalidateGrant, query.locator, query.sessionID, query.staff]);
 
   useEffect(() => {
     if (!entry) return;
@@ -862,12 +869,14 @@ export function App({ demo = false }: DemoSurfaceProps) {
 
   if (loading) return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}><div className="loading-card" role="status">{t.loading}</div>{syncNotice(`${syncID}-page`)}</Shell>;
   const visibleError = error === 'session_expired' ? t.closed : error;
+  const staffBar = query.staff ? <div className={guestStyles.staffBar} role="status"><span>{query.label ?? t.table}</span><a href="/staff/">{t.staffTables}</a></div> : null;
   if (!entry || blocked) return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+    {staffBar}
     <section className="entry-card" aria-labelledby="entry-title">
-      <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{t.joinHint}</p>
+      <h1 id="entry-title" ref={entryHeading} tabIndex={-1}>{t.join}</h1><p>{query.staff ? t.staffInput : t.joinHint}</p>
       <div className="table-chip"><span>{t.table}</span><strong>{query.locator ? displayTableLocator(query.locator, demo) : query.sessionID ?? '—'}</strong></div>
       {status?.expired && <p className="notice">{t.closed}</p>}
-      {(!query.locator || status?.mode === 'SESSION_PIN') && <label className="field">{t.pin}<input className={guestStyles.entryControl} data-control="guest-entry" autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
+      {(!query.locator || status?.mode === 'SESSION_PIN') && !query.staff && <label className="field">{t.pin}<input className={guestStyles.entryControl} data-control="guest-entry" autoComplete="one-time-code" inputMode="numeric" value={pin} onChange={(event) => setPin(event.target.value)} /></label>}
       {(!query.locator && !query.sessionID) && <p className="notice">テーブル QR からアクセスしてください。</p>}
       <button className={`button primary wide ${guestStyles.entryControl}`} data-control="guest-entry" disabled={busy || blocked || (!query.locator && !query.sessionID) || !!status?.expired} onClick={() => void submitJoin()}>{busy ? t.loading : t.enter}</button>
       {visibleError && <p className="error" role="alert">{visibleError}</p>}
@@ -879,6 +888,7 @@ export function App({ demo = false }: DemoSurfaceProps) {
   const previewAmountsSafe = !!preview && isSafeAmount(preview.quote.tax.total_gross_jpy) && isSafeAmount(preview.quote.tax.total_tax_jpy) && preview.quote.lines.every((line) => isSafeAmount(line.base_gross_jpy) && line.options.every((option) => isSafeAmount(option.price_gross_jpy)));
 
   return <Shell demo={demo} storeName={storeName} locale={locale} setLocale={setLocale} t={t} cartBarHeight={cartBarHeight} tableLabel={query.locator ? `${t.table} ${displayTableLocator(query.locator, demo)}` : t.table}>
+    {staffBar}
     <div className={guestStyles.workspace}>
       <header className={guestStyles.welcome}>
         <div><h1 ref={menuHeading} tabIndex={-1}>{t.menu}</h1><p>{mode === 'DIRECT_SCAN' ? t.directMode : mode === 'SESSION_PIN' ? t.pinMode : mode === 'STAFF_OPEN' ? t.staffMode : t.tableActive}</p></div>
