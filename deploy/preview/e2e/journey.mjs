@@ -82,6 +82,19 @@ function saveState(value) {
 }
 const sessionMarker = async (page) => text(page, page.locator('.staff-detail-meta'));
 
+/** A safety stop: the journey must not go on operating 4番卓 after one. */
+class GuardError extends Error {}
+
+/** Throws unless every order on the open 4番卓 detail is one this journey placed. */
+async function assertOnlyOurOrders(page) {
+  if (process.env.E2E_FORCE_RESET === '1') return;
+  await staffRefresh(page);
+  const ours = new Set(readState().orderIds ?? []);
+  const heads = await page.locator('.staff-detail .staff-order-head small').allInnerTexts();
+  const foreign = heads.filter((head) => ![...ours].some((id) => head.includes(id)));
+  if (foreign.length) throw new GuardError(`4番卓 has ${foreign.length} order(s) this journey did not place; rerun with E2E_FORCE_RESET=1 after checking them`);
+}
+
 const tablesCsv = readFileSync(join(credsDir, 'tables.csv'), 'utf8').trim().split('\n').slice(1)
   .map((line) => line.split(','));
 const tableRow = tablesCsv.find((row) => row[0] === TABLE_ID);
@@ -453,13 +466,7 @@ async function closeTable(page) {
 async function resetTable(page, kitchen) {
   // Only drive orders this journey placed: a foreign order (someone scanned the
   // 4番卓 QR meanwhile) stops the reset instead of being served and settled.
-  if (process.env.E2E_FORCE_RESET !== '1') {
-    await staffRefresh(page);
-    const ours = new Set(readState().orderIds ?? []);
-    const heads = await page.locator('.staff-detail .staff-order-head small').allInnerTexts();
-    const foreign = heads.filter((head) => ![...ours].some((id) => head.includes(id)));
-    if (foreign.length) throw new Error(`4番卓 has ${foreign.length} order(s) this journey did not place; rerun with E2E_FORCE_RESET=1 after checking them`);
-  }
+  await assertOnlyOurOrders(page);
   let blockers = '';
   for (let round = 0; round < 60; round += 1) {
     await staffRefresh(page);
@@ -479,6 +486,7 @@ async function resetTable(page, kitchen) {
     if (await serve.count()) { await namedAction('reset 提供済みにする', () => serve.first().click()); continue; }
     // A paid-up session can leave the cash dialog without a settle button and
     // its cancel busy; dismiss it and let the close blockers decide.
+    await assertOnlyOurOrders(page);
     await namedAction('reset cash settlement', () => settleCash(page)).catch(async () => {
       await page.keyboard.press('Escape');
       await ensureStaff(page);
@@ -704,9 +712,11 @@ async function runEngine(engine, result) {
     shotTarget = target;
     let detail = {};
     let error = '';
+    let guard = null;
     try {
       detail = (await fn()) ?? {};
     } catch (cause) {
+      if (cause instanceof GuardError) guard = cause;
       {
         // Keep Playwright's "waiting for locator(...)" line: it names what timed out.
         const lines = String(cause?.message ?? cause).split('\n');
@@ -724,6 +734,8 @@ async function runEngine(engine, result) {
     }
     result.steps.push(entry);
     log(`${engine.name} step ${n} ${entry.status} ${Date.now() - started} ms · ${name}${error ? ` · ${redact(error)}` : ''}`);
+    // A safety stop ends this engine's journey; the guarded cleanup still runs.
+    if (guard) throw guard;
     return entry;
   };
 
@@ -743,7 +755,7 @@ async function runEngine(engine, result) {
         await staffEnterTable(staff);
         const marker = await sessionMarker(staff);
         if (marker !== readState().t04Session && process.env.E2E_FORCE_RESET !== '1') {
-          throw new Error(`4番卓 has a session this journey did not open (${marker.slice(0, 60)}); close it by hand or rerun with E2E_FORCE_RESET=1`);
+          throw new GuardError(`4番卓 has a session this journey did not open (${marker.slice(0, 60)}); close it by hand or rerun with E2E_FORCE_RESET=1`);
         }
         await resetTable(staff, kitchen);
         reset = true;
@@ -833,6 +845,8 @@ async function runEngine(engine, result) {
 
     await step(8, 'Staff settles the cash and closes 4番卓; Guest A sees the session ended after reload', async () => {
       await staffEnterTable(staff);
+      // Someone may have scanned the 4番卓 QR since step 2: settle only our own orders.
+      await assertOnlyOurOrders(staff);
       const settled = await settleCash(staff);
       if (!settled.settled) throw new Error(`cash settlement not offered: ${settled.reason ?? 'unknown'}`);
       await staffRefresh(staff);
@@ -1017,7 +1031,7 @@ async function runEngine(engine, result) {
         // Same ownership rule as step 2: never close a session this journey did not open.
         const marker = await sessionMarker(staff);
         if (marker !== readState().t04Session && process.env.E2E_FORCE_RESET !== '1') {
-          throw new Error(`4番卓 session not opened by this journey left open (${marker.slice(0, 60)})`);
+          throw new GuardError(`4番卓 session not opened by this journey left open (${marker.slice(0, 60)})`);
         }
         await resetTable(staff, kitchen);
       }
